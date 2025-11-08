@@ -1,6 +1,11 @@
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/rbac/access";
-import { getAllUsers, getUserStats } from "@/lib/actions/admin/users";
+import {
+  getAllUsers,
+  getUserStats,
+  getAllRoles,
+  getAllStores,
+} from "@/lib/actions/admin/users";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import {
   Card,
@@ -11,21 +16,32 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users, UserCheck, UserX, Shield } from "lucide-react";
+import { UsersTable } from "@/components/admin/UsersTable";
 
 export default async function AdminUsersPage() {
   const user = await requireAdmin();
 
-  const [usersResult, statsResult] = await Promise.all([
-    getAllUsers(),
-    getUserStats(),
-  ]);
+  const [usersResult, statsResult, rolesResult, storesResult] =
+    await Promise.all([
+      getAllUsers(),
+      getUserStats(),
+      getAllRoles(),
+      getAllStores(),
+    ]);
 
-  if ("error" in usersResult || "error" in statsResult) {
+  if (
+    "error" in usersResult ||
+    "error" in statsResult ||
+    "error" in rolesResult ||
+    "error" in storesResult
+  ) {
     redirect("/dashboard?error=forbidden");
   }
 
   const { users } = usersResult;
   const { stats } = statsResult;
+  const { roles } = rolesResult;
+  const { stores } = storesResult;
 
   return (
     <DashboardLayout user={user}>
@@ -90,38 +106,11 @@ export default async function AdminUsersPage() {
           <CardHeader>
             <CardTitle>All Users</CardTitle>
             <CardDescription>
-              A list of all users in the system
+              Manage users, assign roles, and control access
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {users.map((u) => (
-                <div
-                  key={u.id}
-                  className="flex items-center justify-between rounded-lg border p-4"
-                >
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium">{u.email}</p>
-                      {!u.active && (
-                        <Badge variant="destructive">Inactive</Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Badge variant="secondary">{u.role.name}</Badge>
-                      {u.store && (
-                        <span className="text-xs">• {u.store.name}</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Badge variant="outline">
-                      {u.role.rolePermissions.length} permissions
-                    </Badge>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <UsersTable users={users as any} roles={roles as any} stores={stores as any} />
           </CardContent>
         </Card>
 
