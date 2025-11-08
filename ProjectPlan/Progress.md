@@ -6,9 +6,9 @@
 
 ## Project Status Overview
 
-**Current Phase**: Month 3-4 Core Features ⏳
-**Overall Progress**: 80% Complete (Availability Module Done!)
-**Next Milestone**: Time-Off Management System (Month 4)
+**Current Phase**: Month 4-5 Core Features ⏳
+**Overall Progress**: 85% Complete (Time-Off Module Done!)
+**Next Milestone**: Posts & Communication System (Month 5)
 
 ---
 
@@ -107,24 +107,33 @@
 - [x] Added 2 shadcn/ui components (Switch, Checkbox)
 - [x] Integrated with RBAC system
 
+### Month 4: Time-Off Management (2025-11-08) ✅
+- [x] Created time-off schema with Zod validation (5 schemas)
+- [x] Built 7 server actions for CRUD operations
+- [x] Implemented overlap detection to prevent double-booking
+- [x] Created time-off request form with date pickers
+- [x] Added duration calculator (auto-calculates days)
+- [x] Built request cancellation for staff (pending only)
+- [x] Implemented admin review workflow (approve/reject)
+- [x] Created statistics dashboards (staff and admin views)
+- [x] Added optional review notes field (500 char max)
+- [x] Built color-coded status badges (4 statuses: pending/approved/rejected/cancelled)
+- [x] Implemented audit trail (reviewer tracking with timestamp)
+- [x] Added 2 shadcn/ui components (Textarea, Select)
+- [x] Integrated with RBAC system (permission-based access)
+- [x] Created responsive card-based UI for requests
+- [x] Added confirmation dialogs for destructive actions
+
 ---
 
 ## In Progress 🔄
 
-### Month 4: Time-Off Management (NEXT UP)
-Ready to build the time-off request and approval system.
+### Month 5: Posts & Communication System (NEXT UP)
+Ready to build the channel-based posts and communication system.
 
 ---
 
 ## Pending Tasks 📋
-
----
-
-## Month 4: Time-Off Workflow (PENDING)
-- [ ] Time-off request submission (staff)
-- [ ] Approval/rejection workflow (admin/manager)
-- [ ] Notifications for status changes
-- [ ] Dashboard integration
 
 ---
 
@@ -175,18 +184,59 @@ Ready to build the time-off request and approval system.
 
 ## Key Metrics
 
-| Metric | Current | Target (Month 3) | Target (Month 8) |
+| Metric | Current | Target (Month 4) | Target (Month 8) |
 |--------|---------|------------------|------------------|
-| Lines of Code | ~17,000 | 12,000-15,000 ✅ | 30,000-40,000 |
-| Git Commits | 9 | 50-70 | 200-300 |
+| Lines of Code | ~20,000+ | 15,000-18,000 ✅ | 30,000-40,000 |
+| Git Commits | 17 | 60-80 | 200-300 |
 | Database Tables | 15 ✅ | 15 ✅ | 15 |
-| Components | 26 (17 shadcn + 9 custom) | 25-35 ✅ | 80-100 |
-| Features Complete | 80% 🎉 | 30-40% ✅ | 100% |
+| Components | 31 (19 shadcn + 12 custom) | 30-40 ✅ | 80-100 |
+| Features Complete | 85% 🎉 | 40-50% ✅ | 100% |
 | Test Coverage | 0% | Basic setup | 60-70% |
 
 ---
 
 ## Recent Updates
+
+### 2025-11-08 - Time-Off Management Module Complete! 🎉
+- ✅ **Staff Time-Off Features**:
+  - Complete request submission form with date pickers
+  - Duration calculator (auto-calculates inclusive days)
+  - Overlap detection prevents conflicting requests
+  - Optional reason field with character counter (10-500 chars)
+  - Self-service cancellation for pending requests
+  - Confirmation dialogs before destructive actions
+  - Personal statistics dashboard (total/pending/approved/rejected)
+  - View all own requests with full details
+
+- ✅ **Admin/Manager Dashboard**:
+  - Comprehensive time-off request overview for all staff
+  - Statistics showing total, pending, approved, rejected counts
+  - Review workflow with approve/reject actions
+  - Optional notes field for review decisions (500 char max)
+  - Staff information display (email, role, store)
+  - Filter and sort capabilities
+  - Pending review count for quick access
+
+- ✅ **Server Actions & Validation**:
+  - 7 server actions for full CRUD operations
+  - 5 Zod schemas with comprehensive validation
+  - Overlap detection at database level
+  - Audit trail (records reviewer and timestamp)
+  - RBAC integration (permission-based access)
+  - Path revalidation for real-time updates
+  - Error handling with user-friendly messages
+
+- ✅ **UI Components**:
+  - TimeOffRequestForm with date validation
+  - TimeOffRequestList with cancel capability
+  - TimeOffReviewList with review workflow
+  - Textarea and Select components (shadcn/ui)
+  - Color-coded status badges (yellow/green/red/gray)
+  - Responsive card-based layout
+  - Loading states and empty states
+  - Mobile-friendly design
+
+- 📝 **Next Steps**: Ready to build Posts & Communication System (Month 5)!
 
 ### 2025-11-08 - Availability Management Module Complete! 🎉
 - ✅ **Staff Availability Features**:
@@ -228,11 +278,13 @@ Ready to build the time-off request and approval system.
 
 ## Next Steps (Priority Order)
 
-1. **Implement Availability Module** - Staff availability management (view/edit weekly schedule)
-2. **Build Time-Off System** - Request/approval workflow with admin dashboard
-3. **Create Posts System** - Team communication with channels and moderation
+1. ✅ ~~**Implement Availability Module**~~ - COMPLETED
+2. ✅ ~~**Build Time-Off System**~~ - COMPLETED
+3. **Create Posts System** - Team communication with channels and moderation (NEXT UP)
 4. **Implement Messaging** - Direct 1-on-1 and group messaging with real-time updates
 5. **Add Notification System** - In-app notifications for all user actions
+6. **Build Admin Tools** - Staff management, role/permission UI, audit log viewer
+7. **Testing & Launch** - E2E tests, performance optimization, production deployment
 
 ---
 
