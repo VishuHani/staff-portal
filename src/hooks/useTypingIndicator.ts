@@ -23,7 +23,7 @@ export function useTypingIndicator({
 }: UseTypingIndicatorProps) {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const [channel, setChannel] = useState<any>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const typingTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   useEffect(() => {
     const supabase = createClient();

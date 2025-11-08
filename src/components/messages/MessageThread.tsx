@@ -29,6 +29,7 @@ interface Message {
   id: string;
   content: string;
   mediaUrls: string | null;
+  reactions: string | null;
   readBy: string[];
   createdAt: Date;
   updatedAt: Date;
@@ -71,7 +72,7 @@ export function MessageThread({
 }: MessageThreadProps) {
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const searchTimeoutRef = useRef<NodeJS.Timeout>();
+  const searchTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
