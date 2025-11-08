@@ -57,7 +57,7 @@ export default async function AdminAvailabilityPage() {
             </h2>
           </div>
           <p className="mt-2 text-muted-foreground">
-            View and manage all staff availability schedules
+            View and manage all staff availability schedules (multiple slots per day)
           </p>
         </div>
 
@@ -83,10 +83,13 @@ export default async function AdminAvailabilityPage() {
               <UserCheck className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {users.filter((u) => u.availability.some((a) => a.isAvailable))
-                  .length}
-              </div>
+              <div className="text-2xl font-bold">{stats.usersConfigured}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {stats.totalUsers > 0
+                  ? Math.round((stats.usersConfigured / stats.totalUsers) * 100)
+                  : 0}
+                % configured
+              </p>
             </CardContent>
           </Card>
 
@@ -99,24 +102,28 @@ export default async function AdminAvailabilityPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {users.filter(
-                  (u) => !u.availability.some((a) => a.isAvailable)
-                ).length}
+                {stats.usersNotConfigured}
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Not yet configured
+              </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
-                Days Configured
+                Total Slots
               </CardTitle>
               <Clock className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {stats.byDay.reduce((sum, day) => sum + day.available, 0)}
+                {users.reduce((sum, u) => sum + u.availability.length, 0)}
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Across all staff
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -126,7 +133,7 @@ export default async function AdminAvailabilityPage() {
           <CardHeader>
             <CardTitle>Availability by Day</CardTitle>
             <CardDescription>
-              Number of staff available each day of the week
+              Number of staff with at least one slot on each day
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -137,33 +144,23 @@ export default async function AdminAvailabilityPage() {
                 );
                 if (!dayInfo) return null;
 
-                const availablePercentage =
-                  dayStat.total > 0
-                    ? Math.round((dayStat.available / dayStat.total) * 100)
-                    : 0;
-
                 return (
                   <div key={dayStat.dayOfWeek} className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="font-medium">{dayInfo.label}</span>
                       <div className="flex gap-2">
                         <Badge variant="default" className="bg-green-600">
-                          {dayStat.available} available
+                          {dayStat.available} staff ({dayStat.percentage}%)
                         </Badge>
                         <Badge variant="secondary">
                           {dayStat.unavailable} unavailable
                         </Badge>
-                        {dayStat.notSet > 0 && (
-                          <Badge variant="outline">
-                            {dayStat.notSet} not set
-                          </Badge>
-                        )}
                       </div>
                     </div>
                     <div className="h-2 w-full rounded-full bg-secondary">
                       <div
                         className="h-2 rounded-full bg-green-600"
-                        style={{ width: `${availablePercentage}%` }}
+                        style={{ width: `${dayStat.percentage}%` }}
                       />
                     </div>
                   </div>
@@ -178,82 +175,102 @@ export default async function AdminAvailabilityPage() {
           <CardHeader>
             <CardTitle>Staff Schedules</CardTitle>
             <CardDescription>
-              Detailed availability for each staff member
+              Detailed availability for each staff member (showing all time slots)
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {users.map((staffUser) => (
-                <div
-                  key={staffUser.id}
-                  className="rounded-lg border p-4 space-y-4"
-                >
-                  {/* Staff Info */}
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{staffUser.email}</p>
-                        <Badge variant="secondary">{staffUser.role.name}</Badge>
+              {users.map((staffUser) => {
+                // Group slots by day
+                const slotsByDay: Record<number, typeof staffUser.availability> =
+                  {};
+                DAYS_OF_WEEK.forEach((day) => {
+                  slotsByDay[day.value] = staffUser.availability
+                    .filter((a) => a.dayOfWeek === day.value)
+                    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+                });
+
+                const hasAnySlots = staffUser.availability.length > 0;
+
+                return (
+                  <div
+                    key={staffUser.id}
+                    className="rounded-lg border p-4 space-y-4"
+                  >
+                    {/* Staff Info */}
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{staffUser.email}</p>
+                          <Badge variant="secondary">{staffUser.role.name}</Badge>
+                        </div>
+                        {staffUser.store && (
+                          <p className="text-sm text-muted-foreground">
+                            {staffUser.store.name}
+                          </p>
+                        )}
                       </div>
-                      {staffUser.store && (
-                        <p className="text-sm text-muted-foreground">
-                          {staffUser.store.name}
-                        </p>
-                      )}
+                      <div>
+                        {hasAnySlots ? (
+                          <Badge variant="default" className="bg-green-600">
+                            {staffUser.availability.length} slot
+                            {staffUser.availability.length !== 1 ? "s" : ""}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary">No availability set</Badge>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      {staffUser.availability.some((a) => a.isAvailable) ? (
-                        <Badge variant="default" className="bg-green-600">
-                          Available
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary">No availability set</Badge>
-                      )}
-                    </div>
-                  </div>
 
-                  {/* Weekly Schedule */}
-                  {staffUser.availability.length > 0 && (
-                    <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7">
-                      {DAYS_OF_WEEK.map((dayInfo) => {
-                        const dayAvailability = staffUser.availability.find(
-                          (a) => a.dayOfWeek === dayInfo.value
-                        );
+                    {/* Weekly Schedule */}
+                    {hasAnySlots && (
+                      <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7">
+                        {DAYS_OF_WEEK.map((dayInfo) => {
+                          const daySlots = slotsByDay[dayInfo.value] || [];
+                          const hasSlots = daySlots.length > 0;
 
-                        return (
-                          <div
-                            key={dayInfo.value}
-                            className={`rounded-md border p-3 text-center ${
-                              dayAvailability?.isAvailable
-                                ? "border-green-200 bg-green-50"
-                                : "border-gray-200 bg-gray-50"
-                            }`}
-                          >
-                            <div className="text-xs font-medium text-muted-foreground mb-1">
-                              {dayInfo.short}
+                          return (
+                            <div
+                              key={dayInfo.value}
+                              className={`rounded-md border p-3 text-center ${
+                                hasSlots
+                                  ? "border-green-200 bg-green-50"
+                                  : "border-gray-200 bg-gray-50"
+                              }`}
+                            >
+                              <div className="text-xs font-medium text-muted-foreground mb-1">
+                                {dayInfo.short}
+                              </div>
+                              {hasSlots ? (
+                                <div className="space-y-2">
+                                  {daySlots.map((slot) => (
+                                    <div
+                                      key={slot.id}
+                                      className="bg-white rounded border border-green-300 p-1.5"
+                                    >
+                                      <div className="text-xs font-medium text-green-700">
+                                        {slot.startTime}
+                                      </div>
+                                      <div className="text-xs text-green-600">to</div>
+                                      <div className="text-xs font-medium text-green-700">
+                                        {slot.endTime}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="text-xs text-muted-foreground">
+                                  —
+                                </div>
+                              )}
                             </div>
-                            {dayAvailability?.isAvailable ? (
-                              <div className="space-y-1">
-                                <div className="text-xs font-medium text-green-700">
-                                  {dayAvailability.startTime}
-                                </div>
-                                <div className="text-xs text-green-600">to</div>
-                                <div className="text-xs font-medium text-green-700">
-                                  {dayAvailability.endTime}
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="text-xs text-muted-foreground">
-                                —
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ))}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
 
               {users.length === 0 && (
                 <div className="py-12 text-center text-muted-foreground">

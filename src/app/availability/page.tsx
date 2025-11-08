@@ -57,10 +57,13 @@ export default async function AvailabilityPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             <p className="text-sm text-muted-foreground">
-              • Toggle each day on or off to indicate your availability
+              • Click "Add Slot" to add time slots for each day
             </p>
             <p className="text-sm text-muted-foreground">
-              • Set your available hours for each day
+              • Add up to 3 slots per day (e.g., 9am-12pm and 3pm-6pm)
+            </p>
+            <p className="text-sm text-muted-foreground">
+              • Slots are automatically sorted chronologically
             </p>
             <p className="text-sm text-muted-foreground">
               • Your manager will use this information for scheduling
