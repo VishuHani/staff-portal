@@ -36,6 +36,7 @@ model User {
   posts                Post[]
   comments             Comment[]
   reactions            Reaction[]
+  postReads            PostRead[]
   sentMessages         Message[]
   conversations        ConversationParticipant[]
   notifications        Notification[]
@@ -152,12 +153,17 @@ model TimeOffRequest {
 // ============================================
 
 model Channel {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  type        String   // ALL_STAFF, MANAGERS, CUSTOM
-  permissions String?  // JSON or comma-separated permissions
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  type        String    // ALL_STAFF, MANAGERS, CUSTOM
+  icon        String?   // Emoji or icon identifier
+  color       String?   // Hex color for UI theming
+  permissions String?   // JSON or comma-separated permissions
+  archived    Boolean   @default(false)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   posts Post[]
 
@@ -165,19 +171,22 @@ model Channel {
 }
 
 model Post {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   channelId String
   authorId  String
   content   String
-  mediaUrls String?  // JSON array of URLs
-  pinned    Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  mediaUrls String?   // JSON array of URLs
+  pinned    Boolean   @default(false)
+  edited    Boolean   @default(false)
+  editedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   channel   Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
   author    User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
   comments  Comment[]
   reactions Reaction[]
+  reads     PostRead[]
 
   @@index([channelId])
   @@index([authorId])
@@ -186,34 +195,60 @@ model Post {
 }
 
 model Comment {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   postId    String
   userId    String
+  parentId  String?   // For threaded comments (replies)
   content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  edited    Boolean   @default(false)
+  editedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Comment?   @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[]  @relation("CommentReplies")
+  reactions Reaction[]
 
   @@index([postId])
   @@index([userId])
+  @@index([parentId])
   @@map("comments")
 }
 
 model Reaction {
   id        String   @id @default(cuid())
-  postId    String
+  postId    String?  // Nullable - either postId or commentId must be set
+  commentId String?  // Nullable - either postId or commentId must be set
   userId    String
   emoji     String
   createdAt DateTime @default(now())
 
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post    Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comment Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([postId, userId, emoji])
+  @@unique([commentId, userId, emoji])
   @@index([postId])
+  @@index([commentId])
   @@map("reactions")
+}
+
+model PostRead {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  readAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@index([postId])
+  @@map("post_reads")
 }
 
 model Conversation {
