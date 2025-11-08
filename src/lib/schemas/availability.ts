@@ -14,24 +14,15 @@ export const DAYS_OF_WEEK = [
 ] as const;
 
 /**
- * Constants for availability constraints
+ * Constants for all-day availability
  */
-export const MAX_SLOTS_PER_DAY = 3;
-export const MIN_SLOT_DURATION_MINUTES = 60; // 1 hour
+export const ALL_DAY_START = "00:00";
+export const ALL_DAY_END = "23:59";
 
 /**
  * Time format validation (HH:MM in 24-hour format)
  */
 const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
-
-/**
- * Time slot interface
- */
-export interface TimeSlot {
-  id?: string;
-  startTime: string;
-  endTime: string;
-}
 
 /**
  * Convert time string (HH:MM) to minutes since midnight
@@ -49,114 +40,59 @@ export function validateTimeRange(startTime: string, endTime: string): boolean {
 }
 
 /**
- * Validation to ensure slot is at least minimum duration (1 hour)
+ * Schema for a single day's availability
  */
-export function validateMinimumDuration(startTime: string, endTime: string): boolean {
-  const durationMinutes = timeToMinutes(endTime) - timeToMinutes(startTime);
-  return durationMinutes >= MIN_SLOT_DURATION_MINUTES;
-}
-
-/**
- * Check if two time slots overlap
- */
-function slotsOverlap(slot1: TimeSlot, slot2: TimeSlot): boolean {
-  const start1 = timeToMinutes(slot1.startTime);
-  const end1 = timeToMinutes(slot1.endTime);
-  const start2 = timeToMinutes(slot2.startTime);
-  const end2 = timeToMinutes(slot2.endTime);
-
-  // Slots overlap if one starts before the other ends
-  return start1 < end2 && start2 < end1;
-}
-
-/**
- * Validation to ensure no overlapping slots
- */
-export function validateNoOverlaps(slots: TimeSlot[]): boolean {
-  for (let i = 0; i < slots.length; i++) {
-    for (let j = i + 1; j < slots.length; j++) {
-      if (slotsOverlap(slots[i], slots[j])) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-/**
- * Get overlap error message
- */
-export function getOverlapError(slots: TimeSlot[]): string | null {
-  for (let i = 0; i < slots.length; i++) {
-    for (let j = i + 1; j < slots.length; j++) {
-      if (slotsOverlap(slots[i], slots[j])) {
-        return `Time slots overlap: ${slots[i].startTime}-${slots[i].endTime} and ${slots[j].startTime}-${slots[j].endTime}`;
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Schema for a single time slot
- */
-export const timeSlotSchema = z.object({
-  id: z.string().optional(),
-  startTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)"),
-  endTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)"),
+export const availabilityDaySchema = z.object({
+  dayOfWeek: z.number().min(0).max(6),
+  isAvailable: z.boolean(),
+  isAllDay: z.boolean(),
+  startTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)").nullable(),
+  endTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)").nullable(),
 });
 
 /**
- * Schema for adding a new availability slot
+ * Schema for updating a single day's availability
  */
-export const addAvailabilitySlotSchema = z
+export const updateAvailabilitySchema = z
   .object({
     dayOfWeek: z.number().min(0).max(6),
-    startTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)"),
-    endTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)"),
+    isAvailable: z.boolean(),
+    isAllDay: z.boolean(),
+    startTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)").nullable(),
+    endTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)").nullable(),
   })
-  .refine((data) => validateTimeRange(data.startTime, data.endTime), {
-    message: "End time must be after start time",
-  })
-  .refine((data) => validateMinimumDuration(data.startTime, data.endTime), {
-    message: `Minimum slot duration is ${MIN_SLOT_DURATION_MINUTES} minutes (1 hour)`,
-  });
+  .refine(
+    (data) => {
+      // If not available, no need to validate times
+      if (!data.isAvailable) {
+        return true;
+      }
+
+      // If all day, times should be set to all-day values (will be set automatically)
+      if (data.isAllDay) {
+        return true;
+      }
+
+      // If available and not all day, times are required
+      if (!data.startTime || !data.endTime) {
+        return false;
+      }
+
+      // Validate time range
+      return validateTimeRange(data.startTime, data.endTime);
+    },
+    {
+      message: "When available (and not all day), valid start and end times are required",
+    }
+  );
 
 /**
- * Schema for updating an existing slot
- */
-export const updateAvailabilitySlotSchema = z
-  .object({
-    slotId: z.string(),
-    startTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)"),
-    endTime: z.string().regex(timeRegex, "Invalid time format (use HH:MM)"),
-  })
-  .refine((data) => validateTimeRange(data.startTime, data.endTime), {
-    message: "End time must be after start time",
-  })
-  .refine((data) => validateMinimumDuration(data.startTime, data.endTime), {
-    message: `Minimum slot duration is ${MIN_SLOT_DURATION_MINUTES} minutes (1 hour)`,
-  });
-
-/**
- * Schema for removing a slot
- */
-export const removeAvailabilitySlotSchema = z.object({
-  slotId: z.string(),
-});
-
-/**
- * Schema for bulk updating availability (multiple days with multiple slots each)
+ * Schema for bulk updating availability (multiple days)
  */
 export const bulkUpdateAvailabilitySchema = z.object({
-  availability: z.record(
-    z.string(), // dayOfWeek as string key
-    z.array(timeSlotSchema).max(MAX_SLOTS_PER_DAY, `Maximum ${MAX_SLOTS_PER_DAY} slots per day`)
-  ),
+  availability: z.array(availabilityDaySchema),
 });
 
-export type TimeSlotInput = z.infer<typeof timeSlotSchema>;
-export type AddAvailabilitySlotInput = z.infer<typeof addAvailabilitySlotSchema>;
-export type UpdateAvailabilitySlotInput = z.infer<typeof updateAvailabilitySlotSchema>;
-export type RemoveAvailabilitySlotInput = z.infer<typeof removeAvailabilitySlotSchema>;
+export type AvailabilityDayInput = z.infer<typeof availabilityDaySchema>;
+export type UpdateAvailabilityInput = z.infer<typeof updateAvailabilitySchema>;
 export type BulkUpdateAvailabilityInput = z.infer<typeof bulkUpdateAvailabilitySchema>;

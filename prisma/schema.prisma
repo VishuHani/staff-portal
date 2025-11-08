@@ -109,17 +109,18 @@ model Availability {
   id          String    @id @default(cuid())
   userId      String
   dayOfWeek   Int       // 0-6 (Sunday-Saturday)
-  startTime   String    // HH:MM format (required)
-  endTime     String    // HH:MM format (required)
+  isAvailable Boolean   @default(false)
+  isAllDay    Boolean   @default(false)
+  startTime   String?   // HH:MM format (nullable)
+  endTime     String?   // HH:MM format (nullable)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Removed unique constraint to allow multiple slots per day
+  @@unique([userId, dayOfWeek])
   @@index([userId])
   @@index([dayOfWeek])
-  @@index([userId, dayOfWeek]) // For querying all slots per day
   @@map("availability")
 }
 
