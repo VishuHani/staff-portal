@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/actions/auth";
-import { logout } from "@/lib/actions/auth";
+import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
@@ -18,60 +19,61 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <h1 className="text-xl font-semibold">Staff Portal</h1>
-          <form action={logout}>
-            <Button type="submit" variant="outline">
-              Sign out
-            </Button>
-          </form>
-        </div>
-      </nav>
-
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold">Welcome back!</h2>
-          <p className="mt-2 text-gray-600">
-            You're logged in as {user.email}
+    <DashboardLayout user={user}>
+      <div className="space-y-8">
+        {/* Welcome Section */}
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">Welcome back!</h2>
+          <p className="mt-2 text-muted-foreground">
+            Here's an overview of your account
           </p>
         </div>
 
+        {/* Dashboard Grid */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {/* Profile Card */}
           <Card>
             <CardHeader>
               <CardTitle>Your Profile</CardTitle>
               <CardDescription>Account information</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2">
+            <CardContent className="space-y-3">
               <div>
-                <p className="text-sm font-medium text-gray-500">Email</p>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Email
+                </p>
                 <p className="text-sm">{user.email}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-gray-500">Role</p>
-                <p className="text-sm capitalize">{user.role.name}</p>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Role
+                </p>
+                <Badge variant="secondary">{user.role.name}</Badge>
               </div>
               {user.store && (
                 <div>
-                  <p className="text-sm font-medium text-gray-500">Store</p>
+                  <p className="text-sm font-medium text-muted-foreground">
+                    Store
+                  </p>
                   <p className="text-sm">{user.store.name}</p>
                 </div>
               )}
               <div>
-                <p className="text-sm font-medium text-gray-500">Status</p>
-                <p className="text-sm">
-                  {user.active ? (
-                    <span className="text-green-600">Active</span>
-                  ) : (
-                    <span className="text-red-600">Inactive</span>
-                  )}
+                <p className="text-sm font-medium text-muted-foreground">
+                  Status
                 </p>
+                {user.active ? (
+                  <Badge variant="default" className="bg-green-600">
+                    Active
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive">Inactive</Badge>
+                )}
               </div>
             </CardContent>
           </Card>
 
+          {/* Permissions Card */}
           <Card>
             <CardHeader>
               <CardTitle>Permissions</CardTitle>
@@ -82,7 +84,7 @@ export default async function DashboardPage() {
                 {user.role.rolePermissions.map((rp) => (
                   <div
                     key={rp.permission.id}
-                    className="text-sm text-gray-600"
+                    className="text-sm text-muted-foreground"
                   >
                     • {rp.permission.resource}:{rp.permission.action}
                   </div>
@@ -91,6 +93,7 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
 
+          {/* Quick Actions Card */}
           <Card>
             <CardHeader>
               <CardTitle>Quick Actions</CardTitle>
@@ -104,33 +107,48 @@ export default async function DashboardPage() {
                 Request Time Off
               </Button>
               <Button className="w-full" variant="outline" disabled>
-                View Schedule
+                View Messages
               </Button>
             </CardContent>
           </Card>
         </div>
 
-        <div className="mt-8">
-          <Card>
-            <CardHeader>
-              <CardTitle>Coming Soon</CardTitle>
-              <CardDescription>
-                Features in development
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li>• Availability Management</li>
-                <li>• Time-Off Requests & Approvals</li>
-                <li>• Team Communication & Posts</li>
-                <li>• Direct Messaging</li>
-                <li>• Schedule Viewing</li>
-                <li>• Notifications</li>
-              </ul>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
-    </div>
+        {/* Coming Soon Card */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Coming Soon</CardTitle>
+            <CardDescription>Features in development</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                Availability Management
+              </li>
+              <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                Time-Off Requests
+              </li>
+              <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                Team Communication
+              </li>
+              <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                Direct Messaging
+              </li>
+              <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                Schedule Viewing
+              </li>
+              <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                Notifications
+              </li>
+            </ul>
+          </CardContent>
+        </Card>
+      </div>
+    </DashboardLayout>
   );
 }
