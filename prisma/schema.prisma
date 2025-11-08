@@ -1,0 +1,302 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================
+// Core Entities
+// ============================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String?  // Nullable for OAuth users
+  roleId    String
+  storeId   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role                 Role                  @relation(fields: [roleId], references: [id])
+  store                Store?                @relation(fields: [storeId], references: [id])
+  availability         Availability[]
+  timeOffRequests      TimeOffRequest[]
+  reviewedTimeOff      TimeOffRequest[]      @relation("ReviewedBy")
+  posts                Post[]
+  comments             Comment[]
+  reactions            Reaction[]
+  sentMessages         Message[]
+  conversations        ConversationParticipant[]
+  notifications        Notification[]
+  auditLogs            AuditLog[]
+
+  @@index([email])
+  @@index([roleId])
+  @@index([storeId])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users            User[]
+  rolePermissions  RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  resource    String
+  action      String
+  description String?
+  createdAt   DateTime @default(now())
+
+  rolePermissions  RolePermission[]
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String   @id @default(cuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model Store {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@map("stores")
+}
+
+// ============================================
+// Availability & Time-Off
+// ============================================
+
+model Availability {
+  id          String    @id @default(cuid())
+  userId      String
+  dayOfWeek   Int       // 0-6 (Sunday-Saturday)
+  isAvailable Boolean   @default(true)
+  startTime   String?   // HH:MM format
+  endTime     String?   // HH:MM format
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayOfWeek])
+  @@index([userId])
+  @@index([dayOfWeek])
+  @@map("availability")
+}
+
+model TimeOffRequest {
+  id         String    @id @default(cuid())
+  userId     String
+  startDate  DateTime
+  endDate    DateTime
+  type       String    // VACATION, SICK, PERSONAL, etc.
+  reason     String?
+  status     String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  reviewedBy String?
+  reviewedAt DateTime?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user     User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("ReviewedBy", fields: [reviewedBy], references: [id])
+
+  @@index([userId])
+  @@index([startDate, endDate])
+  @@index([status])
+  @@map("time_off_requests")
+}
+
+// ============================================
+// Communication
+// ============================================
+
+model Channel {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  type        String   // ALL_STAFF, MANAGERS, CUSTOM
+  permissions String?  // JSON or comma-separated permissions
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  posts Post[]
+
+  @@map("channels")
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  channelId String
+  authorId  String
+  content   String
+  mediaUrls String?  // JSON array of URLs
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  channel   Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments  Comment[]
+  reactions Reaction[]
+
+  @@index([channelId])
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("posts")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([userId])
+  @@map("comments")
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId, emoji])
+  @@index([postId])
+  @@map("reactions")
+}
+
+model Conversation {
+  id            String   @id @default(cuid())
+  type          String   // ONE_ON_ONE, GROUP
+  lastMessageAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String   @id @default(cuid())
+  conversationId String
+  userId         String
+  joinedAt       DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([conversationId])
+  @@index([userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String    @id @default(cuid())
+  conversationId String
+  senderId       String
+  content        String
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// ============================================
+// System
+// ============================================
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([readAt])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String
+  actionType   String
+  resourceType String
+  resourceId   String?
+  oldValue     String?  // JSON
+  newValue     String?  // JSON
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([actionType])
+  @@map("audit_logs")
+}
