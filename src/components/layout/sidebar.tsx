@@ -66,6 +66,12 @@ export function Sidebar({ userRole, className }: SidebarProps) {
 
   const adminItems: NavItem[] = [
     {
+      title: "Staff Availability",
+      href: "/admin/availability",
+      icon: Calendar,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
       title: "User Management",
       href: "/admin/users",
       icon: Users,
