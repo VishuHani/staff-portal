@@ -135,7 +135,7 @@ export async function createTimeOffRequest(data: CreateTimeOffRequestInput) {
 
   const validatedFields = createTimeOffRequestSchema.safeParse(data);
   if (!validatedFields.success) {
-    return { error: validatedFields.error.errors[0]?.message || "Invalid fields" };
+    return { error: validatedFields.error.issues[0]?.message || "Invalid fields" };
   }
 
   const { startDate, endDate, type, reason } = validatedFields.data;
@@ -257,7 +257,7 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
 
   const validatedFields = reviewTimeOffRequestSchema.safeParse(data);
   if (!validatedFields.success) {
-    return { error: validatedFields.error.errors[0]?.message || "Invalid fields" };
+    return { error: validatedFields.error.issues[0]?.message || "Invalid fields" };
   }
 
   const { id, status, notes } = validatedFields.data;

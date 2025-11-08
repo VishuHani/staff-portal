@@ -252,11 +252,13 @@ model PostRead {
 }
 
 model Conversation {
-  id            String   @id @default(cuid())
-  type          String   // ONE_ON_ONE, GROUP
+  id            String    @id @default(cuid())
+  type          String    // ONE_ON_ONE, GROUP
+  name          String?   // For group conversations
   lastMessageAt DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  lastMessage   String?   // Cache last message content
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   participants ConversationParticipant[]
   messages     Message[]
@@ -265,10 +267,12 @@ model Conversation {
 }
 
 model ConversationParticipant {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   conversationId String
   userId         String
-  joinedAt       DateTime @default(now())
+  joinedAt       DateTime  @default(now())
+  lastReadAt     DateTime? // Track when user last read messages
+  mutedUntil     DateTime? // For muting conversations
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -284,8 +288,12 @@ model Message {
   conversationId String
   senderId       String
   content        String
+  mediaUrls      String?   // JSON array of media URLs
+  reactions      String?   // JSON array of reactions: [{ emoji, userId }]
   readAt         DateTime?
+  readBy         String[]  @default([]) // Array of user IDs who read the message
   createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)

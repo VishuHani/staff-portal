@@ -62,7 +62,7 @@ export async function updateAvailability(data: UpdateAvailabilityInput) {
 
   const validatedFields = updateAvailabilitySchema.safeParse(data);
   if (!validatedFields.success) {
-    return { error: validatedFields.error.errors[0]?.message || "Invalid fields" };
+    return { error: validatedFields.error.issues[0]?.message || "Invalid fields" };
   }
 
   const { dayOfWeek, isAvailable, isAllDay, startTime, endTime } = validatedFields.data;
@@ -131,7 +131,7 @@ export async function bulkUpdateAvailability(data: BulkUpdateAvailabilityInput) 
 
   const validatedFields = bulkUpdateAvailabilitySchema.safeParse(data);
   if (!validatedFields.success) {
-    return { error: validatedFields.error.errors[0]?.message || "Invalid fields" };
+    return { error: validatedFields.error.issues[0]?.message || "Invalid fields" };
   }
 
   const { availability } = validatedFields.data;
