@@ -4,11 +4,7 @@ import { z } from "zod";
  * Time-off request types
  */
 export const TIME_OFF_TYPES = [
-  { value: "VACATION", label: "Vacation", color: "blue" },
-  { value: "SICK", label: "Sick Leave", color: "red" },
-  { value: "PERSONAL", label: "Personal Leave", color: "purple" },
-  { value: "UNPAID", label: "Unpaid Leave", color: "gray" },
-  { value: "OTHER", label: "Other", color: "orange" },
+  { value: "UNAVAILABLE", label: "Unavailable", color: "gray" },
 ] as const;
 
 /**
@@ -50,7 +46,7 @@ export const createTimeOffRequestSchema = z
       required_error: "End date is required",
       invalid_type_error: "Invalid end date",
     }),
-    type: z.enum(["VACATION", "SICK", "PERSONAL", "UNPAID", "OTHER"], {
+    type: z.enum(["UNAVAILABLE"], {
       required_error: "Time-off type is required",
     }),
     reason: z
@@ -105,7 +101,7 @@ export const reviewTimeOffRequestSchema = z.object({
  */
 export const filterTimeOffRequestsSchema = z.object({
   status: z.enum(["PENDING", "APPROVED", "REJECTED", "CANCELLED"]).optional(),
-  type: z.enum(["VACATION", "SICK", "PERSONAL", "UNPAID", "OTHER"]).optional(),
+  type: z.enum(["UNAVAILABLE"]).optional(),
   userId: z.string().cuid().optional(),
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),

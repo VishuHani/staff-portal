@@ -7,20 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { TIME_OFF_TYPES } from "@/lib/schemas/time-off";
 import { createTimeOffRequest } from "@/lib/actions/time-off";
 import { Loader2, Send, Calendar } from "lucide-react";
 
@@ -33,7 +25,7 @@ export function TimeOffRequestForm() {
   const [formData, setFormData] = useState({
     startDate: "",
     endDate: "",
-    type: "",
+    type: "UNAVAILABLE",
     reason: "",
   });
 
@@ -59,7 +51,7 @@ export function TimeOffRequestForm() {
         setFormData({
           startDate: "",
           endDate: "",
-          type: "",
+          type: "UNAVAILABLE",
           reason: "",
         });
         router.refresh();
@@ -152,31 +144,6 @@ export function TimeOffRequestForm() {
             </div>
           )}
 
-          {/* Type */}
-          <div className="space-y-2">
-            <Label htmlFor="type">
-              Time-Off Type <span className="text-red-500">*</span>
-            </Label>
-            <Select
-              value={formData.type}
-              onValueChange={(value) =>
-                setFormData({ ...formData, type: value })
-              }
-              required
-            >
-              <SelectTrigger id="type">
-                <SelectValue placeholder="Select time-off type" />
-              </SelectTrigger>
-              <SelectContent>
-                {TIME_OFF_TYPES.map((type) => (
-                  <SelectItem key={type.value} value={type.value}>
-                    {type.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           {/* Reason */}
           <div className="space-y-2">
             <Label htmlFor="reason">
@@ -207,7 +174,7 @@ export function TimeOffRequestForm() {
                 setFormData({
                   startDate: "",
                   endDate: "",
-                  type: "",
+                  type: "UNAVAILABLE",
                   reason: "",
                 });
                 setError(null);
