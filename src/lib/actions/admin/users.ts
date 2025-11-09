@@ -15,6 +15,7 @@ import {
   type ToggleUserActiveInput,
 } from "@/lib/schemas/admin/users";
 import bcrypt from "bcryptjs";
+import { createUserInBothSystems } from "@/lib/auth/admin-user";
 
 /**
  * Get all users with their roles and stores
@@ -136,8 +137,10 @@ export async function getUserStats() {
 }
 
 /**
- * Create a new user
+ * Create a new user in BOTH Supabase Auth and Prisma database
  * Admin only
+ *
+ * This ensures the user can log in (requires existence in both systems)
  */
 export async function createUser(data: CreateUserInput) {
   await requireAdmin();
@@ -152,27 +155,22 @@ export async function createUser(data: CreateUserInput) {
   const { email, password, roleId, storeId, active } = validatedFields.data;
 
   try {
-    // Check if email already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
+    // Create user in BOTH Supabase Auth and Prisma database
+    const result = await createUserInBothSystems({
+      email,
+      password,
+      roleId,
+      storeId: storeId || null,
+      active,
     });
 
-    if (existingUser) {
-      return { error: "Email already in use" };
+    if (!result.success) {
+      return { error: result.error || "Failed to create user" };
     }
 
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create the user
-    const user = await prisma.user.create({
-      data: {
-        email,
-        password: hashedPassword,
-        roleId,
-        storeId: storeId || null,
-        active,
-      },
+    // Fetch the created user with relations for the response
+    const user = await prisma.user.findUnique({
+      where: { id: result.userId },
       include: {
         role: true,
         store: true,

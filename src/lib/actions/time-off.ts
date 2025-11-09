@@ -47,46 +47,47 @@ export async function getMyTimeOffRequests() {
 export async function getAllTimeOffRequests(filters?: FilterTimeOffRequestsInput) {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("time_off", "read");
+  const hasAccess = await canAccess("timeoff", "read");
   if (!hasAccess) {
     return { error: "You don't have permission to view all time-off requests" };
   }
 
   const validatedFilters = filters
     ? filterTimeOffRequestsSchema.safeParse(filters)
-    : { success: true, data: {} };
+    : { success: true as const, data: {} as any };
 
   if (!validatedFilters.success) {
     return { error: "Invalid filters" };
   }
 
   try {
+    const filterData: any = validatedFilters.data;
     const where: any = {};
 
-    if (validatedFilters.data.status) {
-      where.status = validatedFilters.data.status;
+    if (filterData.status) {
+      where.status = filterData.status;
     }
 
-    if (validatedFilters.data.type) {
-      where.type = validatedFilters.data.type;
+    if (filterData.type) {
+      where.type = filterData.type;
     }
 
-    if (validatedFilters.data.userId) {
-      where.userId = validatedFilters.data.userId;
+    if (filterData.userId) {
+      where.userId = filterData.userId;
     }
 
-    if (validatedFilters.data.startDate || validatedFilters.data.endDate) {
+    if (filterData.startDate || filterData.endDate) {
       where.AND = [];
 
-      if (validatedFilters.data.startDate) {
+      if (filterData.startDate) {
         where.AND.push({
-          endDate: { gte: validatedFilters.data.startDate },
+          endDate: { gte: filterData.startDate },
         });
       }
 
-      if (validatedFilters.data.endDate) {
+      if (filterData.endDate) {
         where.AND.push({
-          startDate: { lte: validatedFilters.data.endDate },
+          startDate: { lte: filterData.endDate },
         });
       }
     }
@@ -250,7 +251,7 @@ export async function cancelTimeOffRequest(data: UpdateTimeOffRequestInput) {
 export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("time_off", "update");
+  const hasAccess = await canAccess("timeoff", "update");
   if (!hasAccess) {
     return { error: "You don't have permission to review time-off requests" };
   }
@@ -347,7 +348,7 @@ export async function getTimeOffStats() {
 export async function getPendingTimeOffCount() {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("time_off", "read");
+  const hasAccess = await canAccess("timeoff", "read");
   if (!hasAccess) {
     return { count: 0 };
   }

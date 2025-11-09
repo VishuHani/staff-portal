@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 interface Post {
   id: string;
   content: string;
+  channelId: string;
   mediaUrls: string | null;
   pinned: boolean;
   edited: boolean;

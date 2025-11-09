@@ -4,9 +4,9 @@ import { MessagesPageClient } from "@/components/messages/MessagesPageClient";
 import { getUsers } from "@/lib/actions/users";
 
 interface MessagesPageProps {
-  searchParams: {
+  searchParams: Promise<{
     conversationId?: string;
-  };
+  }>;
 }
 
 export default async function MessagesPage({

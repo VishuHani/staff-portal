@@ -38,17 +38,9 @@ export function isDateInFuture(date: Date): boolean {
  */
 export const createTimeOffRequestSchema = z
   .object({
-    startDate: z.coerce.date({
-      required_error: "Start date is required",
-      invalid_type_error: "Invalid start date",
-    }),
-    endDate: z.coerce.date({
-      required_error: "End date is required",
-      invalid_type_error: "Invalid end date",
-    }),
-    type: z.enum(["UNAVAILABLE"], {
-      required_error: "Time-off type is required",
-    }),
+    startDate: z.coerce.date(),
+    endDate: z.coerce.date(),
+    type: z.enum(["UNAVAILABLE"]),
     reason: z
       .string()
       .min(10, "Reason must be at least 10 characters")
@@ -87,9 +79,7 @@ export const updateTimeOffRequestSchema = z.object({
  */
 export const reviewTimeOffRequestSchema = z.object({
   id: z.string().cuid(),
-  status: z.enum(["APPROVED", "REJECTED"], {
-    required_error: "Status is required",
-  }),
+  status: z.enum(["APPROVED", "REJECTED"]),
   notes: z
     .string()
     .max(500, "Notes must be less than 500 characters")

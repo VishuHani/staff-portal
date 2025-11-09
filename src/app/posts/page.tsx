@@ -3,9 +3,9 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { PostsPageClient } from "@/components/posts/PostsPageClient";
 
 interface PostsPageProps {
-  searchParams: {
+  searchParams: Promise<{
     channelId?: string;
-  };
+  }>;
 }
 
 export default async function PostsPage({ searchParams }: PostsPageProps) {

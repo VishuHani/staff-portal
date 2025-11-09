@@ -1,6 +1,8 @@
 import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
 import path from "path";
+import bcrypt from "bcryptjs";
+import { createUserInBothSystems } from "../src/lib/auth/admin-user";
 
 // Load environment variables from .env.local
 config({ path: path.join(process.cwd(), ".env.local") });
@@ -199,12 +201,72 @@ async function main() {
 
   console.log("✅ Default store created");
 
+  // Create admin user if environment variables are provided
+  // NOTE: This creates the user in BOTH Supabase Auth and Prisma database
+  // This is required for login to work (dual authentication system)
+  const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+
+  if (ADMIN_EMAIL && ADMIN_PASSWORD) {
+    console.log("Creating admin user in both Supabase Auth and Prisma database...");
+
+    const existingAdmin = await prisma.user.findUnique({
+      where: { email: ADMIN_EMAIL },
+    });
+
+    if (existingAdmin) {
+      console.log("⚠️  Admin user already exists in Prisma database");
+      console.log("   Updating password in both systems...");
+
+      const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
+
+      // Update in Prisma
+      await prisma.user.update({
+        where: { email: ADMIN_EMAIL },
+        data: {
+          password: hashedPassword,
+          roleId: adminRole.id,
+          active: true,
+        },
+      });
+
+      // Note: For existing users, you may need to manually create in Supabase Auth
+      // or use the syncExistingUserToSupabase utility function
+      console.log("✅ Admin user password updated in Prisma");
+      console.log("⚠️  If login fails, the user may not exist in Supabase Auth");
+      console.log("   You can create it manually in Supabase Dashboard → Authentication → Users");
+    } else {
+      // Create user in BOTH systems using the shared utility
+      const result = await createUserInBothSystems({
+        email: ADMIN_EMAIL,
+        password: ADMIN_PASSWORD,
+        roleId: adminRole.id,
+        active: true,
+      });
+
+      if (result.success) {
+        console.log("✅ Admin user created in both Supabase Auth and Prisma");
+        console.log(`   Email: ${ADMIN_EMAIL}`);
+        console.log(`   User ID: ${result.userId}`);
+        console.log("   You can now log in with these credentials!");
+      } else {
+        console.error("❌ Failed to create admin user:", result.error);
+        console.log("   You may need to create the user manually");
+      }
+    }
+  } else {
+    console.log("ℹ️  No admin credentials provided (ADMIN_EMAIL and ADMIN_PASSWORD not set)");
+  }
+
   // Summary
   console.log("\n🎉 Database seeded successfully!");
   console.log("\nSummary:");
   console.log(`- 3 Roles: Admin, Manager, Staff`);
   console.log(`- ${createdPermissions.length} Permissions`);
   console.log(`- 1 Default Store: ${defaultStore.name}`);
+  if (ADMIN_EMAIL) {
+    console.log(`- 1 Admin User: ${ADMIN_EMAIL}`);
+  }
   console.log("\n✨ Your database is ready to use!");
 }
 

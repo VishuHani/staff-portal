@@ -246,11 +246,11 @@ export default async function AdminAvailabilityPage() {
                                 ) : (
                                   <>
                                     <div className="text-xs font-medium text-green-700">
-                                      {dayAvailability.startTime}
+                                      {dayAvailability?.startTime}
                                     </div>
                                     <div className="text-xs text-green-600">to</div>
                                     <div className="text-xs font-medium text-green-700">
-                                      {dayAvailability.endTime}
+                                      {dayAvailability?.endTime}
                                     </div>
                                   </>
                                 )}

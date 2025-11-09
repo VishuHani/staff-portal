@@ -3,6 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/rbac/access";
+import {
+  createRoleSchema,
+  updateRoleSchema,
+  deleteRoleSchema,
+  assignPermissionsSchema,
+  type CreateRoleInput,
+  type UpdateRoleInput,
+  type DeleteRoleInput,
+  type AssignPermissionsInput,
+} from "@/lib/schemas/admin/roles";
 
 /**
  * Get all roles with their permissions
@@ -60,32 +70,40 @@ export async function getAllPermissions() {
  * Create a new role
  * Admin only
  */
-export async function createRole(data: {
-  name: string;
-  description?: string;
-  permissionIds: string[];
-}) {
+export async function createRole(data: CreateRoleInput & { permissionIds?: string[] }) {
   await requireAdmin();
+
+  const validatedFields = createRoleSchema.safeParse(data);
+  if (!validatedFields.success) {
+    return {
+      error: validatedFields.error.issues[0]?.message || "Invalid fields",
+    };
+  }
+
+  const { name, description } = validatedFields.data;
 
   try {
     // Check if role name already exists
     const existingRole = await prisma.role.findUnique({
-      where: { name: data.name },
+      where: { name },
     });
 
     if (existingRole) {
       return { error: "Role name already exists" };
     }
 
+    // Create role with permissions if provided
     const role = await prisma.role.create({
       data: {
-        name: data.name,
-        description: data.description,
-        rolePermissions: {
-          create: data.permissionIds.map((permissionId) => ({
-            permissionId,
-          })),
-        },
+        name,
+        description,
+        ...(data.permissionIds && data.permissionIds.length > 0 && {
+          rolePermissions: {
+            create: data.permissionIds.map((permissionId) => ({
+              permissionId,
+            })),
+          },
+        }),
       },
       include: {
         rolePermissions: {
@@ -109,22 +127,24 @@ export async function createRole(data: {
  * Update a role
  * Admin only
  */
-export async function updateRole(
-  roleId: string,
-  data: {
-    name?: string;
-    description?: string;
-    permissionIds?: string[];
-  }
-) {
+export async function updateRole(data: UpdateRoleInput & { permissionIds?: string[] }) {
   await requireAdmin();
+
+  const validatedFields = updateRoleSchema.safeParse(data);
+  if (!validatedFields.success) {
+    return {
+      error: validatedFields.error.issues[0]?.message || "Invalid fields",
+    };
+  }
+
+  const { roleId, name, description } = validatedFields.data;
 
   try {
     // Check if role name is being changed and if it's already taken
-    if (data.name) {
+    if (name) {
       const existingRole = await prisma.role.findFirst({
         where: {
-          name: data.name,
+          name,
           NOT: {
             id: roleId,
           },
@@ -137,27 +157,29 @@ export async function updateRole(
     }
 
     // Update role permissions if provided
-    if (data.permissionIds) {
+    if (data.permissionIds !== undefined) {
       // Delete existing permissions
       await prisma.rolePermission.deleteMany({
         where: { roleId },
       });
 
       // Create new permissions
-      await prisma.rolePermission.createMany({
-        data: data.permissionIds.map((permissionId) => ({
-          roleId,
-          permissionId,
-        })),
-      });
+      if (data.permissionIds.length > 0) {
+        await prisma.rolePermission.createMany({
+          data: data.permissionIds.map((permissionId) => ({
+            roleId,
+            permissionId,
+          })),
+        });
+      }
     }
 
     // Update role details
     const role = await prisma.role.update({
       where: { id: roleId },
       data: {
-        ...(data.name && { name: data.name }),
-        ...(data.description !== undefined && { description: data.description }),
+        ...(name && { name }),
+        ...(description !== undefined && { description }),
       },
       include: {
         rolePermissions: {
@@ -182,10 +204,33 @@ export async function updateRole(
  * Delete a role
  * Admin only - Cannot delete if users are assigned
  */
-export async function deleteRole(roleId: string) {
+export async function deleteRole(data: DeleteRoleInput) {
   await requireAdmin();
 
+  const validatedFields = deleteRoleSchema.safeParse(data);
+  if (!validatedFields.success) {
+    return {
+      error: validatedFields.error.issues[0]?.message || "Invalid fields",
+    };
+  }
+
+  const { roleId } = validatedFields.data;
+
   try {
+    // Prevent deletion of system roles
+    const role = await prisma.role.findUnique({
+      where: { id: roleId },
+    });
+
+    if (!role) {
+      return { error: "Role not found" };
+    }
+
+    const systemRoles = ["ADMIN", "MANAGER", "STAFF"];
+    if (systemRoles.includes(role.name)) {
+      return { error: "Cannot delete system roles (ADMIN, MANAGER, STAFF)" };
+    }
+
     // Check if any users have this role
     const usersWithRole = await prisma.user.count({
       where: { roleId },
@@ -214,11 +259,17 @@ export async function deleteRole(roleId: string) {
  * Assign permissions to a role
  * Admin only
  */
-export async function assignPermissionsToRole(
-  roleId: string,
-  permissionIds: string[]
-) {
+export async function assignPermissionsToRole(data: AssignPermissionsInput) {
   await requireAdmin();
+
+  const validatedFields = assignPermissionsSchema.safeParse(data);
+  if (!validatedFields.success) {
+    return {
+      error: validatedFields.error.issues[0]?.message || "Invalid fields",
+    };
+  }
+
+  const { roleId, permissionIds } = validatedFields.data;
 
   try {
     // Delete existing permissions
