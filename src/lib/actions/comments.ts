@@ -11,6 +11,7 @@ import {
   type UpdateCommentInput,
   type DeleteCommentInput,
 } from "@/lib/schemas/posts";
+import { notifyPostMention, notifyMessageReply } from "@/lib/services/notifications";
 
 /**
  * Helper function to extract @mentions from comment content
@@ -104,7 +105,8 @@ export async function createComment(data: CreateCommentInput) {
     // Verify post exists
     const post = await prisma.post.findUnique({
       where: { id: postId },
-      include: {
+      select: {
+        channelId: true,
         author: {
           select: {
             id: true,
@@ -176,20 +178,16 @@ export async function createComment(data: CreateCommentInput) {
         },
       });
 
-      // Notify mentioned users
+      // Notify mentioned users using notification service
       for (const mentionedUser of mentionedUsers) {
         if (mentionedUser.id !== user.id) {
-          await prisma.notification.create({
-            data: {
-              userId: mentionedUser.id,
-              type: "MENTION",
-              title: "You were mentioned",
-              message: `${user.email} mentioned you: "${content.substring(0, 50)}${
-                content.length > 50 ? "..." : ""
-              }"`,
-              link: `/posts?postId=${postId}`,
-            },
-          });
+          await notifyPostMention(
+            mentionedUser.id,
+            user.id,
+            postId,
+            post.channelId,
+            user.email
+          );
           notifiedUserIds.add(mentionedUser.id);
         }
       }
@@ -198,30 +196,22 @@ export async function createComment(data: CreateCommentInput) {
     // Create notification for parent comment author or post author
     if (parentComment && parentComment.user.id !== user.id && !notifiedUserIds.has(parentComment.user.id)) {
       // Notify parent comment author for replies
-      await prisma.notification.create({
-        data: {
-          userId: parentComment.user.id,
-          type: "REPLY",
-          title: "New reply to your comment",
-          message: `${user.email} replied: "${content.substring(0, 50)}${
-            content.length > 50 ? "..." : ""
-          }"`,
-          link: `/posts?postId=${postId}`,
-        },
-      });
+      await notifyMessageReply(
+        parentComment.user.id,
+        user.id,
+        comment.id,
+        post.channelId,
+        user.email
+      );
     } else if (!parentId && post.author.id !== user.id && !notifiedUserIds.has(post.author.id)) {
       // Notify post author for top-level comments
-      await prisma.notification.create({
-        data: {
-          userId: post.author.id,
-          type: "COMMENT",
-          title: "New comment on your post",
-          message: `${user.email} commented: "${content.substring(0, 50)}${
-            content.length > 50 ? "..." : ""
-          }"`,
-          link: `/posts?postId=${postId}`,
-        },
-      });
+      await notifyMessageReply(
+        post.author.id,
+        user.id,
+        comment.id,
+        post.channelId,
+        user.email
+      );
     }
 
     revalidatePath("/posts");

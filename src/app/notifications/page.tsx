@@ -1,35 +1,32 @@
 import { requireAuth } from "@/lib/rbac/access";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Bell } from "lucide-react";
+import { NotificationList } from "@/components/notifications/NotificationList";
+import { getAllNotifications, getUnreadCount } from "@/lib/actions/notifications";
 
 export default async function NotificationsPage() {
   const user = await requireAuth();
 
+  // Fetch initial notifications and unread count on server
+  const [result, unreadResult] = await Promise.all([
+    getAllNotifications({
+      userId: user.id,
+      limit: 20,
+    }),
+    getUnreadCount({ userId: user.id }),
+  ]);
+
+  const initialNotifications = result.notifications || [];
+  const initialCursor = result.nextCursor || null;
+  const unreadCount = unreadResult.count || 0;
+
   return (
-    <DashboardLayout user={user}>
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Bell className="h-6 w-6 text-primary" />
-              <CardTitle>Notifications</CardTitle>
-            </div>
-            <CardDescription>Coming Soon</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              This feature is currently under development. You will be able to
-              view all your notifications here.
-            </p>
-          </CardContent>
-        </Card>
+    <DashboardLayout user={user} unreadCount={unreadCount}>
+      <div className="container max-w-4xl py-6">
+        <NotificationList
+          userId={user.id}
+          initialNotifications={initialNotifications}
+          initialCursor={initialCursor}
+        />
       </div>
     </DashboardLayout>
   );

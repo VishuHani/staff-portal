@@ -12,6 +12,7 @@ import {
 
 interface DashboardLayoutProps {
   user: {
+    id: string;
     email: string;
     firstName?: string | null;
     lastName?: string | null;
@@ -19,16 +20,17 @@ interface DashboardLayoutProps {
       name: string;
     };
   };
+  unreadCount?: number;
   children: React.ReactNode;
 }
 
-export function DashboardLayout({ user, children }: DashboardLayoutProps) {
+export function DashboardLayout({ user, unreadCount = 0, children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <Header user={user} onMenuClick={() => setSidebarOpen(true)} />
+      <Header user={user} unreadCount={unreadCount} onMenuClick={() => setSidebarOpen(true)} />
 
       <div className="flex h-[calc(100vh-4rem)]">
         {/* Desktop Sidebar */}

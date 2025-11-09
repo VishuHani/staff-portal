@@ -13,6 +13,12 @@ import {
   type ReviewTimeOffRequestInput,
   type FilterTimeOffRequestsInput,
 } from "@/lib/schemas/time-off";
+import {
+  notifyTimeOffSubmitted,
+  notifyTimeOffApproved,
+  notifyTimeOffRejected,
+  notifyTimeOffCancelled,
+} from "@/lib/services/notifications";
 
 /**
  * Get all time-off requests for the current user
@@ -187,6 +193,43 @@ export async function createTimeOffRequest(data: CreateTimeOffRequestInput) {
       },
     });
 
+    // Notify managers/admins about new time-off request
+    try {
+      // Get all users with permission to review time-off requests
+      const approvers = await prisma.user.findMany({
+        where: {
+          active: true,
+          role: {
+            permissions: {
+              some: {
+                resource: "timeoff",
+                action: "update",
+              },
+            },
+          },
+        },
+        select: { id: true },
+      });
+
+      if (approvers.length > 0) {
+        const requesterName = user.firstName && user.lastName
+          ? `${user.firstName} ${user.lastName}`
+          : user.email;
+
+        await notifyTimeOffSubmitted(
+          request.id,
+          user.id,
+          requesterName,
+          startDate,
+          endDate,
+          approvers.map(a => a.id)
+        );
+      }
+    } catch (error) {
+      console.error("Error sending time-off notification:", error);
+      // Don't fail the request if notification fails
+    }
+
     revalidatePath("/time-off");
     revalidatePath("/admin/time-off");
 
@@ -234,6 +277,43 @@ export async function cancelTimeOffRequest(data: UpdateTimeOffRequestInput) {
       where: { id },
       data: { status: "CANCELLED" },
     });
+
+    // Notify managers/admins about cancellation
+    try {
+      // Get all users with permission to review time-off requests
+      const approvers = await prisma.user.findMany({
+        where: {
+          active: true,
+          role: {
+            permissions: {
+              some: {
+                resource: "timeoff",
+                action: "update",
+              },
+            },
+          },
+        },
+        select: { id: true },
+      });
+
+      if (approvers.length > 0) {
+        const requesterName = user.firstName && user.lastName
+          ? `${user.firstName} ${user.lastName}`
+          : user.email;
+
+        await notifyTimeOffCancelled(
+          request.id,
+          user.id,
+          requesterName,
+          request.startDate,
+          request.endDate,
+          approvers.map(a => a.id)
+        );
+      }
+    } catch (error) {
+      console.error("Error sending time-off cancellation notification:", error);
+      // Don't fail the cancellation if notification fails
+    }
 
     revalidatePath("/time-off");
     revalidatePath("/admin/time-off");
@@ -289,11 +369,43 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
       include: {
         user: {
           select: {
+            id: true,
             email: true,
           },
         },
       },
     });
+
+    // Notify requester about decision
+    try {
+      const reviewerName = user.firstName && user.lastName
+        ? `${user.firstName} ${user.lastName}`
+        : user.email;
+
+      if (status === "APPROVED") {
+        await notifyTimeOffApproved(
+          request.id,
+          request.userId,
+          user.id,
+          reviewerName,
+          request.startDate,
+          request.endDate
+        );
+      } else if (status === "REJECTED") {
+        await notifyTimeOffRejected(
+          request.id,
+          request.userId,
+          user.id,
+          reviewerName,
+          request.startDate,
+          request.endDate,
+          notes || undefined
+        );
+      }
+    } catch (error) {
+      console.error("Error sending time-off decision notification:", error);
+      // Don't fail the review if notification fails
+    }
 
     revalidatePath("/time-off");
     revalidatePath("/admin/time-off");

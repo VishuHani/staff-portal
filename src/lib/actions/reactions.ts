@@ -9,6 +9,7 @@ import {
   type AddReactionInput,
   type RemoveReactionInput,
 } from "@/lib/schemas/posts";
+import { notifyMessageReaction } from "@/lib/services/notifications";
 
 /**
  * Get reactions for a post
@@ -88,7 +89,8 @@ export async function addReaction(data: AddReactionInput) {
     // Verify post exists
     const post = await prisma.post.findUnique({
       where: { id: postId },
-      include: {
+      select: {
+        channelId: true,
         author: {
           select: {
             id: true,
@@ -126,15 +128,14 @@ export async function addReaction(data: AddReactionInput) {
 
     // Create notification for post author (if not reacting to own post)
     if (post.author.id !== user.id) {
-      await prisma.notification.create({
-        data: {
-          userId: post.author.id,
-          type: "REACTION",
-          title: "New reaction on your post",
-          message: `${user.email} reacted with ${emoji}`,
-          link: `/posts?postId=${postId}`,
-        },
-      });
+      await notifyMessageReaction(
+        post.author.id,
+        user.id,
+        postId,
+        post.channelId,
+        user.email,
+        emoji
+      );
     }
 
     revalidatePath("/posts");
@@ -394,15 +395,22 @@ export async function toggleCommentReaction(data: { commentId: string; emoji: st
 
       // Create notification for comment author (if not reacting to own comment)
       if (comment.user.id !== user.id) {
-        await prisma.notification.create({
-          data: {
-            userId: comment.user.id,
-            type: "REACTION",
-            title: "New reaction on your comment",
-            message: `${user.email} reacted with ${emoji}`,
-            link: `/posts?postId=${comment.postId}`,
-          },
+        // Get post to find channelId
+        const post = await prisma.post.findUnique({
+          where: { id: comment.postId },
+          select: { channelId: true },
         });
+
+        if (post) {
+          await notifyMessageReaction(
+            comment.user.id,
+            user.id,
+            comment.id,
+            post.channelId,
+            user.email,
+            emoji
+          );
+        }
       }
 
       revalidatePath("/posts");

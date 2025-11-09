@@ -14,9 +14,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { logout } from "@/lib/actions/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { NotificationDropdown } from "@/components/notifications/NotificationDropdown";
 
 interface HeaderProps {
   user: {
+    id: string;
     email: string;
     firstName?: string | null;
     lastName?: string | null;
@@ -24,10 +26,11 @@ interface HeaderProps {
       name: string;
     };
   };
+  unreadCount?: number;
   onMenuClick?: () => void;
 }
 
-export function Header({ user, onMenuClick }: HeaderProps) {
+export function Header({ user, unreadCount = 0, onMenuClick }: HeaderProps) {
   const displayName = user.firstName && user.lastName
     ? `${user.firstName} ${user.lastName}`
     : user.email;
@@ -64,6 +67,9 @@ export function Header({ user, onMenuClick }: HeaderProps) {
 
         {/* Theme Toggle */}
         <ThemeToggle />
+
+        {/* Notifications */}
+        <NotificationDropdown userId={user.id} unreadCount={unreadCount} />
 
         {/* User Menu */}
         <DropdownMenu>

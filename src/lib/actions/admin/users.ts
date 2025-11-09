@@ -16,6 +16,13 @@ import {
 } from "@/lib/schemas/admin/users";
 import bcrypt from "bcryptjs";
 import { createUserInBothSystems } from "@/lib/auth/admin-user";
+import {
+  notifyUserWelcome,
+  notifyRoleChanged,
+  notifyUserActivated,
+  notifyUserDeactivated,
+} from "@/lib/services/notifications";
+import { getCurrentUser } from "@/lib/auth";
 
 /**
  * Get all users with their roles and stores
@@ -177,6 +184,18 @@ export async function createUser(data: CreateUserInput) {
       },
     });
 
+    // Send welcome notification
+    try {
+      const userName = user?.firstName && user?.lastName
+        ? `${user.firstName} ${user.lastName}`
+        : user?.email || email;
+
+      await notifyUserWelcome(result.userId!, userName);
+    } catch (error) {
+      console.error("Error sending welcome notification:", error);
+      // Don't fail user creation if notification fails
+    }
+
     revalidatePath("/admin/users");
 
     return { success: true, user };
@@ -191,7 +210,7 @@ export async function createUser(data: CreateUserInput) {
  * Admin only
  */
 export async function updateUser(data: UpdateUserInput) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = updateUserSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -203,6 +222,16 @@ export async function updateUser(data: UpdateUserInput) {
   const { userId, email, roleId, storeId, active } = validatedFields.data;
 
   try {
+    // Get current user state before update
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { role: true },
+    });
+
+    if (!currentUser) {
+      return { error: "User not found" };
+    }
+
     // Check if email is already taken by another user
     if (email) {
       const existingUser = await prisma.user.findFirst({
@@ -232,6 +261,36 @@ export async function updateUser(data: UpdateUserInput) {
         store: true,
       },
     });
+
+    // Send notifications for relevant changes
+    try {
+      const adminName = admin.firstName && admin.lastName
+        ? `${admin.firstName} ${admin.lastName}`
+        : admin.email;
+
+      // Notify if role changed
+      if (roleId && roleId !== currentUser.roleId) {
+        await notifyRoleChanged(
+          userId,
+          admin.id,
+          adminName,
+          currentUser.role.name,
+          user.role.name
+        );
+      }
+
+      // Notify if active status changed
+      if (active !== undefined && active !== currentUser.active) {
+        if (active) {
+          await notifyUserActivated(userId, admin.id, adminName);
+        } else {
+          await notifyUserDeactivated(userId, admin.id, adminName);
+        }
+      }
+    } catch (error) {
+      console.error("Error sending user update notification:", error);
+      // Don't fail the update if notification fails
+    }
 
     revalidatePath("/admin/users");
     revalidatePath(`/admin/users/${userId}`);
@@ -279,7 +338,7 @@ export async function deleteUser(data: DeleteUserInput) {
  * Admin only
  */
 export async function toggleUserActive(data: ToggleUserActiveInput) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = toggleUserActiveSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -300,15 +359,33 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
       return { error: "User not found" };
     }
 
+    const newActiveStatus = !user.active;
+
     // Toggle the active status
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: { active: !user.active },
+      data: { active: newActiveStatus },
       include: {
         role: true,
         store: true,
       },
     });
+
+    // Send notification about status change
+    try {
+      const adminName = admin.firstName && admin.lastName
+        ? `${admin.firstName} ${admin.lastName}`
+        : admin.email;
+
+      if (newActiveStatus) {
+        await notifyUserActivated(userId, admin.id, adminName);
+      } else {
+        await notifyUserDeactivated(userId, admin.id, adminName);
+      }
+    } catch (error) {
+      console.error("Error sending user status notification:", error);
+      // Don't fail the toggle if notification fails
+    }
 
     revalidatePath("/admin/users");
     revalidatePath(`/admin/users/${userId}`);
