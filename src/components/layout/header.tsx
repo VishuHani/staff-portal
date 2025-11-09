@@ -13,6 +13,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { logout } from "@/lib/actions/auth";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 interface HeaderProps {
   user: {
@@ -60,6 +61,9 @@ export function Header({ user, onMenuClick }: HeaderProps) {
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Theme Toggle */}
+        <ThemeToggle />
 
         {/* User Menu */}
         <DropdownMenu>
