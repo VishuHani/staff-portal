@@ -63,7 +63,7 @@ export async function signup(formData: SignupInput) {
     };
   }
 
-  const { email, password } = validatedFields.data;
+  const { email, password, firstName, lastName, phone } = validatedFields.data;
   const supabase = await createClient();
 
   // Check if user already exists
@@ -106,8 +106,12 @@ export async function signup(formData: SignupInput) {
     data: {
       id: data.user.id,
       email,
+      firstName,
+      lastName,
+      phone: phone || null,
       roleId: staffRole.id,
       active: true,
+      profileCompletedAt: new Date(), // Profile complete since we collected names at signup
     },
   });
 
@@ -175,6 +179,18 @@ export async function getCurrentUser() {
         },
       },
       store: true,
+      venues: {
+        include: {
+          venue: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              active: true,
+            },
+          },
+        },
+      },
     },
   });
 

@@ -38,9 +38,13 @@ function createAdminClient() {
 interface CreateUserInBothSystemsParams {
   email: string;
   password: string;
+  firstName: string;
+  lastName: string;
+  phone?: string | null;
   roleId: string;
   storeId?: string | null;
   active?: boolean;
+  profileCompletedAt?: Date;
 }
 
 interface CreateUserInBothSystemsResult {
@@ -62,7 +66,7 @@ interface CreateUserInBothSystemsResult {
 export async function createUserInBothSystems(
   params: CreateUserInBothSystemsParams
 ): Promise<CreateUserInBothSystemsResult> {
-  const { email, password, roleId, storeId, active = true } = params;
+  const { email, password, firstName, lastName, phone, roleId, storeId, active = true, profileCompletedAt } = params;
 
   try {
     // Step 1: Check if user already exists in Prisma
@@ -104,9 +108,13 @@ export async function createUserInBothSystems(
           id: authData.user.id, // Use Supabase Auth ID
           email,
           password: hashedPassword,
+          firstName,
+          lastName,
+          phone: phone || null,
           roleId,
           storeId: storeId || null,
           active,
+          profileCompletedAt: profileCompletedAt || null,
         },
       });
 

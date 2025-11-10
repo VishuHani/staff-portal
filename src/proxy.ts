@@ -1,5 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -32,10 +35,14 @@ export async function proxy(request: NextRequest) {
   // Protected routes
   const protectedPaths = ["/dashboard", "/admin", "/staff"];
   const authPaths = ["/login", "/signup", "/forgot-password"];
+  const onboardingPaths = ["/onboarding"];
   const isProtectedPath = protectedPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path)
   );
   const isAuthPath = authPaths.some((path) =>
+    request.nextUrl.pathname.startsWith(path)
+  );
+  const isOnboardingPath = onboardingPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path)
   );
 
@@ -93,6 +100,27 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);
+  }
+
+  // Check profile completion for authenticated users accessing protected routes
+  if (user && (isProtectedPath && !isOnboardingPath)) {
+    try {
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { profileCompletedAt: true },
+      });
+
+      // If profile is not complete, redirect to onboarding
+      if (dbUser && !dbUser.profileCompletedAt) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/onboarding/complete-profile";
+        url.searchParams.set("redirectTo", request.nextUrl.pathname);
+        return NextResponse.redirect(url);
+      }
+    } catch (error) {
+      console.error("Error checking profile completion:", error);
+      // Allow access on error to avoid blocking users
+    }
   }
 
   return supabaseResponse;

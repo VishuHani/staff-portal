@@ -83,6 +83,36 @@ export default function SignupPage() {
               </div>
             )}
 
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="firstName">First Name</Label>
+                <Input
+                  id="firstName"
+                  type="text"
+                  placeholder="John"
+                  {...register("firstName")}
+                  disabled={loading}
+                />
+                {errors.firstName && (
+                  <p className="text-sm text-red-600">{errors.firstName.message}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="lastName">Last Name</Label>
+                <Input
+                  id="lastName"
+                  type="text"
+                  placeholder="Doe"
+                  {...register("lastName")}
+                  disabled={loading}
+                />
+                {errors.lastName && (
+                  <p className="text-sm text-red-600">{errors.lastName.message}</p>
+                )}
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -94,6 +124,20 @@ export default function SignupPage() {
               />
               {errors.email && (
                 <p className="text-sm text-red-600">{errors.email.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone Number (Optional)</Label>
+              <Input
+                id="phone"
+                type="tel"
+                placeholder="+1 (555) 123-4567"
+                {...register("phone")}
+                disabled={loading}
+              />
+              {errors.phone && (
+                <p className="text-sm text-red-600">{errors.phone.message}</p>
               )}
             </div>
 

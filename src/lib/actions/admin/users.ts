@@ -159,16 +159,20 @@ export async function createUser(data: CreateUserInput) {
     };
   }
 
-  const { email, password, roleId, storeId, active } = validatedFields.data;
+  const { email, password, firstName, lastName, phone, roleId, storeId, active } = validatedFields.data;
 
   try {
     // Create user in BOTH Supabase Auth and Prisma database
     const result = await createUserInBothSystems({
       email,
       password,
+      firstName,
+      lastName,
+      phone: phone || null,
       roleId,
       storeId: storeId || null,
       active,
+      profileCompletedAt: new Date(), // Admin-created users have complete profiles
     });
 
     if (!result.success) {
