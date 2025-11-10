@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,44 +8,36 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// ============================================
-// Core Entities
-// ============================================
-
 model User {
-  id       String  @id @default(cuid())
-  email    String  @unique
-  password String? // Nullable for OAuth users
-
-  // Profile fields
+  id                 String                    @id @default(cuid())
+  email              String                    @unique
+  password           String?
+  roleId             String
+  storeId            String?
+  active             Boolean                   @default(true)
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  bio                String?
+  dateOfBirth        DateTime?
   firstName          String?
   lastName           String?
-  profileImage       String? // Supabase Storage URL or placeholder
   phone              String?
-  bio                String? // Additional information text box
-  dateOfBirth        DateTime?
-  profileCompletedAt DateTime? // NULL = incomplete, force completion on login
-
-  roleId    String
-  storeId   String? // Keep for backward compatibility, will deprecate
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  role            Role                      @relation(fields: [roleId], references: [id])
-  store           Store?                    @relation(fields: [storeId], references: [id])
-  venues          UserVenue[] // Multi-venue support
-  availability    Availability[]
-  timeOffRequests TimeOffRequest[]
-  reviewedTimeOff TimeOffRequest[]          @relation("ReviewedBy")
-  posts           Post[]
-  comments        Comment[]
-  reactions       Reaction[]
-  postReads       PostRead[]
-  sentMessages    Message[]
-  conversations   ConversationParticipant[]
-  notifications   Notification[]
-  auditLogs       AuditLog[]
+  profileCompletedAt DateTime?
+  profileImage       String?
+  auditLogs          AuditLog[]
+  availability       Availability[]
+  comments           Comment[]
+  conversations      ConversationParticipant[]
+  sentMessages       Message[]
+  notifications      Notification[]
+  postReads          PostRead[]
+  posts              Post[]
+  reactions          Reaction[]
+  reviewedTimeOff    TimeOffRequest[]          @relation("ReviewedBy")
+  timeOffRequests    TimeOffRequest[]
+  venues             UserVenue[]
+  role               Role                      @relation(fields: [roleId], references: [id])
+  store              Store?                    @relation(fields: [storeId], references: [id])
 
   @@index([email])
   @@index([firstName])
@@ -62,25 +48,23 @@ model User {
 }
 
 model Role {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  users           User[]
+  id              String           @id @default(cuid())
+  name            String           @unique
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   rolePermissions RolePermission[]
+  users           User[]
 
   @@map("roles")
 }
 
 model Permission {
-  id          String   @id @default(cuid())
-  resource    String
-  action      String
-  description String?
-  createdAt   DateTime @default(now())
-
+  id              String           @id @default(cuid())
+  resource        String
+  action          String
+  description     String?
+  createdAt       DateTime         @default(now())
   rolePermissions RolePermission[]
 
   @@unique([resource, action])
@@ -88,13 +72,12 @@ model Permission {
 }
 
 model RolePermission {
-  id           String   @id @default(cuid())
+  id           String     @id @default(cuid())
   roleId       String
   permissionId String
-  createdAt    DateTime @default(now())
-
-  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@unique([roleId, permissionId])
   @@index([roleId])
@@ -103,15 +86,14 @@ model RolePermission {
 }
 
 model Store {
-  id        String   @id @default(cuid())
-  name      String
-  code      String   @unique
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  users      User[] // Keep for backward compatibility
-  userVenues UserVenue[] // Multi-venue support
+  id         String      @id @default(cuid())
+  name       String
+  code       String      @unique
+  active     Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  userVenues UserVenue[]
+  users      User[]
 
   @@map("stores")
 }
@@ -120,35 +102,29 @@ model UserVenue {
   id        String   @id @default(cuid())
   userId    String
   venueId   String
-  isPrimary Boolean  @default(false) // One venue marked as primary
+  isPrimary Boolean  @default(false)
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venue     Store    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  venue Store @relation(fields: [venueId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, venueId]) // Prevent duplicate assignments
+  @@unique([userId, venueId])
   @@index([userId])
   @@index([venueId])
   @@index([isPrimary])
   @@map("user_venues")
 }
 
-// ============================================
-// Availability & Time-Off
-// ============================================
-
 model Availability {
   id          String   @id @default(cuid())
   userId      String
-  dayOfWeek   Int // 0-6 (Sunday-Saturday)
-  isAvailable Boolean  @default(false)
-  isAllDay    Boolean  @default(false)
-  startTime   String? // HH:MM format (nullable)
-  endTime     String? // HH:MM format (nullable)
+  dayOfWeek   Int
+  startTime   String?
+  endTime     String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isAllDay    Boolean  @default(false)
+  isAvailable Boolean  @default(false)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, dayOfWeek])
   @@index([userId])
@@ -161,17 +137,16 @@ model TimeOffRequest {
   userId     String
   startDate  DateTime
   endDate    DateTime
-  type       String // VACATION, SICK, PERSONAL, etc.
+  type       String
   reason     String?
-  status     String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  status     String    @default("PENDING")
   reviewedBy String?
   reviewedAt DateTime?
   notes      String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
-
-  user     User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reviewer User? @relation("ReviewedBy", fields: [reviewedBy], references: [id])
+  reviewer   User?     @relation("ReviewedBy", fields: [reviewedBy], references: [id])
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([startDate, endDate])
@@ -179,45 +154,39 @@ model TimeOffRequest {
   @@map("time_off_requests")
 }
 
-// ============================================
-// Communication
-// ============================================
-
 model Channel {
   id          String    @id @default(cuid())
   name        String    @unique
-  description String?
-  type        String // ALL_STAFF, MANAGERS, CUSTOM
-  icon        String? // Emoji or icon identifier
-  color       String? // Hex color for UI theming
-  permissions String? // JSON or comma-separated permissions
-  archived    Boolean   @default(false)
-  archivedAt  DateTime?
+  type        String
+  permissions String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-
-  posts Post[]
+  archived    Boolean   @default(false)
+  archivedAt  DateTime?
+  color       String?
+  description String?
+  icon        String?
+  posts       Post[]
 
   @@map("channels")
 }
 
 model Post {
-  id        String    @id @default(cuid())
+  id        String     @id @default(cuid())
   channelId String
   authorId  String
   content   String
-  mediaUrls String? // JSON array of URLs
-  pinned    Boolean   @default(false)
-  edited    Boolean   @default(false)
+  mediaUrls String?
+  pinned    Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  edited    Boolean    @default(false)
   editedAt  DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  channel   Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author    User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
   comments  Comment[]
-  reactions Reaction[]
   reads     PostRead[]
+  author    User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  channel   Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  reactions Reaction[]
 
   @@index([channelId])
   @@index([authorId])
@@ -226,20 +195,19 @@ model Post {
 }
 
 model Comment {
-  id        String    @id @default(cuid())
+  id        String     @id @default(cuid())
   postId    String
   userId    String
-  parentId  String? // For threaded comments (replies)
   content   String
-  edited    Boolean   @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  edited    Boolean    @default(false)
   editedAt  DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  post      Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentId  String?
   parent    Comment?   @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies   Comment[]  @relation("CommentReplies")
+  post      Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   reactions Reaction[]
 
   @@index([postId])
@@ -250,15 +218,14 @@ model Comment {
 
 model Reaction {
   id        String   @id @default(cuid())
-  postId    String? // Nullable - either postId or commentId must be set
-  commentId String? // Nullable - either postId or commentId must be set
+  postId    String?
   userId    String
   emoji     String
   createdAt DateTime @default(now())
-
-  post    Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
-  comment Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  commentId String?
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([postId, userId, emoji])
   @@unique([commentId, userId, emoji])
@@ -272,9 +239,8 @@ model PostRead {
   userId String
   postId String
   readAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post   Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, postId])
   @@index([userId])
@@ -283,30 +249,28 @@ model PostRead {
 }
 
 model Conversation {
-  id            String    @id @default(cuid())
-  type          String // ONE_ON_ONE, GROUP
-  name          String? // For group conversations
+  id            String                    @id @default(cuid())
+  type          String
   lastMessageAt DateTime?
-  lastMessage   String? // Cache last message content
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  participants ConversationParticipant[]
-  messages     Message[]
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  lastMessage   String?
+  name          String?
+  participants  ConversationParticipant[]
+  messages      Message[]
 
   @@map("conversations")
 }
 
 model ConversationParticipant {
-  id             String    @id @default(cuid())
+  id             String       @id @default(cuid())
   conversationId String
   userId         String
-  joinedAt       DateTime  @default(now())
-  lastReadAt     DateTime? // Track when user last read messages
-  mutedUntil     DateTime? // For muting conversations
-
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+  mutedUntil     DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, userId])
   @@index([conversationId])
@@ -315,19 +279,18 @@ model ConversationParticipant {
 }
 
 model Message {
-  id             String    @id @default(cuid())
+  id             String       @id @default(cuid())
   conversationId String
   senderId       String
   content        String
-  mediaUrls      String? // JSON array of media URLs
-  reactions      String? // JSON array of reactions: [{ emoji, userId }]
   readAt         DateTime?
-  readBy         String[]  @default([]) // Array of user IDs who read the message
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  mediaUrls      String?
+  reactions      String?
+  readBy         String[]     @default([])
+  updatedAt      DateTime     @updatedAt
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
   @@index([senderId])
@@ -335,9 +298,40 @@ model Message {
   @@map("messages")
 }
 
-// ============================================
-// System
-// ============================================
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  type      NotificationType
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([readAt])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String
+  actionType   String
+  resourceType String
+  resourceId   String?
+  oldValue     String?
+  newValue     String?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([actionType])
+  @@map("audit_logs")
+}
 
 enum NotificationType {
   NEW_MESSAGE
@@ -356,41 +350,4 @@ enum NotificationType {
   ROLE_CHANGED
   SYSTEM_ANNOUNCEMENT
   GROUP_REMOVED
-}
-
-model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  type      NotificationType
-  title     String
-  message   String
-  link      String?
-  readAt    DateTime?
-  createdAt DateTime         @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([readAt])
-  @@index([createdAt])
-  @@map("notifications")
-}
-
-model AuditLog {
-  id           String   @id @default(cuid())
-  userId       String
-  actionType   String
-  resourceType String
-  resourceId   String?
-  oldValue     String? // JSON
-  newValue     String? // JSON
-  ipAddress    String?
-  createdAt    DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([createdAt])
-  @@index([actionType])
-  @@map("audit_logs")
 }
