@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { requireAuth, canAccess, canAccessVenue } from "@/lib/rbac/access";
 import { getSharedVenueUsers, getAccessibleChannelIds } from "@/lib/utils/venue";
 import {
   createPostSchema,
@@ -376,6 +376,13 @@ export async function deletePost(data: DeletePostInput) {
 
     const existingPost = await prisma.post.findUnique({
       where: { id },
+      include: {
+        channel: {
+          include: {
+            venues: true,
+          },
+        },
+      },
     });
 
     if (!existingPost) {
@@ -387,10 +394,21 @@ export async function deletePost(data: DeletePostInput) {
       return { error: "Post not found" };
     }
 
-    // Check if user owns the post or has manage permission
-    const canManage = await canAccess("posts", "manage");
-    if (existingPost.authorId !== user.id && !canManage) {
-      return { error: "You don't have permission to delete this post" };
+    // Check if user owns the post or has moderate permission at the channel's venues
+    if (existingPost.authorId !== user.id) {
+      // VENUE-SCOPED PERMISSION CHECK: Check if user can moderate at ANY of the channel's venues
+      let hasModeratePermission = false;
+
+      for (const channelVenue of existingPost.channel.venues) {
+        if (await canAccessVenue("posts", "moderate", channelVenue.venueId)) {
+          hasModeratePermission = true;
+          break;
+        }
+      }
+
+      if (!hasModeratePermission) {
+        return { error: "You don't have permission to delete this post" };
+      }
     }
 
     await prisma.post.delete({
@@ -408,15 +426,10 @@ export async function deletePost(data: DeletePostInput) {
 
 /**
  * Pin/unpin a post (admin/manager only)
+ * ENHANCED: Now uses venue-scoped permissions
  */
 export async function pinPost(data: PinPostInput) {
   const user = await requireAuth();
-
-  // Check permissions
-  const hasAccess = await canAccess("posts", "manage");
-  if (!hasAccess) {
-    return { error: "You don't have permission to pin posts" };
-  }
 
   const validatedFields = pinPostSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -428,6 +441,36 @@ export async function pinPost(data: PinPostInput) {
   const { id, pinned } = validatedFields.data;
 
   try {
+    // Get the post with channel venues to check permissions
+    const existingPost = await prisma.post.findUnique({
+      where: { id },
+      include: {
+        channel: {
+          include: {
+            venues: true,
+          },
+        },
+      },
+    });
+
+    if (!existingPost) {
+      return { error: "Post not found" };
+    }
+
+    // VENUE-SCOPED PERMISSION CHECK: Check if user can moderate at ANY of the channel's venues
+    let hasModeratePermission = false;
+
+    for (const channelVenue of existingPost.channel.venues) {
+      if (await canAccessVenue("posts", "moderate", channelVenue.venueId)) {
+        hasModeratePermission = true;
+        break;
+      }
+    }
+
+    if (!hasModeratePermission) {
+      return { error: "You don't have permission to pin posts" };
+    }
+
     const post = await prisma.post.update({
       where: { id },
       data: { pinned },

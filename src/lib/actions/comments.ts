@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { requireAuth, canAccess, canAccessVenue } from "@/lib/rbac/access";
 import { getSharedVenueUsers } from "@/lib/utils/venue";
 import {
   createCommentSchema,
@@ -304,6 +304,7 @@ export async function updateComment(data: UpdateCommentInput) {
 
 /**
  * Delete a comment (own comments or admin/manager)
+ * ENHANCED: Now uses venue-scoped permissions
  */
 export async function deleteComment(data: DeleteCommentInput) {
   const user = await requireAuth();
@@ -320,16 +321,38 @@ export async function deleteComment(data: DeleteCommentInput) {
   try {
     const existingComment = await prisma.comment.findUnique({
       where: { id },
+      include: {
+        post: {
+          include: {
+            channel: {
+              include: {
+                venues: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!existingComment) {
       return { error: "Comment not found" };
     }
 
-    // Check if user owns the comment or has manage permission
-    const canManage = await canAccess("posts", "manage");
-    if (existingComment.userId !== user.id && !canManage) {
-      return { error: "You don't have permission to delete this comment" };
+    // Check if user owns the comment or has moderate permission at the channel's venues
+    if (existingComment.userId !== user.id) {
+      // VENUE-SCOPED PERMISSION CHECK: Check if user can moderate at ANY of the channel's venues
+      let hasModeratePermission = false;
+
+      for (const channelVenue of existingComment.post.channel.venues) {
+        if (await canAccessVenue("posts", "moderate", channelVenue.venueId)) {
+          hasModeratePermission = true;
+          break;
+        }
+      }
+
+      if (!hasModeratePermission) {
+        return { error: "You don't have permission to delete this comment" };
+      }
     }
 
     await prisma.comment.delete({
