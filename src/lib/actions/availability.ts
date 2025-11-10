@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { getSharedVenueUsers } from "@/lib/utils/venue";
 import {
   updateAvailabilitySchema,
   bulkUpdateAvailabilitySchema,
@@ -209,6 +210,7 @@ export async function bulkUpdateAvailability(data: BulkUpdateAvailabilityInput) 
 
 /**
  * Get all users' availability (Admin/Manager only)
+ * Filtered by venues: Managers only see availability for users in their shared venues
  */
 export async function getAllUsersAvailability(filters?: {
   dayOfWeek?: number;
@@ -223,14 +225,37 @@ export async function getAllUsersAvailability(filters?: {
   }
 
   try {
+    // VENUE FILTERING: Get users in shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const users = await prisma.user.findMany({
       where: {
         active: true,
+        // VENUE FILTERING: Only show users from shared venues
+        id: {
+          in: sharedVenueUserIds,
+        },
         ...(filters?.storeId && { storeId: filters.storeId }),
       },
-      include: {
-        role: true,
-        store: true,
+      select: {
+        id: true,
+        email: true,
+        // PROFILE FIELDS: Include name and avatar
+        firstName: true,
+        lastName: true,
+        profileImage: true,
+        role: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        store: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         availability: {
           where: {
             ...(filters?.dayOfWeek !== undefined && {
@@ -251,7 +276,8 @@ export async function getAllUsersAvailability(filters?: {
 }
 
 /**
- * Get availability statistics (Admin only)
+ * Get availability statistics (Admin/Manager only)
+ * Filtered by venues: Managers only see stats for users in their shared venues
  */
 export async function getAvailabilityStats() {
   const user = await requireAuth();
@@ -262,10 +288,23 @@ export async function getAvailabilityStats() {
   }
 
   try {
+    // VENUE FILTERING: Get users in shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const [totalUsers, availabilityByDay] = await Promise.all([
-      prisma.user.count({ where: { active: true } }),
+      // VENUE FILTERING: Count only users in shared venues
+      prisma.user.count({
+        where: {
+          active: true,
+          id: { in: sharedVenueUserIds },
+        }
+      }),
+      // VENUE FILTERING: Group only availability from shared venue users
       prisma.availability.groupBy({
         by: ["dayOfWeek", "isAvailable"],
+        where: {
+          userId: { in: sharedVenueUserIds },
+        },
         _count: true,
       }),
     ]);
@@ -293,9 +332,11 @@ export async function getAvailabilityStats() {
     });
 
     // Calculate users with at least one day configured
+    // VENUE FILTERING: Count only shared venue users
     const usersWithAvailability = await prisma.user.count({
       where: {
         active: true,
+        id: { in: sharedVenueUserIds },
         availability: {
           some: {
             isAvailable: true,

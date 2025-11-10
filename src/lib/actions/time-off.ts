@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { getSharedVenueUsers } from "@/lib/utils/venue";
 import {
   createTimeOffRequestSchema,
   updateTimeOffRequestSchema,
@@ -34,6 +35,15 @@ export async function getMyTimeOffRequests() {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS:
+            firstName: true,
+            lastName: true,
+            profileImage: true,
+            role: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
       },
@@ -67,8 +77,14 @@ export async function getAllTimeOffRequests(filters?: FilterTimeOffRequestsInput
   }
 
   try {
+    // VENUE FILTERING: Get users from shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const filterData: any = validatedFilters.data;
-    const where: any = {};
+    const where: any = {
+      // VENUE FILTERING: Only show requests from shared venue users
+      userId: { in: sharedVenueUserIds },
+    };
 
     if (filterData.status) {
       where.status = filterData.status;
@@ -105,6 +121,10 @@ export async function getAllTimeOffRequests(filters?: FilterTimeOffRequestsInput
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS:
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -121,6 +141,15 @@ export async function getAllTimeOffRequests(filters?: FilterTimeOffRequestsInput
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS:
+            firstName: true,
+            lastName: true,
+            profileImage: true,
+            role: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
       },
@@ -195,9 +224,14 @@ export async function createTimeOffRequest(data: CreateTimeOffRequestInput) {
 
     // Notify managers/admins about new time-off request
     try {
-      // Get all users with permission to review time-off requests
+      // VENUE FILTERING: Get users from shared venues
+      const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
+      // Get all users with permission to review time-off requests from shared venues
       const approvers = await prisma.user.findMany({
         where: {
+          // VENUE FILTERING: Only notify approvers from shared venues
+          id: { in: sharedVenueUserIds },
           active: true,
           role: {
             permissions: {
@@ -280,9 +314,14 @@ export async function cancelTimeOffRequest(data: UpdateTimeOffRequestInput) {
 
     // Notify managers/admins about cancellation
     try {
-      // Get all users with permission to review time-off requests
+      // VENUE FILTERING: Get users from shared venues
+      const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
+      // Get all users with permission to review time-off requests from shared venues
       const approvers = await prisma.user.findMany({
         where: {
+          // VENUE FILTERING: Only notify approvers from shared venues
+          id: { in: sharedVenueUserIds },
           active: true,
           role: {
             permissions: {
@@ -344,6 +383,9 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
   const { id, status, notes } = validatedFields.data;
 
   try {
+    // VENUE FILTERING: Get users from shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     // Get the request
     const request = await prisma.timeOffRequest.findUnique({
       where: { id },
@@ -351,6 +393,11 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
 
     if (!request) {
       return { error: "Time-off request not found" };
+    }
+
+    // VENUE FILTERING: Check if request is from a user in shared venues
+    if (!sharedVenueUserIds.includes(request.userId)) {
+      return { error: "You don't have access to this time-off request" };
     }
 
     // Check if already reviewed
@@ -371,6 +418,15 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS:
+            firstName: true,
+            lastName: true,
+            profileImage: true,
+            role: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
       },
@@ -466,8 +522,15 @@ export async function getPendingTimeOffCount() {
   }
 
   try {
+    // VENUE FILTERING: Get users from shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const count = await prisma.timeOffRequest.count({
-      where: { status: "PENDING" },
+      where: {
+        status: "PENDING",
+        // VENUE FILTERING: Only count requests from shared venue users
+        userId: { in: sharedVenueUserIds },
+      },
     });
 
     return { success: true, count };

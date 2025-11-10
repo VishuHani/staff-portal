@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { getSharedVenueUsers } from "@/lib/utils/venue";
 import {
   createMessageSchema,
   updateMessageSchema,
@@ -58,6 +59,10 @@ export async function getMessages(
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -133,6 +138,10 @@ export async function sendMessage(data: CreateMessageInput) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
               },
             },
           },
@@ -157,6 +166,10 @@ export async function sendMessage(data: CreateMessageInput) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -258,6 +271,10 @@ export async function updateMessage(data: UpdateMessageInput) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -518,6 +535,9 @@ export async function searchMessages(query: string, limit = 50) {
   }
 
   try {
+    // VENUE FILTERING: Get users in shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     // Get user's conversation IDs
     const participants = await prisma.conversationParticipant.findMany({
       where: {
@@ -536,6 +556,10 @@ export async function searchMessages(query: string, limit = 50) {
         conversationId: {
           in: conversationIds,
         },
+        // VENUE FILTERING: Only show messages from users in shared venues
+        senderId: {
+          in: sharedVenueUserIds,
+        },
         content: {
           contains: query,
           mode: "insensitive",
@@ -546,6 +570,10 @@ export async function searchMessages(query: string, limit = 50) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
           },
         },
         conversation: {

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { getSharedVenueUsers } from "@/lib/utils/venue";
 import {
   createConversationSchema,
   updateConversationSchema,
@@ -29,6 +30,9 @@ export async function getConversations(limit = 50) {
   }
 
   try {
+    // VENUE FILTERING: Get users in shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const conversations = await prisma.conversation.findMany({
       where: {
         participants: {
@@ -44,6 +48,10 @@ export async function getConversations(limit = 50) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
                 role: {
                   select: {
                     name: true,
@@ -63,6 +71,10 @@ export async function getConversations(limit = 50) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
               },
             },
           },
@@ -74,9 +86,20 @@ export async function getConversations(limit = 50) {
       take: limit,
     });
 
+    // VENUE FILTERING: Filter conversations to only include those with shared venue participants
+    const filteredConversations = conversations.filter((conversation) => {
+      // Keep conversation if at least one other participant (besides current user) is in shared venues
+      const otherParticipants = conversation.participants.filter(
+        (p) => p.userId !== user.id
+      );
+      return otherParticipants.some((p) =>
+        sharedVenueUserIds.includes(p.userId)
+      );
+    });
+
     // Calculate unread count for each conversation
     const conversationsWithUnread = await Promise.all(
-      conversations.map(async (conversation) => {
+      filteredConversations.map(async (conversation) => {
         const participant = conversation.participants.find(
           (p) => p.userId === user.id
         );
@@ -117,6 +140,9 @@ export async function getConversationById(id: string) {
   }
 
   try {
+    // VENUE FILTERING: Get users in shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const conversation = await prisma.conversation.findUnique({
       where: { id },
       include: {
@@ -126,6 +152,10 @@ export async function getConversationById(id: string) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
                 role: {
                   select: {
                     name: true,
@@ -151,6 +181,18 @@ export async function getConversationById(id: string) {
       return { error: "You don't have access to this conversation" };
     }
 
+    // VENUE FILTERING: Check if at least one other participant is in shared venues
+    const otherParticipants = conversation.participants.filter(
+      (p) => p.userId !== user.id
+    );
+    const hasSharedVenueParticipants = otherParticipants.some((p) =>
+      sharedVenueUserIds.includes(p.userId)
+    );
+
+    if (!hasSharedVenueParticipants) {
+      return { error: "You don't have access to this conversation" };
+    }
+
     return { success: true, conversation };
   } catch (error) {
     console.error("Error fetching conversation:", error);
@@ -170,6 +212,12 @@ export async function findOrCreateConversation(otherUserId: string) {
   }
 
   try {
+    // VENUE FILTERING: Validate that other user is in shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+    if (!sharedVenueUserIds.includes(otherUserId)) {
+      return { error: "You can only create conversations with users in your venues" };
+    }
+
     // Check if conversation already exists
     const existingConversation = await prisma.conversation.findFirst({
       where: {
@@ -187,6 +235,10 @@ export async function findOrCreateConversation(otherUserId: string) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
                 role: {
                   select: {
                     name: true,
@@ -218,6 +270,10 @@ export async function findOrCreateConversation(otherUserId: string) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
                 role: {
                   select: {
                     name: true,
@@ -268,6 +324,17 @@ export async function createGroupConversation(data: CreateConversationInput) {
   }
 
   try {
+    // VENUE FILTERING: Validate all participants are in shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+    const invalidParticipants = participantIds.filter(
+      (id) => !sharedVenueUserIds.includes(id)
+    );
+    if (invalidParticipants.length > 0) {
+      return {
+        error: "You can only add users from your venues to the conversation",
+      };
+    }
+
     // Add current user to participants if not included
     const allParticipantIds = Array.from(
       new Set([user.id, ...participantIds])
@@ -288,6 +355,10 @@ export async function createGroupConversation(data: CreateConversationInput) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
                 role: {
                   select: {
                     name: true,
@@ -370,6 +441,10 @@ export async function updateConversation(data: UpdateConversationInput) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
               },
             },
           },
@@ -452,6 +527,17 @@ export async function addParticipants(data: AddParticipantsInput) {
   const { conversationId, userIds } = validatedFields.data;
 
   try {
+    // VENUE FILTERING: Validate all new participants are in shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+    const invalidUsers = userIds.filter(
+      (id) => !sharedVenueUserIds.includes(id)
+    );
+    if (invalidUsers.length > 0) {
+      return {
+        error: "You can only add users from your venues to the conversation",
+      };
+    }
+
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
       include: {
