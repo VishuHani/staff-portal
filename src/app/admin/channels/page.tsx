@@ -13,6 +13,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Plus,
   Hash,
   Edit,
@@ -20,6 +27,7 @@ import {
   ArchiveRestore,
   Trash2,
   Loader2,
+  Building2,
 } from "lucide-react";
 import {
   getChannels,
@@ -80,6 +88,7 @@ export default function ChannelsAdminPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [channelToDelete, setChannelToDelete] = useState<Channel | null>(null);
   const [includeArchived, setIncludeArchived] = useState(true);
+  const [filterVenueId, setFilterVenueId] = useState<string>("all");
 
   const fetchChannels = async () => {
     try {
@@ -147,8 +156,15 @@ export default function ChannelsAdminPage() {
     }
   };
 
-  const activeChannels = channels.filter((c) => !c.archived);
-  const archivedChannels = channels.filter((c) => c.archived);
+  // Apply venue filter
+  const filteredChannels = filterVenueId === "all"
+    ? channels
+    : channels.filter((channel) =>
+        channel.venues?.some((v) => v.venueId === filterVenueId)
+      );
+
+  const activeChannels = filteredChannels.filter((c) => !c.archived);
+  const archivedChannels = filteredChannels.filter((c) => c.archived);
 
   return (
     <div className="container mx-auto p-6">
@@ -159,8 +175,23 @@ export default function ChannelsAdminPage() {
         </p>
       </div>
 
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={filterVenueId} onValueChange={setFilterVenueId}>
+            <SelectTrigger className="w-[200px]">
+              <Building2 className="mr-2 h-4 w-4" />
+              <SelectValue placeholder="Filter by venue" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Venues</SelectItem>
+              {venues.map((venue) => (
+                <SelectItem key={venue.id} value={venue.id}>
+                  {venue.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <Button
             variant={includeArchived ? "outline" : "default"}
             size="sm"
@@ -168,6 +199,7 @@ export default function ChannelsAdminPage() {
           >
             {includeArchived ? "Hide Archived" : "Show Archived"}
           </Button>
+
           <span className="text-sm text-muted-foreground">
             {activeChannels.length} active, {archivedChannels.length} archived
           </span>
