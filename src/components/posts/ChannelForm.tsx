@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { createChannel, updateChannel } from "@/lib/actions/channels";
 import {
   CHANNEL_TYPES,
@@ -42,7 +43,20 @@ interface ChannelFormProps {
     icon: string | null;
     color: string | null;
     permissions: string | null;
+    venues?: Array<{
+      venueId: string;
+      venue: {
+        id: string;
+        name: string;
+        code: string;
+      };
+    }>;
   };
+  venues: Array<{
+    id: string;
+    name: string;
+    code: string;
+  }>;
   onSuccess?: () => void;
 }
 
@@ -68,6 +82,7 @@ export function ChannelForm({
   open,
   onOpenChange,
   channel,
+  venues,
   onSuccess,
 }: ChannelFormProps) {
   const router = useRouter();
@@ -80,12 +95,32 @@ export function ChannelForm({
   const [type, setType] = useState(channel?.type || "ALL_STAFF");
   const [icon, setIcon] = useState(channel?.icon || "📢");
   const [color, setColor] = useState(channel?.color || CHANNEL_COLORS[0]);
+  const [selectedVenueIds, setSelectedVenueIds] = useState<string[]>(
+    channel?.venues?.map((v) => v.venueId) || []
+  );
 
   const isEditing = !!channel;
+
+  const toggleVenue = (venueId: string) => {
+    setSelectedVenueIds((prev) =>
+      prev.includes(venueId)
+        ? prev.filter((id) => id !== venueId)
+        : [...prev, venueId]
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    // Validate venue selection
+    if (selectedVenueIds.length === 0) {
+      const message = "Please select at least one venue";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -98,6 +133,7 @@ export function ChannelForm({
           type,
           icon,
           color,
+          venueIds: selectedVenueIds,
         };
 
         const result = await updateChannel(data);
@@ -119,6 +155,7 @@ export function ChannelForm({
           type,
           icon,
           color,
+          venueIds: selectedVenueIds,
         };
 
         const result = await createChannel(data);
@@ -138,6 +175,7 @@ export function ChannelForm({
           setType("ALL_STAFF");
           setIcon("📢");
           setColor(CHANNEL_COLORS[0]);
+          setSelectedVenueIds([]);
         }
       }
     } catch (err) {
@@ -226,6 +264,46 @@ export function ChannelForm({
                 {type === "ALL_STAFF" && "Visible to all staff members"}
                 {type === "MANAGERS" && "Only visible to managers and admins"}
                 {type === "CUSTOM" && "Custom permission-based access"}
+              </p>
+            </div>
+
+            {/* Venue Selection */}
+            <div className="grid gap-2">
+              <Label>
+                Venues <span className="text-destructive">*</span>
+              </Label>
+              <div className="rounded-md border p-3 max-h-40 overflow-y-auto">
+                {venues.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No venues available
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {venues.map((venue) => (
+                      <div
+                        key={venue.id}
+                        className="flex items-center space-x-2"
+                      >
+                        <Checkbox
+                          id={`venue-${venue.id}`}
+                          checked={selectedVenueIds.includes(venue.id)}
+                          onCheckedChange={() => toggleVenue(venue.id)}
+                        />
+                        <label
+                          htmlFor={`venue-${venue.id}`}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                        >
+                          {venue.name} ({venue.code})
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {selectedVenueIds.length === 0
+                  ? "Select at least one venue"
+                  : `${selectedVenueIds.length} venue${selectedVenueIds.length > 1 ? "s" : ""} selected`}
               </p>
             </div>
 

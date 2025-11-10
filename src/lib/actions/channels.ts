@@ -47,6 +47,17 @@ export async function getChannels(filters?: FilterChannelsInput) {
             posts: true,
           },
         },
+        venues: {
+          include: {
+            venue: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              },
+            },
+          },
+        },
       },
       orderBy: [{ archived: "asc" }, { name: "asc" }],
     });
@@ -127,7 +138,7 @@ export async function createChannel(data: CreateChannelInput) {
     };
   }
 
-  const { name, description, type, icon, color, permissions } =
+  const { name, description, type, icon, color, permissions, venueIds } =
     validatedFields.data;
 
   try {
@@ -140,6 +151,7 @@ export async function createChannel(data: CreateChannelInput) {
       return { error: "A channel with this name already exists" };
     }
 
+    // Create channel with venue assignments
     const channel = await prisma.channel.create({
       data: {
         name,
@@ -150,6 +162,17 @@ export async function createChannel(data: CreateChannelInput) {
         permissions,
       },
     });
+
+    // If venueIds are provided, create ChannelVenue assignments
+    if (venueIds && venueIds.length > 0) {
+      await prisma.channelVenue.createMany({
+        data: venueIds.map((venueId) => ({
+          channelId: channel.id,
+          venueId,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
     revalidatePath("/posts");
     revalidatePath("/admin/channels");
@@ -179,7 +202,7 @@ export async function updateChannel(data: UpdateChannelInput) {
     };
   }
 
-  const { id, ...updateData } = validatedFields.data;
+  const { id, venueIds, ...updateData } = validatedFields.data;
 
   try {
     // Check if channel exists
@@ -202,10 +225,28 @@ export async function updateChannel(data: UpdateChannelInput) {
       }
     }
 
+    // Update channel
     const channel = await prisma.channel.update({
       where: { id },
       data: updateData,
     });
+
+    // If venueIds are provided, update venue assignments
+    if (venueIds && venueIds.length > 0) {
+      // Delete existing assignments
+      await prisma.channelVenue.deleteMany({
+        where: { channelId: id },
+      });
+
+      // Create new assignments
+      await prisma.channelVenue.createMany({
+        data: venueIds.map((venueId) => ({
+          channelId: id,
+          venueId,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
     revalidatePath("/posts");
     revalidatePath("/admin/channels");

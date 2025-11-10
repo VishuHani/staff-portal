@@ -26,6 +26,7 @@ import {
   archiveChannel,
   deleteChannel,
 } from "@/lib/actions/channels";
+import { getActiveVenues } from "@/lib/actions/admin/venues";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,11 +53,27 @@ interface Channel {
   _count: {
     posts: number;
   };
+  venues?: Array<{
+    venueId: string;
+    venue: {
+      id: string;
+      name: string;
+      code: string;
+    };
+  }>;
+}
+
+interface Venue {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
 }
 
 export default function ChannelsAdminPage() {
   const router = useRouter();
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [venues, setVenues] = useState<Venue[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
@@ -80,8 +97,21 @@ export default function ChannelsAdminPage() {
     }
   };
 
+  const fetchVenues = async () => {
+    try {
+      const result = await getActiveVenues();
+      if (result.venues) {
+        setVenues(result.venues);
+      }
+    } catch (err) {
+      console.error("Failed to load venues:", err);
+      toast.error("Failed to load venues");
+    }
+  };
+
   useEffect(() => {
     fetchChannels();
+    fetchVenues();
   }, [includeArchived]);
 
   const handleArchive = async (channel: Channel) => {
@@ -198,9 +228,27 @@ export default function ChannelsAdminPage() {
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <p className="mb-4 text-sm text-muted-foreground">
+                      <p className="mb-2 text-sm text-muted-foreground">
                         {channel.description || "No description"}
                       </p>
+                      {channel.venues && channel.venues.length > 0 && (
+                        <div className="mb-4">
+                          <p className="mb-1 text-xs font-medium text-muted-foreground">
+                            Venues:
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {channel.venues.map((cv) => (
+                              <Badge
+                                key={cv.venueId}
+                                variant="outline"
+                                className="text-xs"
+                              >
+                                {cv.venue.code}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <Button
                           variant="outline"
@@ -304,6 +352,7 @@ export default function ChannelsAdminPage() {
       <ChannelForm
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
+        venues={venues}
         onSuccess={fetchChannels}
       />
 
@@ -313,6 +362,7 @@ export default function ChannelsAdminPage() {
           open={!!editingChannel}
           onOpenChange={(open) => !open && setEditingChannel(null)}
           channel={editingChannel}
+          venues={venues}
           onSuccess={() => {
             fetchChannels();
             setEditingChannel(null);

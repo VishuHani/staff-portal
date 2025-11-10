@@ -47,6 +47,10 @@ export const createChannelSchema = z.object({
     .regex(/^#[0-9A-Fa-f]{6}$/, "Invalid hex color format")
     .optional(),
   permissions: z.string().optional(), // JSON string of permissions
+  venueIds: z
+    .array(z.string().cuid("Invalid venue ID"))
+    .min(1, "At least one venue must be selected")
+    .optional(),
 });
 
 /**
@@ -74,6 +78,10 @@ export const updateChannelSchema = z.object({
     .regex(/^#[0-9A-Fa-f]{6}$/, "Invalid hex color format")
     .optional(),
   permissions: z.string().optional(),
+  venueIds: z
+    .array(z.string().cuid("Invalid venue ID"))
+    .min(1, "At least one venue must be selected")
+    .optional(),
 });
 
 /**
