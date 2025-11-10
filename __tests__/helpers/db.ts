@@ -96,6 +96,7 @@ export const createMockPrisma = () => {
     timeOffRequest: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),

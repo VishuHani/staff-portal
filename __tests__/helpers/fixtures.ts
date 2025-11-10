@@ -21,19 +21,19 @@ export const createVenueFixture = (overrides?: Partial<Venue>) => ({
 
 export const testVenues = {
   venueA: createVenueFixture({
-    id: "venue-a-id",
+    id: "cltestvenueavenueaaaa",
     name: "Venue A",
     code: "VNA",
     active: true,
   }),
   venueB: createVenueFixture({
-    id: "venue-b-id",
+    id: "cltestvenuebvenuebbbb",
     name: "Venue B",
     code: "VNB",
     active: true,
   }),
   venueC: createVenueFixture({
-    id: "venue-c-id",
+    id: "cltestvenuecvenuecccc",
     name: "Venue C (Inactive)",
     code: "VNC",
     active: false,
@@ -55,17 +55,17 @@ export const createRoleFixture = (overrides?: Partial<Role>) => ({
 
 export const testRoles = {
   admin: createRoleFixture({
-    id: "role-admin-id",
+    id: "cltestroleadminaaaaa",
     name: "ADMIN",
     description: "System administrator",
   }),
   manager: createRoleFixture({
-    id: "role-manager-id",
+    id: "cltestrolemanageraaaa",
     name: "MANAGER",
     description: "Venue manager",
   }),
   staff: createRoleFixture({
-    id: "role-staff-id",
+    id: "cltestrolestaffaaaaa",
     name: "STAFF",
     description: "Staff member",
   }),
@@ -96,7 +96,7 @@ export const createUserFixture = (overrides?: Partial<User>) => ({
 export const testUsers = {
   // User 1: Venue A (primary), Venue B (secondary)
   user1: createUserFixture({
-    id: "user-1-id",
+    id: "cltest001user1aaaa",
     email: "user1@example.com",
     firstName: "User",
     lastName: "One",
@@ -104,7 +104,7 @@ export const testUsers = {
   }),
   // User 2: Venue B (primary)
   user2: createUserFixture({
-    id: "user-2-id",
+    id: "cltest002user2bbbb",
     email: "user2@example.com",
     firstName: "User",
     lastName: "Two",
@@ -112,7 +112,7 @@ export const testUsers = {
   }),
   // User 3: Venue A (primary), Venue C (inactive)
   user3: createUserFixture({
-    id: "user-3-id",
+    id: "cltest003user3cccc",
     email: "user3@example.com",
     firstName: "User",
     lastName: "Three",
@@ -120,7 +120,7 @@ export const testUsers = {
   }),
   // User 4: Venue C (primary) - only inactive venue
   user4: createUserFixture({
-    id: "user-4-id",
+    id: "cltest004user4dddd",
     email: "user4@example.com",
     firstName: "User",
     lastName: "Four",
@@ -128,7 +128,7 @@ export const testUsers = {
   }),
   // User 5: No venues assigned
   user5: createUserFixture({
-    id: "user-5-id",
+    id: "cltest005user5eeee",
     email: "user5@example.com",
     firstName: "User",
     lastName: "Five",
@@ -136,7 +136,7 @@ export const testUsers = {
   }),
   // Admin User: All venues access
   admin: createUserFixture({
-    id: "admin-id",
+    id: "cltestadminadminaaaa",
     email: "admin@example.com",
     firstName: "Admin",
     lastName: "User",
