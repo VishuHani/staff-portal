@@ -234,10 +234,12 @@ export async function createTimeOffRequest(data: CreateTimeOffRequestInput) {
           id: { in: sharedVenueUserIds },
           active: true,
           role: {
-            permissions: {
+            rolePermissions: {
               some: {
-                resource: "timeoff",
-                action: "update",
+                permission: {
+                  resource: "timeoff",
+                  action: "update",
+                },
               },
             },
           },
@@ -324,10 +326,12 @@ export async function cancelTimeOffRequest(data: UpdateTimeOffRequestInput) {
           id: { in: sharedVenueUserIds },
           active: true,
           role: {
-            permissions: {
+            rolePermissions: {
               some: {
-                resource: "timeoff",
-                action: "update",
+                permission: {
+                  resource: "timeoff",
+                  action: "update",
+                },
               },
             },
           },

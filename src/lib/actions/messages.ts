@@ -208,7 +208,7 @@ export async function sendMessage(data: CreateMessageInput) {
         await prisma.notification.create({
           data: {
             userId: participant.userId,
-            type: "MESSAGE",
+            type: "NEW_MESSAGE",
             title: "New message",
             message: notificationMessage,
             link: `/messages?conversationId=${conversationId}`,

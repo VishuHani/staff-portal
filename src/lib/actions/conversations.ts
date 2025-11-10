@@ -377,7 +377,7 @@ export async function createGroupConversation(data: CreateConversationInput) {
         await prisma.notification.create({
           data: {
             userId: participantId,
-            type: "MESSAGE",
+            type: "NEW_MESSAGE",
             title: "Added to group conversation",
             message: `${user.email} added you to "${name}"`,
             link: `/messages?conversationId=${conversation.id}`,
