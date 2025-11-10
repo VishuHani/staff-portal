@@ -22,7 +22,7 @@ import {
   notifyUserActivated,
   notifyUserDeactivated,
 } from "@/lib/services/notifications";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/actions/auth";
 
 /**
  * Get all users with their roles and stores

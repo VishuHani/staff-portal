@@ -19,30 +19,43 @@ datasource db {
 // ============================================
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String?  // Nullable for OAuth users
+  id       String  @id @default(cuid())
+  email    String  @unique
+  password String? // Nullable for OAuth users
+
+  // Profile fields
+  firstName          String?
+  lastName           String?
+  profileImage       String? // Supabase Storage URL or placeholder
+  phone              String?
+  bio                String? // Additional information text box
+  dateOfBirth        DateTime?
+  profileCompletedAt DateTime? // NULL = incomplete, force completion on login
+
   roleId    String
-  storeId   String?
+  storeId   String? // Keep for backward compatibility, will deprecate
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  role                 Role                  @relation(fields: [roleId], references: [id])
-  store                Store?                @relation(fields: [storeId], references: [id])
-  availability         Availability[]
-  timeOffRequests      TimeOffRequest[]
-  reviewedTimeOff      TimeOffRequest[]      @relation("ReviewedBy")
-  posts                Post[]
-  comments             Comment[]
-  reactions            Reaction[]
-  postReads            PostRead[]
-  sentMessages         Message[]
-  conversations        ConversationParticipant[]
-  notifications        Notification[]
-  auditLogs            AuditLog[]
+  role            Role                      @relation(fields: [roleId], references: [id])
+  store           Store?                    @relation(fields: [storeId], references: [id])
+  venues          UserVenue[] // Multi-venue support
+  availability    Availability[]
+  timeOffRequests TimeOffRequest[]
+  reviewedTimeOff TimeOffRequest[]          @relation("ReviewedBy")
+  posts           Post[]
+  comments        Comment[]
+  reactions       Reaction[]
+  postReads       PostRead[]
+  sentMessages    Message[]
+  conversations   ConversationParticipant[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
 
   @@index([email])
+  @@index([firstName])
+  @@index([lastName])
   @@index([roleId])
   @@index([storeId])
   @@map("users")
@@ -55,8 +68,8 @@ model Role {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  users            User[]
-  rolePermissions  RolePermission[]
+  users           User[]
+  rolePermissions RolePermission[]
 
   @@map("roles")
 }
@@ -68,7 +81,7 @@ model Permission {
   description String?
   createdAt   DateTime @default(now())
 
-  rolePermissions  RolePermission[]
+  rolePermissions RolePermission[]
 
   @@unique([resource, action])
   @@map("permissions")
@@ -97,9 +110,27 @@ model Store {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users User[]
+  users      User[] // Keep for backward compatibility
+  userVenues UserVenue[] // Multi-venue support
 
   @@map("stores")
+}
+
+model UserVenue {
+  id        String   @id @default(cuid())
+  userId    String
+  venueId   String
+  isPrimary Boolean  @default(false) // One venue marked as primary
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venue Store @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, venueId]) // Prevent duplicate assignments
+  @@index([userId])
+  @@index([venueId])
+  @@index([isPrimary])
+  @@map("user_venues")
 }
 
 // ============================================
@@ -107,15 +138,15 @@ model Store {
 // ============================================
 
 model Availability {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   userId      String
-  dayOfWeek   Int       // 0-6 (Sunday-Saturday)
-  isAvailable Boolean   @default(false)
-  isAllDay    Boolean   @default(false)
-  startTime   String?   // HH:MM format (nullable)
-  endTime     String?   // HH:MM format (nullable)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  dayOfWeek   Int // 0-6 (Sunday-Saturday)
+  isAvailable Boolean  @default(false)
+  isAllDay    Boolean  @default(false)
+  startTime   String? // HH:MM format (nullable)
+  endTime     String? // HH:MM format (nullable)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -130,7 +161,7 @@ model TimeOffRequest {
   userId     String
   startDate  DateTime
   endDate    DateTime
-  type       String    // VACATION, SICK, PERSONAL, etc.
+  type       String // VACATION, SICK, PERSONAL, etc.
   reason     String?
   status     String    @default("PENDING") // PENDING, APPROVED, REJECTED
   reviewedBy String?
@@ -156,10 +187,10 @@ model Channel {
   id          String    @id @default(cuid())
   name        String    @unique
   description String?
-  type        String    // ALL_STAFF, MANAGERS, CUSTOM
-  icon        String?   // Emoji or icon identifier
-  color       String?   // Hex color for UI theming
-  permissions String?   // JSON or comma-separated permissions
+  type        String // ALL_STAFF, MANAGERS, CUSTOM
+  icon        String? // Emoji or icon identifier
+  color       String? // Hex color for UI theming
+  permissions String? // JSON or comma-separated permissions
   archived    Boolean   @default(false)
   archivedAt  DateTime?
   createdAt   DateTime  @default(now())
@@ -175,7 +206,7 @@ model Post {
   channelId String
   authorId  String
   content   String
-  mediaUrls String?   // JSON array of URLs
+  mediaUrls String? // JSON array of URLs
   pinned    Boolean   @default(false)
   edited    Boolean   @default(false)
   editedAt  DateTime?
@@ -198,7 +229,7 @@ model Comment {
   id        String    @id @default(cuid())
   postId    String
   userId    String
-  parentId  String?   // For threaded comments (replies)
+  parentId  String? // For threaded comments (replies)
   content   String
   edited    Boolean   @default(false)
   editedAt  DateTime?
@@ -219,8 +250,8 @@ model Comment {
 
 model Reaction {
   id        String   @id @default(cuid())
-  postId    String?  // Nullable - either postId or commentId must be set
-  commentId String?  // Nullable - either postId or commentId must be set
+  postId    String? // Nullable - either postId or commentId must be set
+  commentId String? // Nullable - either postId or commentId must be set
   userId    String
   emoji     String
   createdAt DateTime @default(now())
@@ -237,10 +268,10 @@ model Reaction {
 }
 
 model PostRead {
-  id        String   @id @default(cuid())
-  userId    String
-  postId    String
-  readAt    DateTime @default(now())
+  id     String   @id @default(cuid())
+  userId String
+  postId String
+  readAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
@@ -253,10 +284,10 @@ model PostRead {
 
 model Conversation {
   id            String    @id @default(cuid())
-  type          String    // ONE_ON_ONE, GROUP
-  name          String?   // For group conversations
+  type          String // ONE_ON_ONE, GROUP
+  name          String? // For group conversations
   lastMessageAt DateTime?
-  lastMessage   String?   // Cache last message content
+  lastMessage   String? // Cache last message content
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -288,8 +319,8 @@ model Message {
   conversationId String
   senderId       String
   content        String
-  mediaUrls      String?   // JSON array of media URLs
-  reactions      String?   // JSON array of reactions: [{ emoji, userId }]
+  mediaUrls      String? // JSON array of media URLs
+  reactions      String? // JSON array of reactions: [{ emoji, userId }]
   readAt         DateTime?
   readBy         String[]  @default([]) // Array of user IDs who read the message
   createdAt      DateTime  @default(now())
@@ -308,15 +339,34 @@ model Message {
 // System
 // ============================================
 
+enum NotificationType {
+  NEW_MESSAGE
+  MESSAGE_REPLY
+  MESSAGE_MENTION
+  MESSAGE_REACTION
+  POST_MENTION
+  POST_PINNED
+  POST_DELETED
+  TIME_OFF_REQUEST
+  TIME_OFF_APPROVED
+  TIME_OFF_REJECTED
+  TIME_OFF_CANCELLED
+  USER_CREATED
+  USER_UPDATED
+  ROLE_CHANGED
+  SYSTEM_ANNOUNCEMENT
+  GROUP_REMOVED
+}
+
 model Notification {
-  id        String    @id @default(cuid())
+  id        String           @id @default(cuid())
   userId    String
-  type      String
+  type      NotificationType
   title     String
   message   String
   link      String?
   readAt    DateTime?
-  createdAt DateTime  @default(now())
+  createdAt DateTime         @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -332,8 +382,8 @@ model AuditLog {
   actionType   String
   resourceType String
   resourceId   String?
-  oldValue     String?  // JSON
-  newValue     String?  // JSON
+  oldValue     String? // JSON
+  newValue     String? // JSON
   ipAddress    String?
   createdAt    DateTime @default(now())
 
