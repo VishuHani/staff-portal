@@ -8,6 +8,8 @@ import {
   MoreVertical,
   Shield,
   Power,
+  Building2,
+  Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +38,8 @@ import { toast } from "sonner";
 interface User {
   id: string;
   email: string;
+  firstName?: string | null;
+  lastName?: string | null;
   active: boolean;
   role: {
     id: string;
@@ -46,6 +50,15 @@ interface User {
     id: string;
     name: string;
   } | null;
+  venues?: Array<{
+    venue: {
+      id: string;
+      name: string;
+      code: string;
+      active: boolean;
+    };
+    isPrimary: boolean;
+  }>;
 }
 
 interface Role {
@@ -58,16 +71,25 @@ interface Store {
   name: string;
 }
 
+interface Venue {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+}
+
 interface UsersTableProps {
   users: User[];
   roles: Role[];
   stores: Store[];
+  venues: Venue[];
 }
 
-export function UsersTable({ users, roles, stores }: UsersTableProps) {
+export function UsersTable({ users, roles, stores, venues }: UsersTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterRole, setFilterRole] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterVenue, setFilterVenue] = useState<string>("all");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -76,16 +98,22 @@ export function UsersTable({ users, roles, stores }: UsersTableProps) {
 
   // Filter users
   const filteredUsers = users.filter((user) => {
-    const matchesSearch = user.email
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
+    const fullName = user.firstName && user.lastName
+      ? `${user.firstName} ${user.lastName}`.toLowerCase()
+      : "";
+    const matchesSearch =
+      user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      fullName.includes(searchQuery.toLowerCase());
     const matchesRole = filterRole === "all" || user.role.id === filterRole;
     const matchesStatus =
       filterStatus === "all" ||
       (filterStatus === "active" && user.active) ||
       (filterStatus === "inactive" && !user.active);
+    const matchesVenue =
+      filterVenue === "all" ||
+      (user.venues?.some((v) => v.venue.id === filterVenue) ?? false);
 
-    return matchesSearch && matchesRole && matchesStatus;
+    return matchesSearch && matchesRole && matchesStatus && matchesVenue;
   });
 
   const handleCreateUser = () => {
@@ -144,9 +172,9 @@ export function UsersTable({ users, roles, stores }: UsersTableProps) {
       <div className="space-y-4">
         {/* Filters and Search */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-1 gap-2">
+          <div className="flex flex-1 flex-wrap gap-2">
             <Input
-              placeholder="Search users..."
+              placeholder="Search users by name or email..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="max-w-xs"
@@ -161,6 +189,19 @@ export function UsersTable({ users, roles, stores }: UsersTableProps) {
               {roles.map((role) => (
                 <option key={role.id} value={role.id}>
                   {role.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={filterVenue}
+              onChange={(e) => setFilterVenue(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+            >
+              <option value="all">All Venues</option>
+              {venues.map((venue) => (
+                <option key={venue.id} value={venue.id}>
+                  {venue.name}
                 </option>
               ))}
             </select>
@@ -196,21 +237,52 @@ export function UsersTable({ users, roles, stores }: UsersTableProps) {
                 key={user.id}
                 className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
               >
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
-                    <p className="font-medium">{user.email}</p>
+                    <p className="font-medium">
+                      {user.firstName && user.lastName
+                        ? `${user.firstName} ${user.lastName}`
+                        : user.email}
+                    </p>
                     {!user.active && (
                       <Badge variant="destructive">Inactive</Badge>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Badge variant="secondary">{user.role.name}</Badge>
-                    {user.store && (
-                      <span className="text-xs">• {user.store.name}</span>
+                  {user.firstName && user.lastName && (
+                    <p className="text-sm text-muted-foreground">{user.email}</p>
+                  )}
+                  <div className="flex items-center flex-wrap gap-2 text-sm">
+                    <Badge variant="secondary">
+                      <Shield className="mr-1 h-3 w-3" />
+                      {user.role.name}
+                    </Badge>
+
+                    {/* Venue Badges */}
+                    {user.venues && user.venues.length > 0 && (
+                      <>
+                        {user.venues.map((userVenue) => (
+                          <Badge
+                            key={userVenue.venue.id}
+                            variant={userVenue.isPrimary ? "default" : "outline"}
+                            className="flex items-center gap-1"
+                          >
+                            <Building2 className="h-3 w-3" />
+                            {userVenue.venue.code}
+                            {userVenue.isPrimary && (
+                              <Star className="h-3 w-3 fill-current" />
+                            )}
+                          </Badge>
+                        ))}
+                      </>
                     )}
-                    <span className="text-xs">
-                      • {user.role.rolePermissions.length} permissions
-                    </span>
+
+                    {/* Legacy store display */}
+                    {user.store && (!user.venues || user.venues.length === 0) && (
+                      <Badge variant="outline" className="text-xs">
+                        <Building2 className="mr-1 h-3 w-3" />
+                        {user.store.name} (Legacy)
+                      </Badge>
+                    )}
                   </div>
                 </div>
 
@@ -261,6 +333,7 @@ export function UsersTable({ users, roles, stores }: UsersTableProps) {
         user={selectedUser}
         roles={roles}
         stores={stores}
+        venues={venues}
       />
 
       {/* Delete Confirmation Dialog */}

@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { VenueSelector } from "@/components/admin/venue-selector";
 import { createUser, updateUser } from "@/lib/actions/admin/users";
 import { createUserSchema, updateUserSchema } from "@/lib/schemas/admin/users";
 import { toast } from "sonner";
@@ -31,6 +32,9 @@ import type { z } from "zod";
 interface User {
   id: string;
   email: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
   active: boolean;
   role: {
     id: string;
@@ -40,6 +44,15 @@ interface User {
     id: string;
     name: string;
   } | null;
+  venues?: Array<{
+    venue: {
+      id: string;
+      name: string;
+      code: string;
+      active: boolean;
+    };
+    isPrimary: boolean;
+  }>;
 }
 
 interface Role {
@@ -52,19 +65,32 @@ interface Store {
   name: string;
 }
 
+interface Venue {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+}
+
 interface UserDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   user: User | null;
   roles: Role[];
   stores: Store[];
+  venues: Venue[];
 }
 
 type FormData = {
+  firstName: string;
+  lastName: string;
   email: string;
+  phone?: string;
   password?: string;
   roleId: string;
   storeId?: string;
+  venueIds: string[];
+  primaryVenueId?: string;
   active: boolean;
 };
 
@@ -74,8 +100,11 @@ export function UserDialog({
   user,
   roles,
   stores,
+  venues,
 }: UserDialogProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [selectedVenueIds, setSelectedVenueIds] = useState<string[]>([]);
+  const [primaryVenueId, setPrimaryVenueId] = useState<string | undefined>();
   const isEditing = !!user;
 
   const {
@@ -88,16 +117,26 @@ export function UserDialog({
   } = useForm<FormData>({
     defaultValues: user
       ? {
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
           email: user.email,
+          phone: user.phone || "",
           roleId: user.role.id,
           storeId: user.store?.id || undefined,
+          venueIds: user.venues?.map((v) => v.venue.id) || [],
+          primaryVenueId: user.venues?.find((v) => v.isPrimary)?.venue.id,
           active: user.active,
         }
       : {
+          firstName: "",
+          lastName: "",
           email: "",
+          phone: "",
           password: "",
           roleId: "",
           storeId: undefined,
+          venueIds: [],
+          primaryVenueId: undefined,
           active: true,
         },
   });
@@ -111,34 +150,71 @@ export function UserDialog({
   useEffect(() => {
     if (open) {
       if (user) {
+        const userVenueIds = user.venues?.map((v) => v.venue.id) || [];
+        const userPrimaryVenueId = user.venues?.find((v) => v.isPrimary)?.venue.id;
+
         reset({
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
           email: user.email,
+          phone: user.phone || "",
           roleId: user.role.id,
           storeId: user.store?.id || undefined,
+          venueIds: userVenueIds,
+          primaryVenueId: userPrimaryVenueId,
           active: user.active,
         });
+
+        setSelectedVenueIds(userVenueIds);
+        setPrimaryVenueId(userPrimaryVenueId);
       } else {
         reset({
+          firstName: "",
+          lastName: "",
           email: "",
+          phone: "",
           password: "",
           roleId: "",
           storeId: undefined,
+          venueIds: [],
+          primaryVenueId: undefined,
           active: true,
         });
+
+        setSelectedVenueIds([]);
+        setPrimaryVenueId(undefined);
       }
     }
   }, [open, user, reset]);
 
+  const handleVenueSelectionChange = (venueIds: string[], primary?: string) => {
+    setSelectedVenueIds(venueIds);
+    setPrimaryVenueId(primary);
+    setValue("venueIds", venueIds);
+    setValue("primaryVenueId", primary);
+  };
+
   const onSubmit = async (data: FormData) => {
+    // Validate venue selection
+    if (selectedVenueIds.length === 0) {
+      toast.error("Please select at least one venue");
+      return;
+    }
+
     setSubmitting(true);
 
     let result;
     if (isEditing && user) {
       result = await updateUser({
         userId: user.id,
+        firstName: data.firstName,
+        lastName: data.lastName,
         email: data.email,
+        phone: data.phone || undefined,
         roleId: data.roleId,
         storeId: data.storeId || null,
+        venueIds: selectedVenueIds,
+        primaryVenueId: primaryVenueId,
         active: data.active,
       });
     } else {
@@ -148,10 +224,15 @@ export function UserDialog({
         return;
       }
       result = await createUser({
+        firstName: data.firstName,
+        lastName: data.lastName,
         email: data.email,
+        phone: data.phone || undefined,
         password: data.password,
         roleId: data.roleId,
         storeId: data.storeId,
+        venueIds: selectedVenueIds,
+        primaryVenueId: primaryVenueId,
         active: data.active,
       });
     }
@@ -183,10 +264,48 @@ export function UserDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
+            {/* First Name */}
+            <div className="grid gap-2">
+              <Label htmlFor="firstName">
+                First Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="firstName"
+                placeholder="John"
+                {...register("firstName")}
+                disabled={submitting}
+              />
+              {errors.firstName && (
+                <p className="text-sm text-destructive">
+                  {errors.firstName.message}
+                </p>
+              )}
+            </div>
+
+            {/* Last Name */}
+            <div className="grid gap-2">
+              <Label htmlFor="lastName">
+                Last Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="lastName"
+                placeholder="Doe"
+                {...register("lastName")}
+                disabled={submitting}
+              />
+              {errors.lastName && (
+                <p className="text-sm text-destructive">
+                  {errors.lastName.message}
+                </p>
+              )}
+            </div>
+
             {/* Email */}
             <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">
+                Email <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id="email"
                 type="email"
@@ -201,10 +320,29 @@ export function UserDialog({
               )}
             </div>
 
+            {/* Phone */}
+            <div className="grid gap-2">
+              <Label htmlFor="phone">Phone (Optional)</Label>
+              <Input
+                id="phone"
+                type="tel"
+                placeholder="+1 (555) 123-4567"
+                {...register("phone")}
+                disabled={submitting}
+              />
+              {errors.phone && (
+                <p className="text-sm text-destructive">
+                  {errors.phone.message}
+                </p>
+              )}
+            </div>
+
             {/* Password (only for create) */}
             {!isEditing && (
               <div className="grid gap-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">
+                  Password <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="password"
                   type="password"
@@ -222,7 +360,9 @@ export function UserDialog({
 
             {/* Role */}
             <div className="grid gap-2">
-              <Label htmlFor="roleId">Role</Label>
+              <Label htmlFor="roleId">
+                Role <span className="text-destructive">*</span>
+              </Label>
               <Select
                 value={roleId}
                 onValueChange={(value) => setValue("roleId", value)}
@@ -246,9 +386,26 @@ export function UserDialog({
               )}
             </div>
 
-            {/* Store (optional) */}
+            {/* Venues */}
             <div className="grid gap-2">
-              <Label htmlFor="storeId">Store (Optional)</Label>
+              <Label>
+                Venues <span className="text-destructive">*</span>
+              </Label>
+              <VenueSelector
+                venues={venues}
+                selectedVenueIds={selectedVenueIds}
+                primaryVenueId={primaryVenueId}
+                onSelectionChange={handleVenueSelectionChange}
+                disabled={submitting}
+              />
+              <p className="text-xs text-muted-foreground">
+                Select at least one venue. Choose a primary venue if multiple are selected.
+              </p>
+            </div>
+
+            {/* Store (optional, legacy) */}
+            <div className="grid gap-2">
+              <Label htmlFor="storeId">Store (Optional - Legacy)</Label>
               <Select
                 value={storeId || "none"}
                 onValueChange={(value) =>
@@ -268,6 +425,9 @@ export function UserDialog({
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Kept for backward compatibility. Use venues instead.
+              </p>
             </div>
 
             {/* Active Status */}

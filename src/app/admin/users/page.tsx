@@ -6,6 +6,7 @@ import {
   getAllRoles,
   getAllStores,
 } from "@/lib/actions/admin/users";
+import { getActiveVenues } from "@/lib/actions/admin/venues";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import {
   Card,
@@ -21,19 +22,21 @@ import { UsersTable } from "@/components/admin/UsersTable";
 export default async function AdminUsersPage() {
   const user = await requireAdmin();
 
-  const [usersResult, statsResult, rolesResult, storesResult] =
+  const [usersResult, statsResult, rolesResult, storesResult, venuesResult] =
     await Promise.all([
       getAllUsers(),
       getUserStats(),
       getAllRoles(),
       getAllStores(),
+      getActiveVenues(),
     ]);
 
   if (
     "error" in usersResult ||
     "error" in statsResult ||
     "error" in rolesResult ||
-    "error" in storesResult
+    "error" in storesResult ||
+    "error" in venuesResult
   ) {
     redirect("/dashboard?error=forbidden");
   }
@@ -42,6 +45,7 @@ export default async function AdminUsersPage() {
   const { stats } = statsResult;
   const { roles } = rolesResult;
   const { stores } = storesResult;
+  const { venues } = venuesResult;
 
   return (
     <DashboardLayout user={user}>
@@ -110,7 +114,12 @@ export default async function AdminUsersPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <UsersTable users={users as any} roles={roles as any} stores={stores as any} />
+            <UsersTable
+              users={users as any}
+              roles={roles as any}
+              stores={stores as any}
+              venues={venues as any}
+            />
           </CardContent>
         </Card>
 

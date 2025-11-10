@@ -43,7 +43,19 @@ export async function getAllUsers() {
             },
           },
         },
-        store: true,
+        store: true, // Legacy field
+        venues: {
+          include: {
+            venue: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                active: true,
+              },
+            },
+          },
+        },
       },
       orderBy: {
         createdAt: "desc",
@@ -159,7 +171,7 @@ export async function createUser(data: CreateUserInput) {
     };
   }
 
-  const { email, password, firstName, lastName, phone, roleId, storeId, active } = validatedFields.data;
+  const { email, password, firstName, lastName, phone, roleId, storeId, venueIds, primaryVenueId, active } = validatedFields.data;
 
   try {
     // Create user in BOTH Supabase Auth and Prisma database
@@ -179,12 +191,37 @@ export async function createUser(data: CreateUserInput) {
       return { error: result.error || "Failed to create user" };
     }
 
+    // Create UserVenue assignments if venueIds are provided
+    if (venueIds && venueIds.length > 0) {
+      const userVenueData = venueIds.map((venueId) => ({
+        userId: result.userId!,
+        venueId,
+        isPrimary: venueId === primaryVenueId,
+      }));
+
+      await prisma.userVenue.createMany({
+        data: userVenueData,
+      });
+    }
+
     // Fetch the created user with relations for the response
     const user = await prisma.user.findUnique({
       where: { id: result.userId },
       include: {
         role: true,
         store: true,
+        venues: {
+          include: {
+            venue: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                active: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -223,7 +260,7 @@ export async function updateUser(data: UpdateUserInput) {
     };
   }
 
-  const { userId, email, roleId, storeId, active } = validatedFields.data;
+  const { userId, email, firstName, lastName, phone, roleId, storeId, venueIds, primaryVenueId, active } = validatedFields.data;
 
   try {
     // Get current user state before update
@@ -252,10 +289,32 @@ export async function updateUser(data: UpdateUserInput) {
       }
     }
 
+    // Update venue assignments if venueIds are provided
+    if (venueIds && venueIds.length > 0) {
+      // Delete existing venue assignments
+      await prisma.userVenue.deleteMany({
+        where: { userId },
+      });
+
+      // Create new venue assignments
+      const userVenueData = venueIds.map((venueId) => ({
+        userId,
+        venueId,
+        isPrimary: venueId === primaryVenueId,
+      }));
+
+      await prisma.userVenue.createMany({
+        data: userVenueData,
+      });
+    }
+
     const user = await prisma.user.update({
       where: { id: userId },
       data: {
         ...(email && { email }),
+        ...(firstName && { firstName }),
+        ...(lastName && { lastName }),
+        ...(phone !== undefined && { phone }),
         ...(roleId && { roleId }),
         ...(storeId !== undefined && { storeId }),
         ...(active !== undefined && { active }),
@@ -263,6 +322,18 @@ export async function updateUser(data: UpdateUserInput) {
       include: {
         role: true,
         store: true,
+        venues: {
+          include: {
+            venue: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                active: true,
+              },
+            },
+          },
+        },
       },
     });
 

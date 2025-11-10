@@ -34,9 +34,27 @@ export const createUserSchema = z.object({
       "Password must contain at least one uppercase letter, one lowercase letter, and one number"
     ),
   roleId: z.string().cuid("Invalid role ID"),
-  storeId: z.string().cuid("Invalid store ID").optional(),
+  storeId: z.string().cuid("Invalid store ID").optional(), // Legacy field, kept for backward compatibility
+  venueIds: z
+    .array(z.string().cuid("Invalid venue ID"))
+    .min(1, "At least one venue must be selected")
+    .optional(), // Optional for backward compatibility
+  primaryVenueId: z.string().cuid("Invalid primary venue ID").optional(),
   active: z.boolean().default(true),
-});
+})
+  .refine(
+    (data) => {
+      // If venueIds is provided, primaryVenueId must be one of them
+      if (data.venueIds && data.venueIds.length > 0 && data.primaryVenueId) {
+        return data.venueIds.includes(data.primaryVenueId);
+      }
+      return true;
+    },
+    {
+      message: "Primary venue must be one of the selected venues",
+      path: ["primaryVenueId"],
+    }
+  );
 
 // Update user schema
 export const updateUserSchema = z.object({
@@ -63,9 +81,27 @@ export const updateUserSchema = z.object({
       { message: "Please enter a valid phone number" }
     ),
   roleId: z.string().cuid("Invalid role ID").optional(),
-  storeId: z.string().cuid("Invalid store ID").optional().nullable(),
+  storeId: z.string().cuid("Invalid store ID").optional().nullable(), // Legacy field
+  venueIds: z
+    .array(z.string().cuid("Invalid venue ID"))
+    .min(1, "At least one venue must be selected")
+    .optional(),
+  primaryVenueId: z.string().cuid("Invalid primary venue ID").optional(),
   active: z.boolean().optional(),
-});
+})
+  .refine(
+    (data) => {
+      // If venueIds is provided, primaryVenueId must be one of them
+      if (data.venueIds && data.venueIds.length > 0 && data.primaryVenueId) {
+        return data.venueIds.includes(data.primaryVenueId);
+      }
+      return true;
+    },
+    {
+      message: "Primary venue must be one of the selected venues",
+      path: ["primaryVenueId"],
+    }
+  );
 
 // Delete user schema
 export const deleteUserSchema = z.object({

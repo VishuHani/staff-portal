@@ -31,7 +31,7 @@ export interface Venue {
 interface VenueSelectorProps {
   venues: Venue[];
   selectedVenueIds: string[];
-  primaryVenueId?: string | null;
+  primaryVenueId?: string;
   onSelectionChange: (venueIds: string[], primaryVenueId?: string) => void;
   disabled?: boolean;
   className?: string;
