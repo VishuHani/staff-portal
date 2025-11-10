@@ -124,19 +124,24 @@ export async function uploadProfileImage(formData: FormData) {
     }
 
     // Upload new avatar
-    const imageUrl = await uploadAvatar(file, user.id);
+    const uploadResult = await uploadAvatar(user.id, file);
+
+    // Check if upload was successful
+    if ("error" in uploadResult) {
+      return { error: uploadResult.error };
+    }
 
     // Update user record
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        profileImage: imageUrl,
+        profileImage: uploadResult.url,
       },
     });
 
     revalidatePath("/", "layout");
     revalidatePath("/settings/profile");
-    return { success: true, imageUrl };
+    return { success: true, url: uploadResult.url };
   } catch (error: any) {
     console.error("Error uploading profile image:", error);
     return { error: error.message || "Failed to upload image" };

@@ -58,7 +58,8 @@ export function ProfilePageClient({ profile }: ProfilePageClientProps) {
               <AvatarUpload
                 userId={profile.id}
                 currentImageUrl={profile.profileImage}
-                userName={fullName}
+                firstName={profile.firstName}
+                lastName={profile.lastName}
                 userEmail={profile.email}
                 size="2xl"
                 onUploadComplete={handleRefresh}

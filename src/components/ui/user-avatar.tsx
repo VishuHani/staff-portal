@@ -1,15 +1,16 @@
 "use client";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { getInitials, getAvatarColor } from "@/lib/utils/profile";
+import { getInitials, getAvatarColor, getFullName } from "@/lib/utils/profile";
 import { cn } from "@/lib/utils";
 
 export type AvatarSize = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
 interface UserAvatarProps {
   imageUrl?: string | null;
-  name?: string | null;
-  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  email: string;
   size?: AvatarSize;
   className?: string;
   showOnlineIndicator?: boolean;
@@ -48,7 +49,8 @@ const indicatorSizeClasses: Record<AvatarSize, string> = {
  * ```tsx
  * <UserAvatar
  *   imageUrl={user.profileImage}
- *   name={getFullName(user)}
+ *   firstName={user.firstName}
+ *   lastName={user.lastName}
  *   email={user.email}
  *   size="md"
  * />
@@ -56,18 +58,25 @@ const indicatorSizeClasses: Record<AvatarSize, string> = {
  */
 export function UserAvatar({
   imageUrl,
-  name,
+  firstName,
+  lastName,
   email,
   size = "md",
   className,
   showOnlineIndicator = false,
   isOnline = false,
 }: UserAvatarProps) {
-  // Get initials for fallback
-  const initials = getInitials(name, email);
+  // Create user object for utility functions
+  const user = { firstName, lastName, email };
 
-  // Get consistent avatar color
-  const backgroundColor = getAvatarColor(name, email);
+  // Get initials for fallback
+  const initials = getInitials(user);
+
+  // Get full name for alt text
+  const fullName = getFullName(user);
+
+  // Get consistent avatar color based on email
+  const avatarColor = getAvatarColor(email);
 
   return (
     <div className="relative inline-block">
@@ -75,13 +84,12 @@ export function UserAvatar({
         {imageUrl && (
           <AvatarImage
             src={imageUrl}
-            alt={name || email || "User avatar"}
+            alt={fullName}
             className="object-cover"
           />
         )}
         <AvatarFallback
-          className="font-semibold text-white"
-          style={{ backgroundColor }}
+          className={cn("font-semibold text-white", avatarColor)}
         >
           {initials}
         </AvatarFallback>
@@ -116,7 +124,8 @@ interface UserAvatarWithNameProps extends UserAvatarProps {
  * ```tsx
  * <UserAvatarWithName
  *   imageUrl={user.profileImage}
- *   name={getFullName(user)}
+ *   firstName={user.firstName}
+ *   lastName={user.lastName}
  *   email={user.email}
  *   size="lg"
  *   layout="vertical"
@@ -125,7 +134,8 @@ interface UserAvatarWithNameProps extends UserAvatarProps {
  */
 export function UserAvatarWithName({
   imageUrl,
-  name,
+  firstName,
+  lastName,
   email,
   size = "md",
   className,
@@ -135,14 +145,17 @@ export function UserAvatarWithName({
   showOnlineIndicator = false,
   isOnline = false,
 }: UserAvatarWithNameProps) {
-  const displayName = name || email || "Unknown User";
+  // Get display name using utility function
+  const user = { firstName, lastName, email };
+  const displayName = getFullName(user);
 
   if (layout === "vertical") {
     return (
       <div className={cn("flex flex-col items-center gap-2", className)}>
         <UserAvatar
           imageUrl={imageUrl}
-          name={name}
+          firstName={firstName}
+          lastName={lastName}
           email={email}
           size={size}
           showOnlineIndicator={showOnlineIndicator}
@@ -157,16 +170,6 @@ export function UserAvatarWithName({
           >
             {displayName}
           </p>
-          {email && name && (
-            <p
-              className={cn(
-                "text-sm text-gray-500",
-                emailClassName
-              )}
-            >
-              {email}
-            </p>
-          )}
         </div>
       </div>
     );
@@ -176,7 +179,8 @@ export function UserAvatarWithName({
     <div className={cn("flex items-center gap-3", className)}>
       <UserAvatar
         imageUrl={imageUrl}
-        name={name}
+        firstName={firstName}
+        lastName={lastName}
         email={email}
         size={size}
         showOnlineIndicator={showOnlineIndicator}
@@ -186,11 +190,6 @@ export function UserAvatarWithName({
         <p className={cn("font-medium text-gray-900", nameClassName)}>
           {displayName}
         </p>
-        {email && name && (
-          <p className={cn("text-sm text-gray-500", emailClassName)}>
-            {email}
-          </p>
-        )}
       </div>
     </div>
   );
@@ -199,8 +198,9 @@ export function UserAvatarWithName({
 interface AvatarGroupProps {
   users: Array<{
     imageUrl?: string | null;
-    name?: string | null;
-    email?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    email: string;
   }>;
   size?: AvatarSize;
   max?: number;
@@ -216,7 +216,10 @@ interface AvatarGroupProps {
  * @example
  * ```tsx
  * <AvatarGroup
- *   users={[{ name: "John Doe", imageUrl: "/avatar1.jpg" }, ...]}
+ *   users={[
+ *     { firstName: "John", lastName: "Doe", email: "john@example.com", imageUrl: "/avatar1.jpg" },
+ *     ...
+ *   ]}
  *   size="sm"
  *   max={3}
  * />
@@ -241,7 +244,8 @@ export function AvatarGroup({
         >
           <UserAvatar
             imageUrl={user.imageUrl}
-            name={user.name}
+            firstName={user.firstName}
+            lastName={user.lastName}
             email={user.email}
             size={size}
           />

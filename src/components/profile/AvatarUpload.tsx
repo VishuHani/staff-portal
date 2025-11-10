@@ -3,14 +3,15 @@
 import { useState, useRef } from "react";
 import { Camera, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { UserAvatar } from "./UserAvatar";
+import { UserAvatar } from "@/components/ui/user-avatar";
 import { uploadProfileImage, deleteProfileImage } from "@/lib/actions/profile";
 import { toast } from "sonner";
 
 interface AvatarUploadProps {
   userId: string;
   currentImageUrl?: string | null;
-  userName?: string;
+  firstName?: string | null;
+  lastName?: string | null;
   userEmail: string;
   size?: "sm" | "md" | "lg" | "xl" | "2xl";
   onUploadComplete?: (imageUrl: string) => void;
@@ -20,7 +21,8 @@ interface AvatarUploadProps {
 export function AvatarUpload({
   userId,
   currentImageUrl,
-  userName,
+  firstName,
+  lastName,
   userEmail,
   size = "xl",
   onUploadComplete,
@@ -65,10 +67,10 @@ export function AvatarUpload({
       if (result.error) {
         toast.error(result.error);
         setPreviewUrl(null);
-      } else {
+      } else if (result.url) {
         toast.success("Profile image updated!");
-        if (onUploadComplete && result.imageUrl) {
-          onUploadComplete(result.imageUrl);
+        if (onUploadComplete) {
+          onUploadComplete(result.url);
         }
       }
     } catch (error) {
@@ -112,7 +114,8 @@ export function AvatarUpload({
       <div className="relative">
         <UserAvatar
           imageUrl={displayImageUrl}
-          name={userName}
+          firstName={firstName}
+          lastName={lastName}
           email={userEmail}
           size={size}
         />
