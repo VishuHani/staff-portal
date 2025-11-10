@@ -109,6 +109,9 @@ export async function getPostById(id: string) {
   const user = await requireAuth();
 
   try {
+    // Get users in shared venues for venue access check
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const post = await prisma.post.findUnique({
       where: { id },
       include: {
@@ -116,6 +119,10 @@ export async function getPostById(id: string) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -137,6 +144,10 @@ export async function getPostById(id: string) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
                 role: {
                   select: {
                     name: true,
@@ -155,6 +166,10 @@ export async function getPostById(id: string) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
               },
             },
           },
@@ -163,6 +178,11 @@ export async function getPostById(id: string) {
     });
 
     if (!post) {
+      return { error: "Post not found" };
+    }
+
+    // VENUE FILTERING: Check if user has access to this post
+    if (!sharedVenueUserIds.includes(post.authorId)) {
       return { error: "Post not found" };
     }
 
@@ -224,6 +244,10 @@ export async function createPost(data: CreatePostInput) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -292,6 +316,10 @@ export async function updatePost(data: UpdatePostInput) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -303,6 +331,8 @@ export async function updatePost(data: UpdatePostInput) {
           select: {
             id: true,
             name: true,
+            color: true,
+            icon: true,
           },
         },
       },
@@ -333,11 +363,19 @@ export async function deletePost(data: DeletePostInput) {
   const { id } = validatedFields.data;
 
   try {
+    // Get users in shared venues for venue access check
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const existingPost = await prisma.post.findUnique({
       where: { id },
     });
 
     if (!existingPost) {
+      return { error: "Post not found" };
+    }
+
+    // VENUE FILTERING: Check if user has access to this post
+    if (!sharedVenueUserIds.includes(existingPost.authorId)) {
       return { error: "Post not found" };
     }
 
@@ -438,8 +476,16 @@ export async function getPostStats() {
   const user = await requireAuth();
 
   try {
+    // Get users in shared venues for venue filtering
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const [totalPosts, myPosts, totalComments] = await Promise.all([
-      prisma.post.count(),
+      // VENUE FILTERING: Only count posts from users in shared venues
+      prisma.post.count({
+        where: {
+          authorId: { in: sharedVenueUserIds },
+        },
+      }),
       prisma.post.count({ where: { authorId: user.id } }),
       prisma.comment.count({ where: { userId: user.id } }),
     ]);

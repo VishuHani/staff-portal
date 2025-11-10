@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { getSharedVenueUsers } from "@/lib/utils/venue";
 import {
   createCommentSchema,
   updateCommentSchema,
@@ -38,6 +39,10 @@ export async function getCommentsByPostId(postId: string) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -150,6 +155,10 @@ export async function createComment(data: CreateCommentInput) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -165,11 +174,17 @@ export async function createComment(data: CreateCommentInput) {
     const notifiedUserIds = new Set<string>();
 
     if (mentionedEmails.length > 0) {
-      // Get mentioned users
+      // VENUE FILTERING: Only allow mentions of users in shared venues
+      const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
+      // Get mentioned users (filtered by shared venues)
       const mentionedUsers = await prisma.user.findMany({
         where: {
           email: {
             in: mentionedEmails,
+          },
+          id: {
+            in: sharedVenueUserIds,
           },
         },
         select: {
@@ -264,6 +279,10 @@ export async function updateComment(data: UpdateCommentInput) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
             role: {
               select: {
                 name: true,
@@ -333,6 +352,9 @@ export async function getPostParticipants(postId: string) {
   const user = await requireAuth();
 
   try {
+    // VENUE FILTERING: Get users in shared venues
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+
     const post = await prisma.post.findUnique({
       where: { id: postId },
       include: {
@@ -340,6 +362,10 @@ export async function getPostParticipants(postId: string) {
           select: {
             id: true,
             email: true,
+            // PROFILE FIELDS: Include name and avatar
+            firstName: true,
+            lastName: true,
+            profileImage: true,
           },
         },
         comments: {
@@ -348,6 +374,10 @@ export async function getPostParticipants(postId: string) {
               select: {
                 id: true,
                 email: true,
+                // PROFILE FIELDS: Include name and avatar
+                firstName: true,
+                lastName: true,
+                profileImage: true,
               },
             },
           },
@@ -359,15 +389,30 @@ export async function getPostParticipants(postId: string) {
       return { error: "Post not found" };
     }
 
+    // VENUE FILTERING: Check if user has access to this post
+    if (!sharedVenueUserIds.includes(post.author.id)) {
+      return { error: "Post not found" };
+    }
+
+    type Participant = {
+      id: string;
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      profileImage: string | null;
+    };
+
     // Collect all unique participants
-    const participantsMap = new Map<string, { id: string; email: string }>();
+    const participantsMap = new Map<string, Participant>();
 
     // Add post author
     participantsMap.set(post.author.id, post.author);
 
-    // Add all commenters
+    // Add all commenters (only those in shared venues)
     post.comments.forEach((comment) => {
-      participantsMap.set(comment.user.id, comment.user);
+      if (sharedVenueUserIds.includes(comment.user.id)) {
+        participantsMap.set(comment.user.id, comment.user);
+      }
     });
 
     // Convert to array and exclude current user
