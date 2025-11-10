@@ -86,14 +86,15 @@ model RolePermission {
 }
 
 model Store {
-  id         String      @id @default(cuid())
-  name       String
-  code       String      @unique
-  active     Boolean     @default(true)
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-  userVenues UserVenue[]
-  users      User[]
+  id            String         @id @default(cuid())
+  name          String
+  code          String         @unique
+  active        Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  userVenues    UserVenue[]
+  users         User[]
+  channelVenues ChannelVenue[]
 
   @@map("stores")
 }
@@ -155,20 +156,35 @@ model TimeOffRequest {
 }
 
 model Channel {
-  id          String    @id @default(cuid())
-  name        String    @unique
+  id          String         @id @default(cuid())
+  name        String         @unique
   type        String
   permissions String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  archived    Boolean   @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  archived    Boolean        @default(false)
   archivedAt  DateTime?
   color       String?
   description String?
   icon        String?
   posts       Post[]
+  venues      ChannelVenue[]
 
   @@map("channels")
+}
+
+model ChannelVenue {
+  id        String   @id @default(cuid())
+  channelId String
+  venueId   String
+  createdAt DateTime @default(now())
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  venue     Store    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, venueId])
+  @@index([channelId])
+  @@index([venueId])
+  @@map("channel_venues")
 }
 
 model Post {
