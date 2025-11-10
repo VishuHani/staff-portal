@@ -35,9 +35,9 @@ model User {
   reactions          Reaction[]
   reviewedTimeOff    TimeOffRequest[]          @relation("ReviewedBy")
   timeOffRequests    TimeOffRequest[]
-  venues             UserVenue[]
-  venuePermissions   UserVenuePermission[]     @relation("UserPermissions")
   grantedPermissions UserVenuePermission[]     @relation("GrantedPermissions")
+  venuePermissions   UserVenuePermission[]     @relation("UserPermissions")
+  venues             UserVenue[]
   role               Role                      @relation(fields: [roleId], references: [id])
   store              Store?                    @relation(fields: [storeId], references: [id])
 
@@ -50,23 +50,26 @@ model User {
 }
 
 model Role {
-  id              String           @id @default(cuid())
-  name            String           @unique
-  description     String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  rolePermissions RolePermission[]
-  users           User[]
+  id                     String                  @id @default(cuid())
+  name                   String                  @unique
+  description            String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  conditionalPermissions ConditionalPermission[] @relation("RoleConditionalPermissions")
+  fieldPermissions       FieldPermission[]       @relation("RoleFieldPermissions")
+  rolePermissions        RolePermission[]
+  timeBasedAccess        TimeBasedAccess[]       @relation("RoleTimeBasedAccess")
+  users                  User[]
 
   @@map("roles")
 }
 
 model Permission {
-  id                   String                 @id @default(cuid())
+  id                   String                @id @default(cuid())
   resource             String
   action               String
   description          String?
-  createdAt            DateTime               @default(now())
+  createdAt            DateTime              @default(now())
   rolePermissions      RolePermission[]
   userVenuePermissions UserVenuePermission[]
 
@@ -109,16 +112,16 @@ model UserVenuePermission {
 }
 
 model Store {
-  id                   String                 @id @default(cuid())
+  id                   String                @id @default(cuid())
   name                 String
-  code                 String                 @unique
-  active               Boolean                @default(true)
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
-  userVenues           UserVenue[]
-  users                User[]
+  code                 String                @unique
+  active               Boolean               @default(true)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
   channelVenues        ChannelVenue[]
   userVenuePermissions UserVenuePermission[]
+  userVenues           UserVenue[]
+  users                User[]
 
   @@map("stores")
 }
@@ -191,8 +194,8 @@ model Channel {
   color       String?
   description String?
   icon        String?
-  posts       Post[]
   venues      ChannelVenue[]
+  posts       Post[]
 
   @@map("channels")
 }
@@ -371,6 +374,58 @@ model AuditLog {
   @@index([createdAt])
   @@index([actionType])
   @@map("audit_logs")
+}
+
+model FieldPermission {
+  id        String   @id @default(cuid())
+  roleId    String
+  resource  String
+  field     String
+  access    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  role      Role     @relation("RoleFieldPermissions", fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, resource, field])
+  @@index([roleId])
+  @@index([resource])
+  @@index([field])
+  @@map("field_permissions")
+}
+
+model ConditionalPermission {
+  id         String   @id @default(cuid())
+  roleId     String
+  resource   String
+  action     String
+  conditions Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  role       Role     @relation("RoleConditionalPermissions", fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@index([roleId])
+  @@index([resource])
+  @@index([action])
+  @@map("conditional_permissions")
+}
+
+model TimeBasedAccess {
+  id         String   @id @default(cuid())
+  roleId     String
+  resource   String
+  action     String
+  daysOfWeek Int[]
+  startTime  String
+  endTime    String
+  timezone   String   @default("UTC")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  role       Role     @relation("RoleTimeBasedAccess", fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@index([roleId])
+  @@index([resource])
+  @@index([action])
+  @@map("time_based_access")
 }
 
 enum NotificationType {
