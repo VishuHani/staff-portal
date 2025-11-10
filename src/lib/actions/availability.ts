@@ -211,6 +211,7 @@ export async function bulkUpdateAvailability(data: BulkUpdateAvailabilityInput) 
 /**
  * Get all users' availability (Admin/Manager only)
  * Filtered by venues: Managers only see availability for users in their shared venues
+ * ENHANCED: Now uses venue-scoped permissions
  */
 export async function getAllUsersAvailability(filters?: {
   dayOfWeek?: number;
@@ -218,10 +219,10 @@ export async function getAllUsersAvailability(filters?: {
 }) {
   const user = await requireAuth();
 
-  // Check if user has permission to view all availability
-  const hasAccess = await canAccess("availability", "read");
+  // Check if user has permission to view team availability
+  const hasAccess = await canAccess("availability", "view_team");
   if (!hasAccess) {
-    return { error: "You don't have permission to view all availability" };
+    return { error: "You don't have permission to view team availability" };
   }
 
   try {
@@ -278,13 +279,14 @@ export async function getAllUsersAvailability(filters?: {
 /**
  * Get availability statistics (Admin/Manager only)
  * Filtered by venues: Managers only see stats for users in their shared venues
+ * ENHANCED: Now uses venue-scoped permissions
  */
 export async function getAvailabilityStats() {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("availability", "read");
+  const hasAccess = await canAccess("availability", "view_team");
   if (!hasAccess) {
-    return { error: "You don't have permission to view availability stats" };
+    return { error: "You don't have permission to view team availability stats" };
   }
 
   try {
