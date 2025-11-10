@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { requireAuth, canAccess, canAccessVenue } from "@/lib/rbac/access";
 import { getSharedVenueUsers } from "@/lib/utils/venue";
 import {
   createTimeOffRequestSchema,
@@ -59,13 +59,15 @@ export async function getMyTimeOffRequests() {
 
 /**
  * Get all time-off requests (Manager/Admin only)
+ * ENHANCED: Now respects venue-scoped permissions
  */
 export async function getAllTimeOffRequests(filters?: FilterTimeOffRequestsInput) {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("timeoff", "read");
-  if (!hasAccess) {
-    return { error: "You don't have permission to view all time-off requests" };
+  // Check if user has global OR venue-specific permission to view team time-off
+  const hasGlobalAccess = await canAccess("timeoff", "view_team");
+  if (!hasGlobalAccess) {
+    return { error: "You don't have permission to view team time-off requests" };
   }
 
   const validatedFilters = filters
@@ -370,14 +372,10 @@ export async function cancelTimeOffRequest(data: UpdateTimeOffRequestInput) {
 
 /**
  * Review a time-off request (Manager/Admin only)
+ * ENHANCED: Now checks venue-scoped permissions
  */
 export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
   const user = await requireAuth();
-
-  const hasAccess = await canAccess("timeoff", "update");
-  if (!hasAccess) {
-    return { error: "You don't have permission to review time-off requests" };
-  }
 
   const validatedFields = reviewTimeOffRequestSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -387,19 +385,53 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
   const { id, status, notes } = validatedFields.data;
 
   try {
-    // VENUE FILTERING: Get users from shared venues
-    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
-
-    // Get the request
+    // Get the request with requester's venue information
     const request = await prisma.timeOffRequest.findUnique({
       where: { id },
+      include: {
+        user: {
+          include: {
+            venues: {
+              where: { isPrimary: true },
+              include: {
+                venue: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!request) {
       return { error: "Time-off request not found" };
     }
 
-    // VENUE FILTERING: Check if request is from a user in shared venues
+    // Get requester's primary venue
+    const requesterPrimaryVenue = request.user.venues.find((uv) => uv.isPrimary);
+
+    if (!requesterPrimaryVenue) {
+      // Fallback to global permission check if no venue assigned
+      const hasAccess = await canAccess("timeoff", "approve");
+      if (!hasAccess) {
+        return { error: "You don't have permission to review time-off requests" };
+      }
+    } else {
+      // VENUE-SCOPED PERMISSION CHECK: Check if reviewer has approval permission at requester's venue
+      const hasVenueAccess = await canAccessVenue(
+        "timeoff",
+        "approve",
+        requesterPrimaryVenue.venueId
+      );
+
+      if (!hasVenueAccess) {
+        return {
+          error: `You don't have permission to approve time-off requests for ${requesterPrimaryVenue.venue.name}`
+        };
+      }
+    }
+
+    // VENUE FILTERING: Double-check shared venues for additional safety
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
     if (!sharedVenueUserIds.includes(request.userId)) {
       return { error: "You don't have access to this time-off request" };
     }
@@ -516,11 +548,12 @@ export async function getTimeOffStats() {
 
 /**
  * Get pending time-off requests count (for managers)
+ * ENHANCED: Respects venue-scoped permissions
  */
 export async function getPendingTimeOffCount() {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("timeoff", "read");
+  const hasAccess = await canAccess("timeoff", "view_team");
   if (!hasAccess) {
     return { count: 0 };
   }
