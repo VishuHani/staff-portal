@@ -23,7 +23,12 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") || "/dashboard";
-  const [error, setError] = useState<string>("");
+  const authError = searchParams.get("error");
+  const [error, setError] = useState<string>(
+    authError === "auth_service_unavailable"
+      ? "Authentication service is temporarily unavailable. Please try again later."
+      : ""
+  );
   const [loading, setLoading] = useState(false);
 
   const {

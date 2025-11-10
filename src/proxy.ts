@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -29,20 +29,56 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session if expired
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   // Protected routes
   const protectedPaths = ["/dashboard", "/admin", "/staff"];
-  const authPaths = ["/login", "/signup"];
+  const authPaths = ["/login", "/signup", "/forgot-password"];
   const isProtectedPath = protectedPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path)
   );
   const isAuthPath = authPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path)
   );
+
+  let user = null;
+  let authError = null;
+
+  // Try to get user with error handling for network failures
+  try {
+    const {
+      data: { user: supabaseUser },
+      error,
+    } = await supabase.auth.getUser();
+
+    if (error) {
+      console.error("Supabase auth error:", error.message);
+      authError = error;
+    } else {
+      user = supabaseUser;
+    }
+  } catch (error) {
+    console.error("Unexpected error checking auth:", error);
+    authError = error;
+  }
+
+  // If Supabase is unavailable, allow access to auth pages but block protected routes
+  if (authError) {
+    // Allow access to auth pages when Supabase is down
+    if (isAuthPath) {
+      return supabaseResponse;
+    }
+
+    // Block protected routes with error redirect
+    if (isProtectedPath) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("error", "auth_service_unavailable");
+      url.searchParams.set("redirectTo", request.nextUrl.pathname);
+      return NextResponse.redirect(url);
+    }
+
+    // Allow access to public routes
+    return supabaseResponse;
+  }
 
   // Redirect to login if accessing protected route without auth
   if (isProtectedPath && !user) {
