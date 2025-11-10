@@ -48,32 +48,73 @@ async function main() {
   // Create Permissions
   console.log("Creating permissions...");
   const permissions = [
-    // Availability permissions
-    { resource: "availability", action: "view_own", description: "View own availability" },
-    { resource: "availability", action: "edit_own", description: "Edit own availability" },
-    { resource: "availability", action: "view_team", description: "View team availability" },
-    { resource: "availability", action: "edit_team", description: "Edit team availability" },
+    // ===== AVAILABILITY PERMISSIONS =====
+    { resource: "availability", action: "view_own", description: "View own availability/schedule" },
+    { resource: "availability", action: "edit_own", description: "Edit own availability/schedule" },
+    { resource: "availability", action: "view_team", description: "View team availability in assigned venues" },
+    { resource: "availability", action: "edit_team", description: "Edit team availability in assigned venues" },
+    { resource: "availability", action: "view_all", description: "View all availability (admin)" },
+    { resource: "availability", action: "edit_all", description: "Edit all availability (admin)" },
 
-    // Time-off permissions
-    { resource: "time_off", action: "create", description: "Create time-off requests" },
-    { resource: "time_off", action: "view_own", description: "View own time-off requests" },
-    { resource: "time_off", action: "view_team", description: "View team time-off requests" },
-    { resource: "time_off", action: "approve", description: "Approve/reject time-off requests" },
+    // ===== TIME-OFF PERMISSIONS =====
+    { resource: "timeoff", action: "create", description: "Create own time-off requests" },
+    { resource: "timeoff", action: "view_own", description: "View own time-off requests" },
+    { resource: "timeoff", action: "view_team", description: "View team time-off requests in assigned venues" },
+    { resource: "timeoff", action: "approve", description: "Approve time-off requests" },
+    { resource: "timeoff", action: "reject", description: "Reject time-off requests" },
+    { resource: "timeoff", action: "cancel", description: "Cancel approved time-off requests" },
+    { resource: "timeoff", action: "view_all", description: "View all time-off requests (admin)" },
+    { resource: "timeoff", action: "edit_all", description: "Edit all time-off requests (admin)" },
 
-    // Posts permissions
-    { resource: "posts", action: "create", description: "Create posts" },
-    { resource: "posts", action: "view", description: "View posts" },
-    { resource: "posts", action: "moderate", description: "Moderate posts (pin, delete)" },
+    // ===== POSTS PERMISSIONS =====
+    { resource: "posts", action: "create", description: "Create posts in accessible channels" },
+    { resource: "posts", action: "view", description: "View posts in accessible channels" },
+    { resource: "posts", action: "edit_own", description: "Edit own posts" },
+    { resource: "posts", action: "delete_own", description: "Delete own posts" },
+    { resource: "posts", action: "moderate", description: "Pin/delete any posts, manage content" },
+    { resource: "posts", action: "edit_all", description: "Edit any posts (admin)" },
+    { resource: "posts", action: "delete_all", description: "Delete any posts (admin)" },
 
-    // Messages permissions
+    // ===== MESSAGES PERMISSIONS =====
     { resource: "messages", action: "send", description: "Send direct messages" },
-    { resource: "messages", action: "view", description: "View messages" },
+    { resource: "messages", action: "view", description: "View own conversations" },
+    { resource: "messages", action: "delete_own", description: "Delete own messages" },
+    { resource: "messages", action: "view_all", description: "View all conversations (admin)" },
 
-    // Admin permissions
-    { resource: "admin", action: "manage_users", description: "Manage users" },
+    // ===== CHANNELS PERMISSIONS =====
+    { resource: "channels", action: "create", description: "Create new channels" },
+    { resource: "channels", action: "edit", description: "Edit channel settings" },
+    { resource: "channels", action: "archive", description: "Archive channels" },
+    { resource: "channels", action: "delete", description: "Delete channels (no posts)" },
+    { resource: "channels", action: "moderate", description: "Moderate channel content" },
+
+    // ===== USERS PERMISSIONS =====
+    { resource: "users", action: "view_team", description: "View users in assigned venues" },
+    { resource: "users", action: "edit_team", description: "Edit users in assigned venues" },
+    { resource: "users", action: "create", description: "Create new users" },
+    { resource: "users", action: "view_all", description: "View all users (admin)" },
+    { resource: "users", action: "edit_all", description: "Edit all users (admin)" },
+    { resource: "users", action: "delete", description: "Deactivate users" },
+
+    // ===== REPORTS PERMISSIONS =====
+    { resource: "reports", action: "view_team", description: "View reports for assigned venues" },
+    { resource: "reports", action: "export_team", description: "Export data for assigned venues" },
+    { resource: "reports", action: "view_all", description: "View all reports (admin)" },
+    { resource: "reports", action: "export_all", description: "Export all data (admin)" },
+
+    // ===== SCHEDULES PERMISSIONS =====
+    { resource: "schedules", action: "view_own", description: "View own schedule" },
+    { resource: "schedules", action: "view_team", description: "View team schedules" },
+    { resource: "schedules", action: "edit_team", description: "Edit team schedules" },
+    { resource: "schedules", action: "publish", description: "Publish schedules" },
+
+    // ===== ADMIN PERMISSIONS =====
+    { resource: "admin", action: "manage_users", description: "Full user management" },
     { resource: "admin", action: "manage_roles", description: "Manage roles and permissions" },
-    { resource: "admin", action: "view_audit_logs", description: "View audit logs" },
-    { resource: "admin", action: "manage_stores", description: "Manage stores" },
+    { resource: "admin", action: "manage_stores", description: "Manage venue/store settings" },
+    { resource: "admin", action: "manage_permissions", description: "Manage permission assignments" },
+    { resource: "admin", action: "view_audit_logs", description: "View system audit logs" },
+    { resource: "admin", action: "manage_settings", description: "Manage system settings" },
   ];
 
   const createdPermissions = [];
@@ -115,18 +156,40 @@ async function main() {
 
   // Manager permissions
   const managerPermissionNames = [
+    // Availability
     "availability:view_own",
     "availability:edit_own",
     "availability:view_team",
-    "time_off:create",
-    "time_off:view_own",
-    "time_off:view_team",
-    "time_off:approve",
+    "availability:edit_team",
+    // Time-off
+    "timeoff:create",
+    "timeoff:view_own",
+    "timeoff:view_team",
+    "timeoff:approve",
+    // Posts
     "posts:create",
     "posts:view",
+    "posts:edit_own",
+    "posts:delete_own",
     "posts:moderate",
+    // Messages
     "messages:send",
     "messages:view",
+    // Channels
+    "channels:create",
+    "channels:edit",
+    "channels:moderate",
+    // Users
+    "users:view_team",
+    "users:edit_team",
+    // Schedules
+    "schedules:view_own",
+    "schedules:view_team",
+    "schedules:edit_team",
+    "schedules:publish",
+    // Reports
+    "reports:view_team",
+    "reports:export_team",
   ];
 
   for (const permName of managerPermissionNames) {
@@ -153,14 +216,22 @@ async function main() {
 
   // Staff permissions
   const staffPermissionNames = [
+    // Availability
     "availability:view_own",
     "availability:edit_own",
-    "time_off:create",
-    "time_off:view_own",
+    // Time-off
+    "timeoff:create",
+    "timeoff:view_own",
+    // Posts
     "posts:create",
     "posts:view",
+    "posts:edit_own",
+    "posts:delete_own",
+    // Messages
     "messages:send",
     "messages:view",
+    // Schedules
+    "schedules:view_own",
   ];
 
   for (const permName of staffPermissionNames) {

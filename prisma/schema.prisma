@@ -36,6 +36,8 @@ model User {
   reviewedTimeOff    TimeOffRequest[]          @relation("ReviewedBy")
   timeOffRequests    TimeOffRequest[]
   venues             UserVenue[]
+  venuePermissions   UserVenuePermission[]     @relation("UserPermissions")
+  grantedPermissions UserVenuePermission[]     @relation("GrantedPermissions")
   role               Role                      @relation(fields: [roleId], references: [id])
   store              Store?                    @relation(fields: [storeId], references: [id])
 
@@ -60,12 +62,13 @@ model Role {
 }
 
 model Permission {
-  id              String           @id @default(cuid())
-  resource        String
-  action          String
-  description     String?
-  createdAt       DateTime         @default(now())
-  rolePermissions RolePermission[]
+  id                   String                 @id @default(cuid())
+  resource             String
+  action               String
+  description          String?
+  createdAt            DateTime               @default(now())
+  rolePermissions      RolePermission[]
+  userVenuePermissions UserVenuePermission[]
 
   @@unique([resource, action])
   @@map("permissions")
@@ -85,16 +88,37 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+model UserVenuePermission {
+  id            String     @id @default(cuid())
+  userId        String
+  venueId       String
+  permissionId  String
+  grantedAt     DateTime   @default(now())
+  grantedBy     String
+  grantedByUser User       @relation("GrantedPermissions", fields: [grantedBy], references: [id])
+  permission    Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  user          User       @relation("UserPermissions", fields: [userId], references: [id], onDelete: Cascade)
+  venue         Store      @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, venueId, permissionId])
+  @@index([userId])
+  @@index([venueId])
+  @@index([permissionId])
+  @@index([grantedBy])
+  @@map("user_venue_permissions")
+}
+
 model Store {
-  id            String         @id @default(cuid())
-  name          String
-  code          String         @unique
-  active        Boolean        @default(true)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  userVenues    UserVenue[]
-  users         User[]
-  channelVenues ChannelVenue[]
+  id                   String                 @id @default(cuid())
+  name                 String
+  code                 String                 @unique
+  active               Boolean                @default(true)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  userVenues           UserVenue[]
+  users                User[]
+  channelVenues        ChannelVenue[]
+  userVenuePermissions UserVenuePermission[]
 
   @@map("stores")
 }
