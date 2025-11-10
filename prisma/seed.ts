@@ -201,6 +201,63 @@ async function main() {
 
   console.log("✅ Default store created");
 
+  // Create default channels
+  console.log("Creating default channels...");
+  const channels = [
+    {
+      name: "General Announcements",
+      description: "Company-wide announcements and important updates",
+      type: "ALL_STAFF",
+      icon: "📢",
+      color: "#3b82f6",
+      archived: false,
+    },
+    {
+      name: "Team Updates",
+      description: "Updates and news from different teams",
+      type: "ALL_STAFF",
+      icon: "👥",
+      color: "#10b981",
+      archived: false,
+    },
+    {
+      name: "Social",
+      description: "Casual conversations, celebrations, and fun",
+      type: "ALL_STAFF",
+      icon: "🎉",
+      color: "#f59e0b",
+      archived: false,
+    },
+    {
+      name: "Help & Questions",
+      description: "Ask questions and get help from the team",
+      type: "ALL_STAFF",
+      icon: "❓",
+      color: "#8b5cf6",
+      archived: false,
+    },
+    {
+      name: "Managers Only",
+      description: "Private channel for management discussions",
+      type: "MANAGERS",
+      icon: "🔒",
+      color: "#ef4444",
+      archived: false,
+    },
+  ];
+
+  let channelCount = 0;
+  for (const channelData of channels) {
+    const channel = await prisma.channel.upsert({
+      where: { name: channelData.name },
+      update: {},
+      create: channelData,
+    });
+    channelCount++;
+  }
+
+  console.log(`✅ ${channelCount} default channels created`);
+
   // Create admin user if environment variables are provided
   // NOTE: This creates the user in BOTH Supabase Auth and Prisma database
   // This is required for login to work (dual authentication system)
@@ -264,6 +321,7 @@ async function main() {
   console.log(`- 3 Roles: Admin, Manager, Staff`);
   console.log(`- ${createdPermissions.length} Permissions`);
   console.log(`- 1 Default Store: ${defaultStore.name}`);
+  console.log(`- ${channelCount} Default Channels`);
   if (ADMIN_EMAIL) {
     console.log(`- 1 Admin User: ${ADMIN_EMAIL}`);
   }
