@@ -58,7 +58,7 @@ export const createUserSchema = z.object({
 
 // Update user schema
 export const updateUserSchema = z.object({
-  userId: z.string().cuid("Invalid user ID"),
+  userId: z.string().min(1, "User ID is required"),
   firstName: z
     .string()
     .min(2, "First name must be at least 2 characters")
@@ -105,12 +105,12 @@ export const updateUserSchema = z.object({
 
 // Delete user schema
 export const deleteUserSchema = z.object({
-  userId: z.string().cuid("Invalid user ID"),
+  userId: z.string().min(1, "User ID is required"),
 });
 
 // Toggle active schema
 export const toggleUserActiveSchema = z.object({
-  userId: z.string().cuid("Invalid user ID"),
+  userId: z.string().min(1, "User ID is required"),
 });
 
 // Type exports
