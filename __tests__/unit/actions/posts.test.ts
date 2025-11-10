@@ -53,6 +53,7 @@ vi.mock("@/lib/rbac/access", () => ({
 
 vi.mock("@/lib/utils/venue", () => ({
   getSharedVenueUsers: vi.fn(),
+  getAccessibleChannelIds: vi.fn(),
 }));
 
 import {
@@ -66,7 +67,7 @@ import {
 } from "@/lib/actions/posts";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
-import { getSharedVenueUsers } from "@/lib/utils/venue";
+import { getSharedVenueUsers, getAccessibleChannelIds } from "@/lib/utils/venue";
 import { revalidatePath } from "next/cache";
 
 describe("Posts Actions", () => {
@@ -74,6 +75,7 @@ describe("Posts Actions", () => {
   let mockRequireAuth: any;
   let mockCanAccess: any;
   let mockGetSharedVenueUsers: any;
+  let mockGetAccessibleChannelIds: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -81,6 +83,7 @@ describe("Posts Actions", () => {
     mockRequireAuth = requireAuth as any;
     mockCanAccess = canAccess as any;
     mockGetSharedVenueUsers = getSharedVenueUsers as any;
+    mockGetAccessibleChannelIds = getAccessibleChannelIds as any;
   });
 
   // ==========================================================================
@@ -99,6 +102,9 @@ describe("Posts Actions", () => {
         testUsers.user2.id,
         testUsers.user3.id,
       ]);
+
+      // Accessible channels (all channels for testing)
+      mockGetAccessibleChannelIds.mockResolvedValue([channelId]);
 
       const mockPosts = [
         createPostFixture({

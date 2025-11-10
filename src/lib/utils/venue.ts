@@ -367,3 +367,63 @@ export function getVenueBadgeColor(
 
   return "bg-green-100 text-green-700 border-green-300";
 }
+
+/**
+ * Get all channel IDs accessible to a user based on their venue assignments
+ *
+ * ADMIN BYPASS: If the user is an admin, returns ALL channel IDs (global access).
+ * Otherwise, returns only channels assigned to the user's venues.
+ *
+ * @param userId - User ID to get accessible channels for
+ * @returns Array of channel IDs accessible to the user
+ */
+export async function getAccessibleChannelIds(userId: string): Promise<string[]> {
+  // Check if user is admin - admins get global access
+  const userIsAdmin = await isAdmin(userId);
+
+  if (userIsAdmin) {
+    // Admin bypass: return ALL channels
+    const allChannels = await prisma.channel.findMany({
+      where: {
+        archived: false, // Only return non-archived channels
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    return allChannels.map((c) => c.id);
+  }
+
+  // Non-admin: filter by user's venues
+  const venueIds = await getUserVenueIds(userId);
+
+  if (venueIds.length === 0) {
+    return [];
+  }
+
+  // Get channels that are assigned to any of the user's venues
+  const channelVenues = await prisma.channelVenue.findMany({
+    where: {
+      venueId: {
+        in: venueIds,
+      },
+    },
+    include: {
+      channel: {
+        select: {
+          id: true,
+          archived: true,
+        },
+      },
+    },
+  });
+
+  // Filter out archived channels and return unique channel IDs
+  const channelIds = channelVenues
+    .filter((cv) => !cv.channel.archived)
+    .map((cv) => cv.channelId);
+
+  // Return unique channel IDs
+  return [...new Set(channelIds)];
+}

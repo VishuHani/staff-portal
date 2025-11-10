@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
-import { getSharedVenueUsers } from "@/lib/utils/venue";
+import { getSharedVenueUsers, getAccessibleChannelIds } from "@/lib/utils/venue";
 import {
   createPostSchema,
   updatePostSchema,
@@ -20,6 +20,7 @@ import {
 /**
  * Get posts with filtering and pagination
  * Filtered by venues: Users only see posts from authors in their shared venues
+ * Filtered by channels: Users only see posts from channels assigned to their venues
  */
 export async function getPosts(filters?: FilterPostsInput) {
   const user = await requireAuth();
@@ -32,11 +33,18 @@ export async function getPosts(filters?: FilterPostsInput) {
     // Get users in shared venues for venue filtering
     const sharedVenueUserIds = await getSharedVenueUsers(user.id);
 
+    // Get accessible channels for venue-based channel filtering
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+
     const posts = await prisma.post.findMany({
       where: {
         // VENUE FILTERING: Only show posts from users in shared venues
         authorId: {
           in: sharedVenueUserIds,
+        },
+        // CHANNEL FILTERING: Only show posts from accessible channels
+        channelId: {
+          in: accessibleChannelIds,
         },
         ...(validatedFilters.channelId && {
           channelId: validatedFilters.channelId,

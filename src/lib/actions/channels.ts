@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { getAccessibleChannelIds } from "@/lib/utils/venue";
 import {
   createChannelSchema,
   updateChannelSchema,
@@ -18,6 +19,7 @@ import {
 
 /**
  * Get all channels (filtered) with unread counts
+ * Filtered by venues: Users only see channels assigned to their venues
  */
 export async function getChannels(filters?: FilterChannelsInput) {
   const user = await requireAuth();
@@ -27,8 +29,15 @@ export async function getChannels(filters?: FilterChannelsInput) {
       ? filterChannelsSchema.parse(filters)
       : { includeArchived: false };
 
+    // Get accessible channels for venue-based filtering
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+
     const channels = await prisma.channel.findMany({
       where: {
+        // VENUE FILTERING: Only show channels accessible to user's venues
+        id: {
+          in: accessibleChannelIds,
+        },
         ...(validatedFilters.type && { type: validatedFilters.type }),
         ...(validatedFilters.includeArchived === false && { archived: false }),
       },
