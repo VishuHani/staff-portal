@@ -10,6 +10,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { isAdmin } from "@/lib/rbac/permissions";
 
 /**
  * Get all venue IDs assigned to a user
@@ -125,9 +126,12 @@ export async function filterByUserVenues(userId: string) {
 /**
  * Get all users who share at least one venue with the given user
  *
+ * ADMIN BYPASS: If the user is an admin, returns ALL active users (global access).
+ * Otherwise, returns only users in shared venues.
+ *
  * @param userId - User ID to find shared venue users for
  * @param options - Optional filters
- * @returns Array of user IDs who share venues
+ * @returns Array of user IDs who share venues (or all users if admin)
  */
 export async function getSharedVenueUsers(
   userId: string,
@@ -135,6 +139,27 @@ export async function getSharedVenueUsers(
     includeInactive?: boolean;
   }
 ): Promise<string[]> {
+  // Check if user is admin - admins get global access
+  const userIsAdmin = await isAdmin(userId);
+
+  if (userIsAdmin) {
+    // Admin bypass: return ALL active users
+    const allUsers = await prisma.user.findMany({
+      where: {
+        id: {
+          not: userId, // Exclude the user themselves
+        },
+        ...(options?.includeInactive ? {} : { active: true }),
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    return allUsers.map((u) => u.id);
+  }
+
+  // Non-admin: filter by shared venues
   const venueIds = await getUserVenueIds(userId);
 
   if (venueIds.length === 0) {
