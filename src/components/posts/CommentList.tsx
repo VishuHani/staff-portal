@@ -12,6 +12,9 @@ interface Comment {
   user: {
     id: string;
     email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    profileImage?: string | null;
     role: {
       name: string;
     } | null;

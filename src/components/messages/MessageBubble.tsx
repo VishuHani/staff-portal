@@ -16,6 +16,8 @@ import {
   Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { UserAvatar } from "@/components/ui/user-avatar";
+import { getFullName } from "@/lib/utils/profile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,6 +59,9 @@ interface Message {
   sender: {
     id: string;
     email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    profileImage?: string | null;
     role: {
       name: string;
     } | null;
@@ -96,6 +101,7 @@ export function MessageBubble({
 
   const isOwn = message.sender.id === currentUserId;
   const mediaUrls = message.mediaUrls ? JSON.parse(message.mediaUrls) : [];
+  const senderName = getFullName(message.sender);
 
   // Check if message is edited (updatedAt is different from createdAt)
   const isEdited =
@@ -198,16 +204,20 @@ export function MessageBubble({
       >
         {/* Avatar (only show for other users in group chats or 1-on-1) */}
         {!isOwn && (
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-            {message.sender.email.charAt(0).toUpperCase()}
-          </div>
+          <UserAvatar
+            imageUrl={message.sender.profileImage}
+            firstName={message.sender.firstName}
+            lastName={message.sender.lastName}
+            email={message.sender.email}
+            size="sm"
+          />
         )}
 
         <div className={cn("flex max-w-[70%] flex-col", isOwn && "items-end")}>
           {/* Sender name (only show for other users in group chats) */}
           {!isOwn && isGroupChat && (
             <span className="mb-1 px-3 text-xs font-medium text-muted-foreground">
-              {message.sender.email}
+              {senderName}
             </span>
           )}
 

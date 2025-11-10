@@ -6,6 +6,7 @@ import { Loader2, Users, Settings, ArrowLeft, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { getFullName } from "@/lib/utils/profile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +37,9 @@ interface Message {
   sender: {
     id: string;
     email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    profileImage?: string | null;
     role: {
       name: string;
     } | null;
@@ -50,6 +54,9 @@ interface Conversation {
     user: {
       id: string;
       email: string;
+      firstName?: string | null;
+      lastName?: string | null;
+      profileImage?: string | null;
       role: {
         name: string;
       } | null;
@@ -215,16 +222,16 @@ export function MessageThread({
       return conversation.name;
     }
 
-    // For 1-on-1, show the other user's email
+    // For 1-on-1, show the other user's name
     const otherParticipant = conversation.participants.find(
       (p) => p.user.id !== currentUserId
     );
-    return otherParticipant?.user.email || "Unknown";
+    return otherParticipant ? getFullName(otherParticipant.user) : "Unknown";
   };
 
   const getParticipantsList = () => {
     if (!conversation) return "";
-    return conversation.participants.map((p) => p.user.email).join(", ");
+    return conversation.participants.map((p) => getFullName(p.user)).join(", ");
   };
 
   const isGroupChat = conversation?.type === "GROUP";
@@ -440,9 +447,9 @@ export function MessageThread({
             </div>
             <p className="text-xs text-muted-foreground">
               {typingUsers.length === 1
-                ? `${typingUsers[0].email.split("@")[0]} is typing...`
+                ? `${getFullName(typingUsers[0])} is typing...`
                 : typingUsers.length === 2
-                ? `${typingUsers[0].email.split("@")[0]} and ${typingUsers[1].email.split("@")[0]} are typing...`
+                ? `${getFullName(typingUsers[0])} and ${getFullName(typingUsers[1])} are typing...`
                 : `${typingUsers.length} people are typing...`}
             </p>
           </div>

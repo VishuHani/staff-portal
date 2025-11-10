@@ -7,12 +7,18 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
+import { getFullName } from "@/lib/utils/profile";
 import { EmojiPicker } from "./EmojiPicker";
 
 interface ReactionGroup {
   emoji: string;
   count: number;
-  users: { id: string; email: string }[];
+  users: {
+    id: string;
+    email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+  }[];
   hasReacted: boolean;
 }
 
@@ -50,11 +56,14 @@ export function ReactionPicker({
           </HoverCardTrigger>
           <HoverCardContent className="w-auto p-2" side="top">
             <div className="space-y-1">
-              {reaction.users.slice(0, 10).map((user) => (
-                <div key={user.id} className="text-xs">
-                  {user.email}
-                </div>
-              ))}
+              {reaction.users.slice(0, 10).map((user) => {
+                const userName = getFullName(user);
+                return (
+                  <div key={user.id} className="text-xs">
+                    {userName}
+                  </div>
+                );
+              })}
               {reaction.users.length > 10 && (
                 <div className="text-xs text-muted-foreground">
                   +{reaction.users.length - 10} more

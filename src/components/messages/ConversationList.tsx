@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { getFullName } from "@/lib/utils/profile";
 import { getConversations } from "@/lib/actions/conversations";
 import { useConversationListRealtime } from "@/hooks/useConversationListRealtime";
 
@@ -23,6 +24,9 @@ interface Conversation {
     user: {
       id: string;
       email: string;
+      firstName?: string | null;
+      lastName?: string | null;
+      profileImage?: string | null;
       role: {
         name: string;
       } | null;
@@ -35,6 +39,8 @@ interface Conversation {
     sender: {
       id: string;
       email: string;
+      firstName?: string | null;
+      lastName?: string | null;
     };
   }>;
 }
@@ -83,10 +89,12 @@ export function ConversationList({
     // Search by conversation name
     if (conversation.name?.toLowerCase().includes(query)) return true;
 
-    // Search by participant email
-    const participantMatch = conversation.participants.some((p) =>
-      p.user.email.toLowerCase().includes(query)
-    );
+    // Search by participant name or email
+    const participantMatch = conversation.participants.some((p) => {
+      const userName = getFullName(p.user);
+      return userName.toLowerCase().includes(query) ||
+             p.user.email.toLowerCase().includes(query);
+    });
     if (participantMatch) return true;
 
     // Search by last message
@@ -100,11 +108,11 @@ export function ConversationList({
       return conversation.name;
     }
 
-    // For 1-on-1, show the other user's email
+    // For 1-on-1, show the other user's name
     const otherParticipant = conversation.participants.find(
       (p) => p.user.id !== currentUserId
     );
-    return otherParticipant?.user.email || "Unknown";
+    return otherParticipant ? getFullName(otherParticipant.user) : "Unknown";
   };
 
   const getConversationIcon = (conversation: Conversation) => {

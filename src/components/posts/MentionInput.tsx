@@ -10,10 +10,13 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import { getFullName } from "@/lib/utils/profile";
 
 interface User {
   id: string;
   email: string;
+  firstName?: string | null;
+  lastName?: string | null;
 }
 
 interface MentionInputProps {
@@ -70,9 +73,11 @@ export function MentionInput({
       const search = textAfterAt.toLowerCase();
       setMentionSearch(search);
 
-      const filtered = users.filter((user) =>
-        user.email.toLowerCase().includes(search)
-      );
+      const filtered = users.filter((user) => {
+        const userName = getFullName(user);
+        return userName.toLowerCase().includes(search) ||
+               user.email.toLowerCase().includes(search);
+      });
 
       if (filtered.length > 0) {
         setFilteredUsers(filtered);
@@ -185,18 +190,21 @@ export function MentionInput({
             <CommandList className="max-h-[200px]">
               <CommandEmpty>No users found</CommandEmpty>
               <CommandGroup heading="Mention user">
-                {filteredUsers.map((user, index) => (
-                  <CommandItem
-                    key={user.id}
-                    onSelect={() => insertMention(user)}
-                    className={cn(
-                      "cursor-pointer",
-                      index === selectedIndex && "bg-accent"
-                    )}
-                  >
-                    <span className="font-medium">@{user.email}</span>
-                  </CommandItem>
-                ))}
+                {filteredUsers.map((user, index) => {
+                  const userName = getFullName(user);
+                  return (
+                    <CommandItem
+                      key={user.id}
+                      onSelect={() => insertMention(user)}
+                      className={cn(
+                        "cursor-pointer",
+                        index === selectedIndex && "bg-accent"
+                      )}
+                    >
+                      <span className="font-medium">{userName}</span>
+                    </CommandItem>
+                  );
+                })}
               </CommandGroup>
             </CommandList>
           </Command>

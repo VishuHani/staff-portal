@@ -14,6 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { UserAvatar } from "@/components/ui/user-avatar";
+import { getFullName } from "@/lib/utils/profile";
 import { TIME_OFF_TYPES, TIME_OFF_STATUSES } from "@/lib/schemas/time-off";
 import { reviewTimeOffRequest } from "@/lib/actions/time-off";
 import { format } from "date-fns";
@@ -33,6 +35,9 @@ interface TimeOffRequest {
   user: {
     id: string;
     email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    profileImage?: string | null;
     role: {
       name: string;
     };
@@ -43,6 +48,8 @@ interface TimeOffRequest {
   reviewer?: {
     id: string;
     email: string;
+    firstName?: string | null;
+    lastName?: string | null;
   } | null;
 }
 
@@ -150,6 +157,7 @@ export function TimeOffReviewList({ requests }: TimeOffReviewListProps) {
         {requests.map((request) => {
           const days = calculateDays(request.startDate, request.endDate);
           const isPending = request.status === "PENDING";
+          const userName = getFullName(request.user);
 
           return (
             <div key={request.id} className="rounded-lg border p-4 space-y-4">
@@ -157,8 +165,14 @@ export function TimeOffReviewList({ requests }: TimeOffReviewListProps) {
               <div className="flex items-start justify-between">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <User className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">{request.user.email}</span>
+                    <UserAvatar
+                      imageUrl={request.user.profileImage}
+                      firstName={request.user.firstName}
+                      lastName={request.user.lastName}
+                      email={request.user.email}
+                      size="sm"
+                    />
+                    <span className="font-medium">{userName}</span>
                     <Badge variant="secondary" className="text-xs">
                       {request.user.role.name}
                     </Badge>
@@ -235,7 +249,7 @@ export function TimeOffReviewList({ requests }: TimeOffReviewListProps) {
                       )}
                       <span>
                         {request.status === "APPROVED" ? "Approved" : "Rejected"} by{" "}
-                        {request.reviewer?.email || "Unknown"} on{" "}
+                        {request.reviewer ? getFullName(request.reviewer) : "Unknown"} on{" "}
                         {request.reviewedAt
                           ? format(new Date(request.reviewedAt), "MMM d, yyyy 'at' h:mm a")
                           : "Unknown date"}
@@ -273,7 +287,7 @@ export function TimeOffReviewList({ requests }: TimeOffReviewListProps) {
               {selectedRequest && (
                 <div className="mt-2 space-y-1">
                   <p>
-                    <strong>Staff:</strong> {selectedRequest.user.email}
+                    <strong>Staff:</strong> {getFullName(selectedRequest.user)}
                   </p>
                   <p>
                     <strong>Dates:</strong>{" "}

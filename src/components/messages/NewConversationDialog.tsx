@@ -17,6 +17,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UserAvatar } from "@/components/ui/user-avatar";
+import { getFullName } from "@/lib/utils/profile";
 import { toast } from "sonner";
 import {
   findOrCreateConversation,
@@ -27,6 +29,9 @@ import { cn } from "@/lib/utils";
 interface UserOption {
   id: string;
   email: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  profileImage?: string | null;
   role: {
     name: string;
   } | null;
@@ -70,7 +75,9 @@ export function NewConversationDialog({
   // Filter users by search query
   const filteredUsers = availableUsers.filter((user) => {
     if (!searchQuery) return true;
-    return user.email.toLowerCase().includes(searchQuery.toLowerCase());
+    const userName = getFullName(user);
+    return userName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+           user.email.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
   const toggleUserSelection = (userId: string) => {
@@ -207,6 +214,7 @@ export function NewConversationDialog({
                 {selectedUsers.map((userId) => {
                   const user = availableUsers.find((u) => u.id === userId);
                   if (!user) return null;
+                  const userName = getFullName(user);
                   return (
                     <Badge
                       key={userId}
@@ -214,7 +222,7 @@ export function NewConversationDialog({
                       className="cursor-pointer"
                       onClick={() => toggleUserSelection(userId)}
                     >
-                      {user.email}
+                      {userName}
                       <button
                         type="button"
                         className="ml-1 hover:text-destructive"
@@ -243,6 +251,7 @@ export function NewConversationDialog({
                       conversationType === "direct" &&
                       selectedUsers.length === 1 &&
                       !isSelected;
+                    const userName = getFullName(user);
 
                     return (
                       <button
@@ -264,13 +273,17 @@ export function NewConversationDialog({
                         />
 
                         {/* Avatar */}
-                        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                          {user.email.charAt(0).toUpperCase()}
-                        </div>
+                        <UserAvatar
+                          imageUrl={user.profileImage}
+                          firstName={user.firstName}
+                          lastName={user.lastName}
+                          email={user.email}
+                          size="sm"
+                        />
 
                         {/* User info */}
                         <div className="flex-1">
-                          <p className="text-sm font-medium">{user.email}</p>
+                          <p className="text-sm font-medium">{userName}</p>
                           {user.role && (
                             <p className="text-xs text-muted-foreground">
                               {user.role.name}

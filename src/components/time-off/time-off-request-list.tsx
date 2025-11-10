@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getFullName } from "@/lib/utils/profile";
 import { TIME_OFF_TYPES, TIME_OFF_STATUSES } from "@/lib/schemas/time-off";
 import { cancelTimeOffRequest } from "@/lib/actions/time-off";
 import { format } from "date-fns";
@@ -30,6 +31,8 @@ interface TimeOffRequest {
   reviewer?: {
     id: string;
     email: string;
+    firstName?: string | null;
+    lastName?: string | null;
   } | null;
 }
 
@@ -195,7 +198,7 @@ export function TimeOffRequestList({ requests }: TimeOffRequestListProps) {
                       <Clock className="h-4 w-4" />
                       <span className="text-xs">
                         {request.status === "APPROVED" ? "Approved" : "Rejected"} by{" "}
-                        {request.reviewer?.email || "Unknown"} on{" "}
+                        {request.reviewer ? getFullName(request.reviewer) : "Unknown"} on{" "}
                         {request.reviewedAt
                           ? format(new Date(request.reviewedAt), "MMM d, yyyy 'at' h:mm a")
                           : "Unknown date"}
