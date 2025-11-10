@@ -6,6 +6,8 @@ import {
   hasAnyPermission,
   isAdmin,
   isManager,
+  hasVenuePermission,
+  getUserEffectivePermissions,
   type Permission,
   type PermissionResource,
   type PermissionAction,
@@ -179,5 +181,82 @@ export async function canAccessManager(): Promise<boolean> {
   } catch (error) {
     console.error("Error checking manager access:", error);
     return false;
+  }
+}
+
+/**
+ * VENUE-SCOPED PERMISSION FUNCTIONS
+ * These functions check permissions with venue context
+ */
+
+/**
+ * Check if current user has permission at a specific venue (non-redirecting)
+ * @param resource - The resource to check
+ * @param action - The action to check
+ * @param venueId - The venue ID for scoped check
+ * @returns true if user has permission at that venue, false otherwise
+ */
+export async function canAccessVenue(
+  resource: PermissionResource,
+  action: PermissionAction,
+  venueId: string
+): Promise<boolean> {
+  try {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      return false;
+    }
+
+    return await hasVenuePermission(user.id, resource, action, venueId);
+  } catch (error) {
+    console.error("Error checking venue access:", error);
+    return false;
+  }
+}
+
+/**
+ * Require specific permission at a venue - redirect if user doesn't have it
+ * @param resource - The resource to check
+ * @param action - The action to check
+ * @param venueId - The venue ID for scoped check
+ * @returns The authenticated user
+ */
+export async function requireVenuePermission(
+  resource: PermissionResource,
+  action: PermissionAction,
+  venueId: string
+) {
+  const user = await requireAuth();
+
+  const hasAccess = await hasVenuePermission(user.id, resource, action, venueId);
+
+  if (!hasAccess) {
+    redirect("/dashboard?error=forbidden");
+  }
+
+  return user;
+}
+
+/**
+ * Get all effective permissions for current user at a venue
+ * Useful for UI rendering (showing/hiding features based on permissions)
+ * @param venueId - Optional venue ID for venue-specific permissions
+ * @returns Array of permissions
+ */
+export async function getCurrentUserEffectivePermissions(
+  venueId?: string
+): Promise<Permission[]> {
+  try {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      return [];
+    }
+
+    return await getUserEffectivePermissions(user.id, venueId);
+  } catch (error) {
+    console.error("Error getting current user effective permissions:", error);
+    return [];
   }
 }

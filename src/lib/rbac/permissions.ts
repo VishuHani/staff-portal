@@ -86,17 +86,30 @@ export interface Permission {
 
 /**
  * Check if a user has a specific permission
+ *
+ * ENHANCED: Now supports venue-scoped permissions
+ * - If venueId is provided, checks both role permissions AND user-venue permissions
+ * - If venueId is not provided, only checks role permissions (global)
+ * - Admin users bypass all permission checks (see isAdmin() function)
+ *
  * @param userId - The user's ID
  * @param resource - The resource to check
  * @param action - The action to check
+ * @param venueId - Optional venue ID for venue-scoped permission check
  * @returns true if user has permission, false otherwise
  */
 export async function hasPermission(
   userId: string,
   resource: PermissionResource,
-  action: PermissionAction
+  action: PermissionAction,
+  venueId?: string
 ): Promise<boolean> {
   try {
+    // Check if user is admin first (admin bypass)
+    if (await isAdmin(userId)) {
+      return true;
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -109,6 +122,11 @@ export async function hasPermission(
             },
           },
         },
+        venuePermissions: {
+          include: {
+            permission: true,
+          },
+        },
       },
     });
 
@@ -116,12 +134,28 @@ export async function hasPermission(
       return false;
     }
 
-    // Check if user's role has the specific permission
-    return user.role.rolePermissions.some(
+    // Check role permissions (global/default permissions)
+    const hasRolePermission = user.role.rolePermissions.some(
       (rp) =>
         rp.permission.resource === resource &&
         rp.permission.action === action
     );
+
+    // If venueId is provided, also check venue-specific permissions
+    if (venueId) {
+      const hasVenuePermission = user.venuePermissions.some(
+        (vp) =>
+          vp.permission.resource === resource &&
+          vp.permission.action === action &&
+          vp.venueId === venueId
+      );
+
+      // User has permission if they have it via role OR via venue-specific grant
+      return hasRolePermission || hasVenuePermission;
+    }
+
+    // No venue specified, just check role permissions
+    return hasRolePermission;
   } catch (error) {
     console.error("Error checking permission:", error);
     return false;
@@ -161,9 +195,10 @@ export async function hasAnyPermission(
 }
 
 /**
- * Get all permissions for a user
+ * Get all permissions for a user (role-based only, no venue-specific)
  * @param userId - The user's ID
  * @returns Array of permissions
+ * @deprecated Use getUserEffectivePermissions() for complete permission list
  */
 export async function getUserPermissions(userId: string): Promise<Permission[]> {
   try {
@@ -194,6 +229,96 @@ export async function getUserPermissions(userId: string): Promise<Permission[]> 
     console.error("Error getting user permissions:", error);
     return [];
   }
+}
+
+/**
+ * Get all effective permissions for a user at a specific venue
+ * Combines role permissions + venue-specific permissions
+ *
+ * @param userId - The user's ID
+ * @param venueId - Optional venue ID to include venue-specific permissions
+ * @returns Array of unique permissions
+ */
+export async function getUserEffectivePermissions(
+  userId: string,
+  venueId?: string
+): Promise<Permission[]> {
+  try {
+    // Admin has all permissions
+    if (await isAdmin(userId)) {
+      // Return all possible permissions (admin bypass means they have everything)
+      return [];
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        role: {
+          include: {
+            rolePermissions: {
+              include: {
+                permission: true,
+              },
+            },
+          },
+        },
+        venuePermissions: {
+          where: venueId ? { venueId } : undefined,
+          include: {
+            permission: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return [];
+    }
+
+    // Collect role permissions
+    const rolePerms = user.role.rolePermissions.map((rp) => ({
+      resource: rp.permission.resource as PermissionResource,
+      action: rp.permission.action as PermissionAction,
+    }));
+
+    // Collect venue permissions if venueId provided
+    const venuePerms = user.venuePermissions.map((vp) => ({
+      resource: vp.permission.resource as PermissionResource,
+      action: vp.permission.action as PermissionAction,
+    }));
+
+    // Combine and deduplicate
+    const allPerms = [...rolePerms, ...venuePerms];
+    const uniquePerms = Array.from(
+      new Map(
+        allPerms.map((p) => [`${p.resource}:${p.action}`, p])
+      ).values()
+    );
+
+    return uniquePerms;
+  } catch (error) {
+    console.error("Error getting effective permissions:", error);
+    return [];
+  }
+}
+
+/**
+ * Check if user has a specific permission at a venue
+ * Convenience wrapper around hasPermission with venue context
+ *
+ * @param userId - The user's ID
+ * @param resource - The resource to check
+ * @param action - The action to check
+ * @param venueId - Venue ID for venue-scoped check
+ * @returns true if user has permission at that venue
+ */
+export async function hasVenuePermission(
+  userId: string,
+  resource: PermissionResource,
+  action: PermissionAction,
+  venueId: string
+): Promise<boolean> {
+  return hasPermission(userId, resource, action, venueId);
 }
 
 /**
