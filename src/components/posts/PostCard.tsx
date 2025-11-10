@@ -36,6 +36,8 @@ import {
 } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { UserAvatar } from "@/components/ui/user-avatar";
+import { getFullName } from "@/lib/utils/profile";
 import { ReactionPicker } from "./ReactionPicker";
 import { EmojiPicker } from "./EmojiPicker";
 import { CommentList } from "./CommentList";
@@ -59,6 +61,9 @@ interface Post {
   author: {
     id: string;
     email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    profileImage?: string | null;
     role: {
       name: string;
     } | null;
@@ -108,6 +113,7 @@ export function PostCard({
   const canEdit = isOwn;
   const canDelete = isOwn || canManage;
   const mediaUrls = parseMediaUrls(post.mediaUrls);
+  const authorName = getFullName(post.author);
 
   // Auto mark as read when post is visible
   useEffect(() => {
@@ -199,14 +205,18 @@ export function PostCard({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
             {/* User Avatar */}
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-              {post.author.email.charAt(0).toUpperCase()}
-            </div>
+            <UserAvatar
+              imageUrl={post.author.profileImage}
+              firstName={post.author.firstName}
+              lastName={post.author.lastName}
+              email={post.author.email}
+              size="md"
+            />
 
             {/* Post Header Info */}
             <div className="flex-1 space-y-1">
               <div className="flex items-center gap-2">
-                <span className="font-semibold">{post.author.email}</span>
+                <span className="font-semibold">{authorName}</span>
                 {post.author.role && (
                   <Badge variant="secondary" className="text-xs">
                     {post.author.role.name}

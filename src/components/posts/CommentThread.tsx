@@ -21,6 +21,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { UserAvatar } from "@/components/ui/user-avatar";
+import { getFullName } from "@/lib/utils/profile";
 import { CommentForm } from "./CommentForm";
 import { CommentContent } from "./CommentContent";
 import { ReactionPicker } from "./ReactionPicker";
@@ -43,6 +45,9 @@ interface Comment {
   user: {
     id: string;
     email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    profileImage?: string | null;
     role: {
       name: string;
     } | null;
@@ -78,6 +83,7 @@ export function CommentThread({
   const isOwn = comment.user.id === currentUserId;
   const canEdit = isOwn;
   const canDelete = isOwn || canManage;
+  const userName = getFullName(comment.user);
   const isEditing = editingCommentId === comment.id;
   const isReplying = replyingToId === comment.id;
   const canReply = depth < maxDepth;
@@ -140,16 +146,20 @@ export function CommentThread({
 
         <div className="flex gap-3">
           {/* User Avatar */}
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-            {comment.user.email.charAt(0).toUpperCase()}
-          </div>
+          <UserAvatar
+            imageUrl={comment.user.profileImage}
+            firstName={comment.user.firstName}
+            lastName={comment.user.lastName}
+            email={comment.user.email}
+            size="sm"
+          />
 
           {/* Comment Content */}
           <div className="flex-1 space-y-1">
             {/* User Info & Timestamp */}
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold">
-                {comment.user.email}
+                {userName}
               </span>
               {comment.user.role && (
                 <Badge variant="secondary" className="text-xs">
