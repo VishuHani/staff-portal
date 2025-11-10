@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { UserDialog } from "./UserDialog";
+import { VenuePermissionsDialog } from "./VenuePermissionsDialog";
 import { toggleUserActive, deleteUser } from "@/lib/actions/admin/users";
 import { toast } from "sonner";
 
@@ -92,6 +93,8 @@ export function UsersTable({ users, roles, stores, venues }: UsersTableProps) {
   const [filterVenue, setFilterVenue] = useState<string>("all");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
+  const [permissionsUser, setPermissionsUser] = useState<User | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -165,6 +168,11 @@ export function UsersTable({ users, roles, stores, venues }: UsersTableProps) {
   const openDeleteDialog = (user: User) => {
     setDeletingUser(user);
     setDeleteDialogOpen(true);
+  };
+
+  const handleManagePermissions = (user: User) => {
+    setPermissionsUser(user);
+    setPermissionsDialogOpen(true);
   };
 
   return (
@@ -301,6 +309,10 @@ export function UsersTable({ users, roles, stores, venues }: UsersTableProps) {
                       <Edit className="mr-2 h-4 w-4" />
                       Edit User
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleManagePermissions(user)}>
+                      <Shield className="mr-2 h-4 w-4" />
+                      Manage Venue Permissions
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleToggleActive(user)}>
                       <Power className="mr-2 h-4 w-4" />
                       {user.active ? "Deactivate" : "Activate"}
@@ -335,6 +347,16 @@ export function UsersTable({ users, roles, stores, venues }: UsersTableProps) {
         stores={stores}
         venues={venues}
       />
+
+      {/* Venue Permissions Dialog */}
+      {permissionsUser && (
+        <VenuePermissionsDialog
+          open={permissionsDialogOpen}
+          onOpenChange={setPermissionsDialogOpen}
+          user={permissionsUser}
+          venues={venues}
+        />
+      )}
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
