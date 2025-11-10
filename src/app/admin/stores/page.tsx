@@ -1,47 +1,63 @@
 import { requireAdmin } from "@/lib/rbac/access";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Store } from "lucide-react";
+import { getAllVenues, getVenueStats } from "@/lib/actions/admin/venues";
+import { StoresPageClient } from "./stores-page-client";
+import { redirect } from "next/navigation";
 
 export default async function AdminStoresPage() {
   const user = await requireAdmin();
 
+  // Fetch venues and stats
+  const [venuesResult, statsResult] = await Promise.all([
+    getAllVenues(),
+    getVenueStats(),
+  ]);
+
+  // Handle errors
+  if (venuesResult.error || !venuesResult.venues) {
+    console.error("Error fetching venues:", venuesResult.error);
+    // Could redirect to error page or show error message
+    return (
+      <DashboardLayout user={user}>
+        <div className="space-y-8">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight">
+              Venue Management
+            </h2>
+            <p className="mt-2 text-red-600">
+              Error loading venues: {venuesResult.error}
+            </p>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (statsResult.error || !statsResult.stats) {
+    console.error("Error fetching stats:", statsResult.error);
+    // Could redirect to error page or show error message
+    return (
+      <DashboardLayout user={user}>
+        <div className="space-y-8">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight">
+              Venue Management
+            </h2>
+            <p className="mt-2 text-red-600">
+              Error loading statistics: {statsResult.error}
+            </p>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout user={user}>
-      <div className="space-y-8">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">
-            Store Management
-          </h2>
-          <p className="mt-2 text-muted-foreground">
-            Manage all stores in the system
-          </p>
-        </div>
-
-        <div className="flex min-h-[40vh] items-center justify-center">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Store className="h-6 w-6 text-primary" />
-                <CardTitle>Store Management</CardTitle>
-              </div>
-              <CardDescription>Coming Soon</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">
-                This feature is currently under development. You will be able to
-                create, update, and manage stores here.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <StoresPageClient
+        venues={venuesResult.venues}
+        stats={statsResult.stats}
+      />
     </DashboardLayout>
   );
 }
