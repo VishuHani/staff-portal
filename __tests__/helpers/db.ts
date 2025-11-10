@@ -107,7 +107,9 @@ export const createMockPrisma = () => {
       findMany: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      upsert: vi.fn(),
       delete: vi.fn(),
+      groupBy: vi.fn(),
     },
     $transaction: vi.fn((callback) => callback(createMockPrisma())),
   } as unknown as PrismaClient;

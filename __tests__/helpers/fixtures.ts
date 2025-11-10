@@ -393,3 +393,36 @@ export interface TimeOffRequest {
   createdAt: Date;
   updatedAt: Date;
 }
+
+// ============================================================================
+// AVAILABILITY FIXTURES
+// ============================================================================
+
+export const createAvailabilityFixture = (overrides?: Partial<Availability>) => ({
+  id: faker.string.uuid(),
+  userId: faker.string.uuid(),
+  dayOfWeek: faker.number.int({ min: 0, max: 6 }),
+  isAvailable: faker.datatype.boolean(),
+  isAllDay: false,
+  startTime: "09:00",
+  endTime: "17:00",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  ...overrides,
+});
+
+// ============================================================================
+// TYPE DEFINITIONS (continued)
+// ============================================================================
+
+export interface Availability {
+  id: string;
+  userId: string;
+  dayOfWeek: number;
+  isAvailable: boolean;
+  isAllDay: boolean;
+  startTime: string | null;
+  endTime: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
