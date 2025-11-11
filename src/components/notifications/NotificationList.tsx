@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Loader2, Bell, Inbox } from "lucide-react";
 import { NotificationCard } from "./NotificationCard";
+import { NotificationStats } from "./NotificationStats";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -193,6 +194,16 @@ export function NotificationList({
 
   return (
     <div className="space-y-4">
+      {/* Statistics cards */}
+      {notifications.length > 0 && (
+        <NotificationStats
+          notifications={notifications.map(n => ({
+            type: n.type,
+            readAt: n.read ? new Date() : null
+          }))}
+        />
+      )}
+
       {/* Header with filters and actions */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
@@ -219,15 +230,37 @@ export function NotificationList({
 
           {/* Filter by type */}
           <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as NotificationType | "ALL")}>
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="All types" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All types</SelectItem>
-              <SelectItem value="NEW_MESSAGE">Messages</SelectItem>
-              <SelectItem value="TIME_OFF_REQUEST">Time Off</SelectItem>
-              <SelectItem value="POST_MENTION">Posts</SelectItem>
-              <SelectItem value="SYSTEM_ANNOUNCEMENT">System</SelectItem>
+
+              {/* Message notifications */}
+              <SelectItem value="NEW_MESSAGE">New Message</SelectItem>
+              <SelectItem value="MESSAGE_REPLY">Message Reply</SelectItem>
+              <SelectItem value="MESSAGE_MENTION">Message Mention</SelectItem>
+              <SelectItem value="MESSAGE_REACTION">Message Reaction</SelectItem>
+
+              {/* Post notifications */}
+              <SelectItem value="POST_MENTION">Post Mention</SelectItem>
+              <SelectItem value="POST_PINNED">Post Pinned</SelectItem>
+              <SelectItem value="POST_DELETED">Post Deleted</SelectItem>
+
+              {/* Time off notifications */}
+              <SelectItem value="TIME_OFF_REQUEST">Time Off Request</SelectItem>
+              <SelectItem value="TIME_OFF_APPROVED">Time Off Approved</SelectItem>
+              <SelectItem value="TIME_OFF_REJECTED">Time Off Rejected</SelectItem>
+              <SelectItem value="TIME_OFF_CANCELLED">Time Off Cancelled</SelectItem>
+
+              {/* User/Admin notifications */}
+              <SelectItem value="USER_CREATED">Welcome</SelectItem>
+              <SelectItem value="USER_UPDATED">Account Updated</SelectItem>
+              <SelectItem value="ROLE_CHANGED">Role Changed</SelectItem>
+
+              {/* System notifications */}
+              <SelectItem value="SYSTEM_ANNOUNCEMENT">System Announcement</SelectItem>
+              <SelectItem value="GROUP_REMOVED">Group Removed</SelectItem>
             </SelectContent>
           </Select>
 
