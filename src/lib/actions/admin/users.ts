@@ -23,6 +23,7 @@ import {
   notifyUserDeactivated,
 } from "@/lib/services/notifications";
 import { getCurrentUser } from "@/lib/actions/auth";
+import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 
 /**
  * Get all users with their roles and stores
@@ -162,7 +163,7 @@ export async function getUserStats() {
  * This ensures the user can log in (requires existence in both systems)
  */
 export async function createUser(data: CreateUserInput) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = createUserSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -235,6 +236,29 @@ export async function createUser(data: CreateUserInput) {
     } catch (error) {
       console.error("Error sending welcome notification:", error);
       // Don't fail user creation if notification fails
+    }
+
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "USER_CREATED",
+        resourceType: "User",
+        resourceId: result.userId!,
+        newValue: JSON.stringify({
+          email,
+          firstName,
+          lastName,
+          phone,
+          roleId,
+          storeId,
+          active,
+          venueIds,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail user creation if audit log fails
     }
 
     revalidatePath("/admin/users");
@@ -367,6 +391,37 @@ export async function updateUser(data: UpdateUserInput) {
       // Don't fail the update if notification fails
     }
 
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "USER_UPDATED",
+        resourceType: "User",
+        resourceId: userId,
+        oldValue: JSON.stringify({
+          email: currentUser.email,
+          firstName: currentUser.firstName,
+          lastName: currentUser.lastName,
+          phone: currentUser.phone,
+          roleId: currentUser.roleId,
+          storeId: currentUser.storeId,
+          active: currentUser.active,
+        }),
+        newValue: JSON.stringify({
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          phone: user.phone,
+          roleId: user.roleId,
+          storeId: user.storeId,
+          active: user.active,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail the update if audit log fails
+    }
+
     revalidatePath("/admin/users");
     revalidatePath(`/admin/users/${userId}`);
 
@@ -382,7 +437,7 @@ export async function updateUser(data: UpdateUserInput) {
  * Admin only
  */
 export async function deleteUser(data: DeleteUserInput) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = deleteUserSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -394,10 +449,41 @@ export async function deleteUser(data: DeleteUserInput) {
   const { userId } = validatedFields.data;
 
   try {
+    // Get user info before deletion for audit log
+    const userToDelete = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { role: true },
+    });
+
+    if (!userToDelete) {
+      return { error: "User not found" };
+    }
+
     // Delete from our database (cascade will handle related records)
     await prisma.user.delete({
       where: { id: userId },
     });
+
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "USER_DELETED",
+        resourceType: "User",
+        resourceId: userId,
+        oldValue: JSON.stringify({
+          email: userToDelete.email,
+          firstName: userToDelete.firstName,
+          lastName: userToDelete.lastName,
+          roleId: userToDelete.roleId,
+          roleName: userToDelete.role.name,
+          active: userToDelete.active,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail deletion if audit log fails
+    }
 
     revalidatePath("/admin/users");
 
@@ -460,6 +546,21 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
     } catch (error) {
       console.error("Error sending user status notification:", error);
       // Don't fail the toggle if notification fails
+    }
+
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: newActiveStatus ? "USER_ACTIVATED" : "USER_DEACTIVATED",
+        resourceType: "User",
+        resourceId: userId,
+        oldValue: JSON.stringify({ active: user.active }),
+        newValue: JSON.stringify({ active: newActiveStatus }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail the toggle if audit log fails
     }
 
     revalidatePath("/admin/users");

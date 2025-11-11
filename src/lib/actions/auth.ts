@@ -12,6 +12,7 @@ import {
   type SignupInput,
   type ResetPasswordInput,
 } from "@/lib/auth/schemas";
+import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 
 export async function login(formData: LoginInput) {
   // Validate input
@@ -45,7 +46,35 @@ export async function login(formData: LoginInput) {
 
   if (!user || !user.active) {
     await supabase.auth.signOut();
+    // Log failed login attempt
+    try {
+      if (user) {
+        await createAuditLog({
+          userId: user.id,
+          actionType: "LOGIN_FAILED",
+          resourceType: "Auth",
+          resourceId: user.id,
+          newValue: JSON.stringify({ reason: "Account inactive", email }),
+        });
+      }
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+    }
     return { error: "Account not found or inactive" };
+  }
+
+  // Log successful login
+  try {
+    await createAuditLog({
+      userId: user.id,
+      actionType: "LOGIN_SUCCESS",
+      resourceType: "Auth",
+      resourceId: user.id,
+      newValue: JSON.stringify({ email, roleId: user.roleId }),
+    });
+  } catch (error) {
+    console.error("Error creating audit log:", error);
+    // Don't fail login if audit log fails
   }
 
   revalidatePath("/", "layout");
@@ -102,7 +131,7 @@ export async function signup(formData: SignupInput) {
     return { error: "System error: Staff role not found" };
   }
 
-  await prisma.user.create({
+  const newUser = await prisma.user.create({
     data: {
       id: data.user.id,
       email,
@@ -115,6 +144,20 @@ export async function signup(formData: SignupInput) {
     },
   });
 
+  // Log user signup
+  try {
+    await createAuditLog({
+      userId: newUser.id,
+      actionType: "USER_SIGNUP",
+      resourceType: "Auth",
+      resourceId: newUser.id,
+      newValue: JSON.stringify({ email, firstName, lastName, roleId: staffRole.id }),
+    });
+  } catch (error) {
+    console.error("Error creating audit log:", error);
+    // Don't fail signup if audit log fails
+  }
+
   return {
     success: true,
     message: "Account created! Please check your email to verify your account.",
@@ -123,6 +166,25 @@ export async function signup(formData: SignupInput) {
 
 export async function logout() {
   const supabase = await createClient();
+
+  // Get current user before logout for audit log
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (user) {
+    try {
+      await createAuditLog({
+        userId: user.id,
+        actionType: "LOGOUT",
+        resourceType: "Auth",
+        resourceId: user.id,
+        newValue: JSON.stringify({ email: user.email }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail logout if audit log fails
+    }
+  }
+
   await supabase.auth.signOut();
   revalidatePath("/", "layout");
   redirect("/login");
