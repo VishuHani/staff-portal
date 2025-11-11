@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Users,
+  User,
   Calendar,
   Clock,
   MessageSquare,
@@ -15,6 +16,7 @@ import {
   Store,
   Bell,
   FileText,
+  Lock,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -95,6 +97,12 @@ export function Sidebar({ userRole, className }: SidebarProps) {
       icon: FileText,
       roles: ["ADMIN"],
     },
+    {
+      title: "Venue Permissions",
+      href: "/admin/venue-permissions",
+      icon: Lock,
+      roles: ["ADMIN"],
+    },
   ];
 
   const bottomItems: NavItem[] = [
@@ -102,6 +110,11 @@ export function Sidebar({ userRole, className }: SidebarProps) {
       title: "Notifications",
       href: "/notifications",
       icon: Bell,
+    },
+    {
+      title: "Profile",
+      href: "/settings/profile",
+      icon: User,
     },
     {
       title: "Settings",

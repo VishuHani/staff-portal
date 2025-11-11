@@ -42,7 +42,7 @@ export function DashboardLayout({ user, unreadCount = 0, children }: DashboardLa
 
         {/* Mobile Sidebar */}
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="left" className="w-64 p-0">
+          <SheetContent side="left" className="w-64 p-0" aria-describedby={undefined}>
             <SheetHeader className="border-b p-4">
               <SheetTitle>Navigation</SheetTitle>
             </SheetHeader>

@@ -329,6 +329,33 @@ async function main() {
 
   console.log(`✅ ${channelCount} default channels created`);
 
+  // Create ChannelVenue associations (link channels to the default store)
+  console.log("Creating channel-venue associations...");
+  let channelVenueCount = 0;
+  for (const channelData of channels) {
+    const channel = await prisma.channel.findUnique({
+      where: { name: channelData.name },
+    });
+
+    if (channel) {
+      await prisma.channelVenue.upsert({
+        where: {
+          channelId_venueId: {
+            channelId: channel.id,
+            venueId: defaultStore.id,
+          },
+        },
+        update: {},
+        create: {
+          channelId: channel.id,
+          venueId: defaultStore.id,
+        },
+      });
+      channelVenueCount++;
+    }
+  }
+  console.log(`✅ ${channelVenueCount} channel-venue associations created`);
+
   // Create admin user if environment variables are provided
   // NOTE: This creates the user in BOTH Supabase Auth and Prisma database
   // This is required for login to work (dual authentication system)
