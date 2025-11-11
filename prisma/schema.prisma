@@ -9,37 +9,38 @@ datasource db {
 }
 
 model User {
-  id                 String                    @id @default(cuid())
-  email              String                    @unique
-  password           String?
-  roleId             String
-  storeId            String?
-  active             Boolean                   @default(true)
-  createdAt          DateTime                  @default(now())
-  updatedAt          DateTime                  @updatedAt
-  bio                String?
-  dateOfBirth        DateTime?
-  firstName          String?
-  lastName           String?
-  phone              String?
-  profileCompletedAt DateTime?
-  profileImage       String?
-  auditLogs          AuditLog[]
-  availability       Availability[]
-  comments           Comment[]
-  conversations      ConversationParticipant[]
-  sentMessages       Message[]
-  notifications      Notification[]
-  postReads          PostRead[]
-  posts              Post[]
-  reactions          Reaction[]
-  reviewedTimeOff    TimeOffRequest[]          @relation("ReviewedBy")
-  timeOffRequests    TimeOffRequest[]
-  grantedPermissions UserVenuePermission[]     @relation("GrantedPermissions")
-  venuePermissions   UserVenuePermission[]     @relation("UserPermissions")
-  venues             UserVenue[]
-  role               Role                      @relation(fields: [roleId], references: [id])
-  store              Store?                    @relation(fields: [storeId], references: [id])
+  id                      String                    @id @default(cuid())
+  email                   String                    @unique
+  password                String?
+  roleId                  String
+  storeId                 String?
+  active                  Boolean                   @default(true)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  bio                     String?
+  dateOfBirth             DateTime?
+  firstName               String?
+  lastName                String?
+  phone                   String?
+  profileCompletedAt      DateTime?
+  profileImage            String?
+  auditLogs               AuditLog[]
+  availability            Availability[]
+  comments                Comment[]
+  conversations           ConversationParticipant[]
+  sentMessages            Message[]
+  notificationPreferences NotificationPreference[]
+  notifications           Notification[]
+  postReads               PostRead[]
+  posts                   Post[]
+  reactions               Reaction[]
+  reviewedTimeOff         TimeOffRequest[]          @relation("ReviewedBy")
+  timeOffRequests         TimeOffRequest[]
+  grantedPermissions      UserVenuePermission[]     @relation("GrantedPermissions")
+  venuePermissions        UserVenuePermission[]     @relation("UserPermissions")
+  venues                  UserVenue[]
+  role                    Role                      @relation(fields: [roleId], references: [id])
+  store                   Store?                    @relation(fields: [storeId], references: [id])
 
   @@index([email])
   @@index([firstName])
@@ -428,6 +429,22 @@ model TimeBasedAccess {
   @@map("time_based_access")
 }
 
+model NotificationPreference {
+  id        String                @id @default(cuid())
+  userId    String
+  type      NotificationType
+  channels  NotificationChannel[]
+  enabled   Boolean               @default(true)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId])
+  @@index([type])
+  @@map("notification_preferences")
+}
+
 enum NotificationType {
   NEW_MESSAGE
   MESSAGE_REPLY
@@ -445,4 +462,11 @@ enum NotificationType {
   ROLE_CHANGED
   SYSTEM_ANNOUNCEMENT
   GROUP_REMOVED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+  SMS
 }
