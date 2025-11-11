@@ -13,6 +13,7 @@ import {
   type DeleteRoleInput,
   type AssignPermissionsInput,
 } from "@/lib/schemas/admin/roles";
+import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 
 /**
  * Get all roles with their permissions
@@ -71,7 +72,7 @@ export async function getAllPermissions() {
  * Admin only
  */
 export async function createRole(data: CreateRoleInput & { permissionIds?: string[] }) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = createRoleSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -114,6 +115,25 @@ export async function createRole(data: CreateRoleInput & { permissionIds?: strin
       },
     });
 
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "ROLE_CREATED",
+        resourceType: "Role",
+        resourceId: role.id,
+        newValue: JSON.stringify({
+          name,
+          description,
+          permissionIds: data.permissionIds || [],
+          permissionCount: role.rolePermissions.length,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail role creation if audit log fails
+    }
+
     revalidatePath("/admin/roles");
 
     return { success: true, role };
@@ -128,7 +148,7 @@ export async function createRole(data: CreateRoleInput & { permissionIds?: strin
  * Admin only
  */
 export async function updateRole(data: UpdateRoleInput & { permissionIds?: string[] }) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = updateRoleSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -140,6 +160,22 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
   const { roleId, name, description } = validatedFields.data;
 
   try {
+    // Get current role state for audit log
+    const oldRole = await prisma.role.findUnique({
+      where: { id: roleId },
+      include: {
+        rolePermissions: {
+          include: {
+            permission: true,
+          },
+        },
+      },
+    });
+
+    if (!oldRole) {
+      return { error: "Role not found" };
+    }
+
     // Check if role name is being changed and if it's already taken
     if (name) {
       const existingRole = await prisma.role.findFirst({
@@ -190,6 +226,29 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
       },
     });
 
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "ROLE_UPDATED",
+        resourceType: "Role",
+        resourceId: roleId,
+        oldValue: JSON.stringify({
+          name: oldRole.name,
+          description: oldRole.description,
+          permissionCount: oldRole.rolePermissions.length,
+        }),
+        newValue: JSON.stringify({
+          name: role.name,
+          description: role.description,
+          permissionCount: role.rolePermissions.length,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail role update if audit log fails
+    }
+
     revalidatePath("/admin/roles");
     revalidatePath(`/admin/roles/${roleId}`);
 
@@ -205,7 +264,7 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
  * Admin only - Cannot delete if users are assigned
  */
 export async function deleteRole(data: DeleteRoleInput) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = deleteRoleSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -220,6 +279,13 @@ export async function deleteRole(data: DeleteRoleInput) {
     // Prevent deletion of system roles
     const role = await prisma.role.findUnique({
       where: { id: roleId },
+      include: {
+        rolePermissions: {
+          include: {
+            permission: true,
+          },
+        },
+      },
     });
 
     if (!role) {
@@ -246,6 +312,24 @@ export async function deleteRole(data: DeleteRoleInput) {
       where: { id: roleId },
     });
 
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "ROLE_DELETED",
+        resourceType: "Role",
+        resourceId: roleId,
+        oldValue: JSON.stringify({
+          name: role.name,
+          description: role.description,
+          permissionCount: role.rolePermissions.length,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail role deletion if audit log fails
+    }
+
     revalidatePath("/admin/roles");
 
     return { success: true };
@@ -260,7 +344,7 @@ export async function deleteRole(data: DeleteRoleInput) {
  * Admin only
  */
 export async function assignPermissionsToRole(data: AssignPermissionsInput) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = assignPermissionsSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -272,6 +356,24 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
   const { roleId, permissionIds } = validatedFields.data;
 
   try {
+    // Get role info and old permissions for audit log
+    const role = await prisma.role.findUnique({
+      where: { id: roleId },
+      include: {
+        rolePermissions: {
+          include: {
+            permission: true,
+          },
+        },
+      },
+    });
+
+    if (!role) {
+      return { error: "Role not found" };
+    }
+
+    const oldPermissionIds = role.rolePermissions.map(rp => rp.permissionId);
+
     // Delete existing permissions
     await prisma.rolePermission.deleteMany({
       where: { roleId },
@@ -284,6 +386,29 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
         permissionId,
       })),
     });
+
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "ROLE_PERMISSIONS_UPDATED",
+        resourceType: "Role",
+        resourceId: roleId,
+        oldValue: JSON.stringify({
+          roleName: role.name,
+          permissionIds: oldPermissionIds,
+          permissionCount: oldPermissionIds.length,
+        }),
+        newValue: JSON.stringify({
+          roleName: role.name,
+          permissionIds,
+          permissionCount: permissionIds.length,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail permission assignment if audit log fails
+    }
 
     revalidatePath("/admin/roles");
     revalidatePath(`/admin/roles/${roleId}`);
