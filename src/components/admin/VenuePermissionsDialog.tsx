@@ -356,8 +356,9 @@ export function VenuePermissionsDialog({
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <ScrollArea className="flex-1 pr-4">
-                  <Accordion type="multiple" className="space-y-2">
+                <div className="flex-1 min-h-0">
+                  <ScrollArea className="h-full pr-4">
+                    <Accordion type="multiple" className="space-y-2">
                     {Object.entries(allPermissions).map(
                       ([resource, permissions]) => {
                         const resourceKey = resource as PermissionResource;
@@ -495,8 +496,9 @@ export function VenuePermissionsDialog({
                         );
                       }
                     )}
-                  </Accordion>
-                </ScrollArea>
+                    </Accordion>
+                  </ScrollArea>
+                </div>
               )}
             </>
           )}
