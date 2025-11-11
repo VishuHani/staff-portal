@@ -13,6 +13,18 @@ import {
   type PermissionAction,
 } from "./permissions";
 
+// Re-export advanced permission functions for convenient access
+export {
+  canAccessField,
+  getUserFieldPermissions,
+  filterFieldsByPermission,
+  hasConditionalPermission,
+  hasTimeBasedAccess,
+  getUserTimeWindows,
+  hasAdvancedPermission,
+  type FieldAccessLevel,
+} from "./advanced-permissions";
+
 /**
  * Require authentication - redirect to login if not authenticated
  * @returns The authenticated user
