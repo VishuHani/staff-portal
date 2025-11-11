@@ -17,6 +17,7 @@ import {
   Bell,
   FileText,
   Lock,
+  Megaphone,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -96,6 +97,12 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       title: "Audit Logs",
       href: "/admin/audit",
       icon: FileText,
+      roles: ["ADMIN"],
+    },
+    {
+      title: "Notifications",
+      href: "/admin/notifications",
+      icon: Megaphone,
       roles: ["ADMIN"],
     },
     {
