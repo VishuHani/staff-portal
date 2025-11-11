@@ -1,5 +1,7 @@
 import { NotificationType, NotificationChannel } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { sendBrevoEmail } from "./email/brevo";
+import { getEmailTemplate } from "./email/templates";
 
 /**
  * Notification Channels Service
@@ -74,8 +76,8 @@ export async function getEnabledChannels(
 }
 
 /**
- * Send notification via EMAIL channel
- * Placeholder for future email integration
+ * Send notification via EMAIL channel using Brevo
+ * Fetches user email, formats template, and sends via Brevo API
  */
 export async function sendEmailNotification(
   userId: string,
@@ -85,21 +87,43 @@ export async function sendEmailNotification(
   link?: string
 ) {
   try {
-    // TODO: Integrate with email service (e.g., SendGrid, AWS SES, Resend)
-    console.log(`[EMAIL] Notification to user ${userId}:`, {
-      type,
-      title,
-      message,
-      link,
+    // Fetch user email and name from database
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        email: true,
+        firstName: true,
+        lastName: true,
+      },
     });
 
-    // Future implementation:
-    // - Fetch user email from database
-    // - Format email template based on notification type
-    // - Send via email service
-    // - Log delivery status
+    if (!user?.email) {
+      console.error(`[EMAIL] User ${userId} has no email address`);
+      return { success: false, channel: "EMAIL", error: "No email address" };
+    }
 
-    return { success: true, channel: "EMAIL" };
+    // Get formatted email template for notification type
+    const template = getEmailTemplate(type, title, message, link);
+
+    // Send email via Brevo
+    const userName = user.firstName
+      ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ""}`
+      : user.email;
+
+    const result = await sendBrevoEmail({
+      to: user.email,
+      toName: userName,
+      subject: template.subject,
+      htmlContent: template.htmlContent,
+    });
+
+    if (result.success) {
+      console.log(`[EMAIL] Sent to ${user.email} (messageId: ${result.messageId})`);
+      return { success: true, channel: "EMAIL", messageId: result.messageId };
+    } else {
+      console.error(`[EMAIL] Failed to send to ${user.email}:`, result.error);
+      return { success: false, channel: "EMAIL", error: result.error };
+    }
   } catch (error) {
     console.error("Error sending email notification:", error);
     return { success: false, channel: "EMAIL", error };
