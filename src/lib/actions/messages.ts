@@ -16,6 +16,11 @@ import {
   type MarkAsReadInput,
   type ToggleReactionInput,
 } from "@/lib/schemas/messages";
+import {
+  notifyNewDirectMessage,
+  notifyMessageMention,
+  notifyMessageReaction,
+} from "@/lib/services/notifications";
 
 /**
  * Get messages for a conversation with pagination
@@ -189,10 +194,48 @@ export async function sendMessage(data: CreateMessageInput) {
       },
     });
 
+    // Extract @mentions from message content
+    const mentionRegex = /@(\w+)/g;
+    const mentions = content.match(mentionRegex) || [];
+    const mentionedUsernames = mentions.map((m) => m.substring(1)); // Remove @ symbol
+
+    // Get user IDs for mentioned users (match by email prefix or name)
+    const mentionedUsers = await prisma.user.findMany({
+      where: {
+        OR: [
+          {
+            email: {
+              in: mentionedUsernames.map((u) => `${u}@`), // Partial email match
+              mode: "insensitive",
+            },
+          },
+          {
+            firstName: {
+              in: mentionedUsernames,
+              mode: "insensitive",
+            },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+      },
+    });
+
+    const mentionedUserIds = new Set(mentionedUsers.map((u) => u.id));
+
     // Create notifications for other participants
     const otherParticipants = conversation.participants.filter(
       (p) => p.userId !== user.id
     );
+
+    const senderName =
+      user.firstName || user.lastName
+        ? `${user.firstName || ""} ${user.lastName || ""}`.trim()
+        : user.email;
 
     for (const participant of otherParticipants) {
       // Check if conversation is muted
@@ -200,20 +243,26 @@ export async function sendMessage(data: CreateMessageInput) {
         participant.mutedUntil && participant.mutedUntil > new Date();
 
       if (!isMuted) {
-        const notificationMessage =
-          conversation.type === "ONE_ON_ONE"
-            ? `${user.email}: ${content.substring(0, 50)}${content.length > 50 ? "..." : ""}`
-            : `${user.email} in ${conversation.name || "group"}: ${content.substring(0, 50)}${content.length > 50 ? "..." : ""}`;
-
-        await prisma.notification.create({
-          data: {
-            userId: participant.userId,
-            type: "NEW_MESSAGE",
-            title: "New message",
-            message: notificationMessage,
-            link: `/messages?conversationId=${conversationId}`,
-          },
-        });
+        // If user was mentioned, send mention notification instead of regular message notification
+        if (mentionedUserIds.has(participant.userId)) {
+          await notifyMessageMention(
+            participant.userId,
+            user.id,
+            message.id,
+            conversationId,
+            senderName
+          );
+        } else {
+          // Send regular new message notification using service layer
+          await notifyNewDirectMessage(
+            participant.userId,
+            user.id,
+            message.id,
+            conversationId,
+            senderName,
+            content
+          );
+        }
       }
     }
 
@@ -648,12 +697,15 @@ export async function toggleReaction(data: ToggleReactionInput) {
       (r) => r.userId === user.id && r.emoji === emoji
     );
 
+    let reactionAdded = false;
+
     if (existingReactionIndex !== -1) {
       // Remove the reaction
       reactions.splice(existingReactionIndex, 1);
     } else {
       // Add the reaction
       reactions.push({ emoji, userId: user.id });
+      reactionAdded = true;
     }
 
     // Update message
@@ -663,6 +715,23 @@ export async function toggleReaction(data: ToggleReactionInput) {
         reactions: reactions.length > 0 ? JSON.stringify(reactions) : null,
       },
     });
+
+    // Send notification to message author when someone reacts (but not if reacting to own message)
+    if (reactionAdded && message.senderId !== user.id) {
+      const reactorName =
+        user.firstName || user.lastName
+          ? `${user.firstName || ""} ${user.lastName || ""}`.trim()
+          : user.email;
+
+      await notifyMessageReaction(
+        message.senderId,
+        user.id,
+        messageId,
+        message.conversationId,
+        reactorName,
+        emoji
+      );
+    }
 
     revalidatePath("/messages");
 
