@@ -574,3 +574,29 @@ export async function getUsersWithVenuePermissions(venueId: string) {
     };
   }
 }
+
+/**
+ * Get total count of venue permission assignments
+ * Used for statistics display
+ *
+ * @returns Count of all venue permission assignments
+ */
+export async function getTotalVenuePermissionAssignments() {
+  try {
+    await requireAdmin();
+
+    const count = await prisma.userVenuePermission.count();
+
+    return {
+      success: true,
+      count,
+    };
+  } catch (error) {
+    console.error("Error getting venue permission count:", error);
+    return {
+      success: false,
+      error: "Failed to get count",
+      count: 0,
+    };
+  }
+}

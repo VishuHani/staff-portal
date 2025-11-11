@@ -3,24 +3,26 @@ import { requireAdmin } from "@/lib/rbac/access";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { VenuePermissionsPageClient } from "./venue-permissions-page-client";
 import { getAllVenues } from "@/lib/actions/admin/venues";
-import { getAvailablePermissions } from "@/lib/actions/admin/venue-permissions";
-import { prisma } from "@/lib/prisma";
+import {
+  getAvailablePermissions,
+  getTotalVenuePermissionAssignments
+} from "@/lib/actions/admin/venue-permissions";
 
 export default async function AdminVenuePermissionsPage() {
   const user = await requireAdmin();
 
-  const [venuesResult, permissionsResult] = await Promise.all([
+  const [venuesResult, permissionsResult, assignmentsResult] = await Promise.all([
     getAllVenues(),
     getAvailablePermissions(),
+    getTotalVenuePermissionAssignments(),
   ]);
 
-  if (venuesResult.error || permissionsResult.error) {
+  if (venuesResult.error || permissionsResult.error || assignmentsResult.error) {
     console.error("Error loading venue permissions page data");
     redirect("/dashboard?error=forbidden");
   }
 
-  // Get count of users with venue permissions
-  const totalAssignments = await prisma.userVenuePermission.count();
+  const totalAssignments = assignmentsResult.count || 0;
 
   return (
     <DashboardLayout user={user}>
