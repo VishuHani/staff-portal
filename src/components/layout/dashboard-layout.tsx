@@ -21,10 +21,11 @@ interface DashboardLayoutProps {
     };
   };
   unreadCount?: number;
+  unreadMessageCount?: number;
   children: React.ReactNode;
 }
 
-export function DashboardLayout({ user, unreadCount = 0, children }: DashboardLayoutProps) {
+export function DashboardLayout({ user, unreadCount = 0, unreadMessageCount = 0, children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
@@ -36,7 +37,7 @@ export function DashboardLayout({ user, unreadCount = 0, children }: DashboardLa
         {/* Desktop Sidebar */}
         <aside className="hidden w-64 border-r bg-background lg:block">
           <div className="h-full overflow-y-auto p-4">
-            <Sidebar userRole={user.role.name} />
+            <Sidebar userRole={user.role.name} unreadMessageCount={unreadMessageCount} />
           </div>
         </aside>
 
@@ -47,7 +48,7 @@ export function DashboardLayout({ user, unreadCount = 0, children }: DashboardLa
               <SheetTitle>Navigation</SheetTitle>
             </SheetHeader>
             <div className="h-full overflow-y-auto p-4">
-              <Sidebar userRole={user.role.name} />
+              <Sidebar userRole={user.role.name} unreadMessageCount={unreadMessageCount} />
             </div>
           </SheetContent>
         </Sheet>

@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/actions/auth";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { getUnreadCount } from "@/lib/actions/notifications";
+import { getUnreadMessageCount } from "@/lib/actions/messages";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,8 +20,17 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
+  const [unreadResult, messageCountResult] = await Promise.all([
+    getUnreadCount({ userId: user.id }),
+    getUnreadMessageCount(),
+  ]);
+
   return (
-    <DashboardLayout user={user}>
+    <DashboardLayout
+      user={user}
+      unreadCount={unreadResult.count || 0}
+      unreadMessageCount={messageCountResult.count || 0}
+    >
       <div className="space-y-8">
         {/* Welcome Section */}
         <div>

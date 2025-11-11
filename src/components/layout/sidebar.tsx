@@ -24,6 +24,7 @@ import { Separator } from "@/components/ui/separator";
 interface SidebarProps {
   userRole: string;
   className?: string;
+  unreadMessageCount?: number;
 }
 
 interface NavItem {
@@ -34,7 +35,7 @@ interface NavItem {
   roles?: string[]; // If specified, only shown to these roles
 }
 
-export function Sidebar({ userRole, className }: SidebarProps) {
+export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProps) {
   const pathname = usePathname();
 
   const navItems: NavItem[] = [
@@ -62,7 +63,7 @@ export function Sidebar({ userRole, className }: SidebarProps) {
       title: "Messages",
       href: "/messages",
       icon: Mail,
-      badge: 3, // TODO: Dynamic badge from notifications
+      badge: unreadMessageCount || undefined,
     },
   ];
 
