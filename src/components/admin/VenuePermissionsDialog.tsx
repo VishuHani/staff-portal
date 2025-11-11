@@ -279,7 +279,7 @@ export function VenuePermissionsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-4xl h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5" />
@@ -356,9 +356,8 @@ export function VenuePermissionsDialog({
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <div className="flex-1 min-h-0">
-                  <ScrollArea className="h-full pr-4">
-                    <Accordion type="multiple" className="space-y-2">
+                <ScrollArea className="flex-1 min-h-0 pr-4">
+                  <Accordion type="multiple" className="space-y-2">
                     {Object.entries(allPermissions).map(
                       ([resource, permissions]) => {
                         const resourceKey = resource as PermissionResource;
@@ -497,8 +496,7 @@ export function VenuePermissionsDialog({
                       }
                     )}
                     </Accordion>
-                  </ScrollArea>
-                </div>
+                </ScrollArea>
               )}
             </>
           )}
