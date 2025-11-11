@@ -211,7 +211,6 @@ export function AuditLogsPageClient({ stats, filterOptions }: AuditLogsPageClien
                   <SelectValue placeholder="All users" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All users</SelectItem>
                   {filterOptions.users.map(user => (
                     <SelectItem key={user.id} value={user.id}>
                       {user.name}
@@ -229,7 +228,6 @@ export function AuditLogsPageClient({ stats, filterOptions }: AuditLogsPageClien
                   <SelectValue placeholder="All actions" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All actions</SelectItem>
                   {filterOptions.actionTypes.map(action => (
                     <SelectItem key={action} value={action}>
                       {action}
@@ -247,7 +245,6 @@ export function AuditLogsPageClient({ stats, filterOptions }: AuditLogsPageClien
                   <SelectValue placeholder="All resources" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All resources</SelectItem>
                   {filterOptions.resourceTypes.map(resource => (
                     <SelectItem key={resource} value={resource}>
                       {resource}
