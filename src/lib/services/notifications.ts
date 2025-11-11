@@ -1,9 +1,15 @@
 import { prisma } from "@/lib/prisma";
 import { NotificationType } from "@prisma/client";
+import {
+  shouldNotifyUser,
+  getEnabledChannels,
+  sendMultiChannelNotification,
+} from "./notification-channels";
 
 /**
  * Universal Notification Service
  * Centralized service for creating notifications across all features
+ * Enhanced with multi-channel support and user preferences
  */
 
 export interface CreateNotificationParams {
@@ -17,9 +23,24 @@ export interface CreateNotificationParams {
 /**
  * Core function to create a single notification
  * Prevents duplicate notifications within 5 minutes
+ * Enhanced with user preference checking and multi-channel delivery
  */
 export async function createNotification(params: CreateNotificationParams) {
   try {
+    // Check if user has enabled this notification type
+    const shouldNotify = await shouldNotifyUser(params.userId, params.type);
+    if (!shouldNotify) {
+      console.log(`User ${params.userId} has disabled ${params.type} notifications`);
+      return null;
+    }
+
+    // Get enabled channels for this user and notification type
+    const enabledChannels = await getEnabledChannels(params.userId, params.type);
+    if (enabledChannels.length === 0) {
+      console.log(`User ${params.userId} has no enabled channels for ${params.type}`);
+      return null;
+    }
+
     // Check for duplicate notification in last 5 minutes
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const existingNotification = await prisma.notification.findFirst({
@@ -36,16 +57,34 @@ export async function createNotification(params: CreateNotificationParams) {
       return null;
     }
 
-    // Create the notification
-    const notification = await prisma.notification.create({
-      data: {
-        userId: params.userId,
-        type: params.type,
-        title: params.title,
-        message: params.message || "",
-        link: params.link,
-      },
-    });
+    // Create in-app notification if IN_APP channel is enabled
+    let notification = null;
+    if (enabledChannels.includes("IN_APP")) {
+      notification = await prisma.notification.create({
+        data: {
+          userId: params.userId,
+          type: params.type,
+          title: params.title,
+          message: params.message || "",
+          link: params.link,
+        },
+      });
+    }
+
+    // Send to other enabled channels (EMAIL, PUSH, SMS)
+    const otherChannels = enabledChannels.filter((ch) => ch !== "IN_APP");
+    if (otherChannels.length > 0) {
+      // Send notifications to other channels asynchronously
+      sendMultiChannelNotification(
+        params.userId,
+        params.type,
+        params.title,
+        params.message || "",
+        params.link ?? undefined
+      ).catch((error) => {
+        console.error("Error sending multi-channel notification:", error);
+      });
+    }
 
     return notification;
   } catch (error) {
@@ -57,22 +96,70 @@ export async function createNotification(params: CreateNotificationParams) {
 /**
  * Create multiple notifications in batch
  * Useful for broadcasting to multiple users
+ * Enhanced to respect user preferences and send via multiple channels
  */
 export async function createBulkNotifications(
   params: Omit<CreateNotificationParams, "userId">,
   userIds: string[]
 ) {
   try {
-    const notifications = await prisma.notification.createMany({
-      data: userIds.map((userId) => ({
-        userId,
-        type: params.type,
-        title: params.title,
-        message: params.message || "",
-        link: params.link,
-      })),
-      skipDuplicates: true,
-    });
+    // Filter users who have enabled this notification type
+    const usersWithPreferences = await Promise.all(
+      userIds.map(async (userId) => {
+        const shouldNotify = await shouldNotifyUser(userId, params.type);
+        const channels = shouldNotify
+          ? await getEnabledChannels(userId, params.type)
+          : [];
+        return { userId, shouldNotify, channels };
+      })
+    );
+
+    const usersToNotify = usersWithPreferences.filter(
+      (u) => u.shouldNotify && u.channels.length > 0
+    );
+
+    if (usersToNotify.length === 0) {
+      console.log(`No users to notify for ${params.type}`);
+      return null;
+    }
+
+    // Create in-app notifications for users who have IN_APP enabled
+    const inAppUsers = usersToNotify.filter((u) =>
+      u.channels.includes("IN_APP")
+    );
+
+    let notifications = null;
+    if (inAppUsers.length > 0) {
+      notifications = await prisma.notification.createMany({
+        data: inAppUsers.map((u) => ({
+          userId: u.userId,
+          type: params.type,
+          title: params.title,
+          message: params.message || "",
+          link: params.link,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    // Send to other channels for users who have them enabled
+    for (const user of usersToNotify) {
+      const otherChannels = user.channels.filter((ch) => ch !== "IN_APP");
+      if (otherChannels.length > 0) {
+        sendMultiChannelNotification(
+          user.userId,
+          params.type,
+          params.title,
+          params.message || "",
+          params.link ?? undefined
+        ).catch((error) => {
+          console.error(
+            `Error sending multi-channel notification to user ${user.userId}:`,
+            error
+          );
+        });
+      }
+    }
 
     return notifications;
   } catch (error) {
