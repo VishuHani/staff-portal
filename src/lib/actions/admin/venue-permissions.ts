@@ -8,6 +8,7 @@ import {
   type Permission,
 } from "@/lib/rbac/permissions";
 import { revalidatePath } from "next/cache";
+import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 
 /**
  * VENUE-SCOPED PERMISSION MANAGEMENT ACTIONS
@@ -259,6 +260,27 @@ export async function grantUserVenuePermission(
       },
     });
 
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "VENUE_PERMISSION_GRANTED",
+        resourceType: "VenuePermission",
+        resourceId: `${userId}-${venueId}-${permissionId}`,
+        newValue: JSON.stringify({
+          userId,
+          userEmail: user.email,
+          venueId,
+          venueName: venue.name,
+          permissionId,
+          permission: `${permission.resource}:${permission.action}`,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail permission grant if audit log fails
+    }
+
     revalidatePath("/admin/users");
     revalidatePath(`/admin/users/${userId}`);
 
@@ -289,7 +311,23 @@ export async function revokeUserVenuePermission(
   permissionId: string
 ) {
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
+
+    // Get permission info before deleting for audit log
+    const existingPermission = await prisma.userVenuePermission.findUnique({
+      where: {
+        userId_venueId_permissionId: {
+          userId,
+          venueId,
+          permissionId,
+        },
+      },
+      include: {
+        user: { select: { email: true } },
+        venue: { select: { name: true } },
+        permission: { select: { resource: true, action: true } },
+      },
+    });
 
     const deleted = await prisma.userVenuePermission.deleteMany({
       where: {
@@ -304,6 +342,29 @@ export async function revokeUserVenuePermission(
         success: false,
         error: "Permission not found or already revoked",
       };
+    }
+
+    // Create audit log
+    if (existingPermission) {
+      try {
+        await createAuditLog({
+          userId: admin.id,
+          actionType: "VENUE_PERMISSION_REVOKED",
+          resourceType: "VenuePermission",
+          resourceId: `${userId}-${venueId}-${permissionId}`,
+          oldValue: JSON.stringify({
+            userId,
+            userEmail: existingPermission.user.email,
+            venueId,
+            venueName: existingPermission.venue.name,
+            permissionId,
+            permission: `${existingPermission.permission.resource}:${existingPermission.permission.action}`,
+          }),
+        });
+      } catch (error) {
+        console.error("Error creating audit log:", error);
+        // Don't fail permission revocation if audit log fails
+      }
     }
 
     revalidatePath("/admin/users");
@@ -387,6 +448,16 @@ export async function bulkUpdateUserVenuePermissions(
       };
     }
 
+    // Get old permissions before transaction for audit log
+    const oldPermissions = await prisma.userVenuePermission.findMany({
+      where: {
+        userId,
+        venueId,
+      },
+      select: { permissionId: true },
+    });
+    const oldPermissionIds = oldPermissions.map(p => p.permissionId);
+
     // Use transaction to delete old and create new permissions
     await prisma.$transaction(async (tx) => {
       // Delete all existing venue permissions for this user at this venue
@@ -409,6 +480,33 @@ export async function bulkUpdateUserVenuePermissions(
         });
       }
     });
+
+    // Create audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "VENUE_PERMISSIONS_BULK_UPDATED",
+        resourceType: "VenuePermission",
+        resourceId: `${userId}-${venueId}`,
+        oldValue: JSON.stringify({
+          userId,
+          venueId,
+          venueName: venue.name,
+          permissionIds: oldPermissionIds,
+          permissionCount: oldPermissionIds.length,
+        }),
+        newValue: JSON.stringify({
+          userId,
+          venueId,
+          venueName: venue.name,
+          permissionIds,
+          permissionCount: permissionIds.length,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail bulk update if audit log fails
+    }
 
     revalidatePath("/admin/users");
     revalidatePath(`/admin/users/${userId}`);

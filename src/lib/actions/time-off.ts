@@ -20,6 +20,7 @@ import {
   notifyTimeOffRejected,
   notifyTimeOffCancelled,
 } from "@/lib/services/notifications";
+import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 
 /**
  * Get all time-off requests for the current user
@@ -467,6 +468,43 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
         },
       },
     });
+
+    // Create audit log
+    try {
+      const requesterName = updated.user.firstName && updated.user.lastName
+        ? `${updated.user.firstName} ${updated.user.lastName}`
+        : updated.user.email;
+
+      await createAuditLog({
+        userId: user.id,
+        actionType: status === "APPROVED" ? "TIMEOFF_APPROVED" : "TIMEOFF_REJECTED",
+        resourceType: "TimeOffRequest",
+        resourceId: id,
+        oldValue: JSON.stringify({
+          requestId: id,
+          status: "PENDING",
+          userId: request.userId,
+          requesterName,
+          startDate: request.startDate,
+          endDate: request.endDate,
+          type: request.type,
+        }),
+        newValue: JSON.stringify({
+          requestId: id,
+          status,
+          userId: request.userId,
+          requesterName,
+          reviewerId: user.id,
+          startDate: request.startDate,
+          endDate: request.endDate,
+          type: request.type,
+          notes: notes || null,
+        }),
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail the review if audit log fails
+    }
 
     // Notify requester about decision
     try {
