@@ -81,7 +81,11 @@ export function ProfilePageClient({ profile }: ProfilePageClientProps) {
               <div className="flex items-center gap-2 text-sm">
                 <Calendar className="h-4 w-4 text-gray-500" />
                 <span className="text-gray-600">
-                  Joined {new Date(profile.createdAt).toLocaleDateString()}
+                  Joined {new Date(profile.createdAt).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
                 </span>
               </div>
 
