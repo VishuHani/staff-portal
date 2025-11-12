@@ -5,6 +5,7 @@ import { DateRange } from "react-day-picker";
 import { startOfWeek, endOfWeek } from "date-fns";
 import { ReportFilters, FilterValues } from "@/components/reports/ReportFilters";
 import { ConflictsList } from "@/components/reports/ConflictsList";
+import { ExportButton } from "@/components/reports/ExportButton";
 import { getConflictsReport } from "@/lib/actions/reports/availability-reports";
 import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +20,7 @@ interface ConflictsReportClientProps {
 
 export function ConflictsReportClient({ venues = [] }: ConflictsReportClientProps) {
   const [conflictsData, setConflictsData] = useState<any>(null);
+  const [rawConflictsData, setRawConflictsData] = useState<any>(null); // For export
   const [loading, setLoading] = useState(false);
   const [autoGenerateAI, setAutoGenerateAI] = useState(true); // Auto-generate AI resolutions by default
   const [filters, setFilters] = useState<FilterValues>({
@@ -48,6 +50,7 @@ export function ConflictsReportClient({ venues = [] }: ConflictsReportClientProp
 
         if (result.success) {
           setConflictsData(result.data);
+          setRawConflictsData(result.data); // Store for export
           if (autoGenerateAI) {
             toast.success("Conflicts loaded with AI resolutions");
           }
@@ -103,6 +106,17 @@ export function ConflictsReportClient({ venues = [] }: ConflictsReportClientProp
         showSeverity={true}
         venues={venues}
       />
+
+      {/* Export Button */}
+      {rawConflictsData && (
+        <div className="flex justify-end">
+          <ExportButton
+            reportType="conflicts"
+            reportData={rawConflictsData}
+            formats={["csv", "excel", "pdf"]}
+          />
+        </div>
+      )}
 
       {loading ? (
         <Card>
