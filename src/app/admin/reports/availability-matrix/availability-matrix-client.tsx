@@ -13,9 +13,10 @@ import { Loader2 } from "lucide-react";
 
 interface AvailabilityMatrixClientProps {
   venues?: Array<{ id: string; name: string }>;
+  roles?: Array<{ id: string; name: string }>;
 }
 
-export function AvailabilityMatrixClient({ venues = [] }: AvailabilityMatrixClientProps) {
+export function AvailabilityMatrixClient({ venues = [], roles = [] }: AvailabilityMatrixClientProps) {
   const [matrixData, setMatrixData] = useState<any>(null);
   const [rawMatrixData, setRawMatrixData] = useState<any>(null); // For export
   const [loading, setLoading] = useState(false);
@@ -99,6 +100,7 @@ export function AvailabilityMatrixClient({ venues = [] }: AvailabilityMatrixClie
           showTimeSlot={true}
           showSearch={true}
           venues={venues}
+          roles={roles}
         />
       </div>
 
