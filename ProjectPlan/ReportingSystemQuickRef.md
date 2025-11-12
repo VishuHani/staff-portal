@@ -29,16 +29,49 @@
 
 ### Reusable Components
 
-#### Report Filters
+#### Report Filters (Enhanced with Multi-Select)
 ```tsx
 import { ReportFilters } from "@/components/reports/ReportFilters";
 
 <ReportFilters
   onApplyFilters={(filters) => handleFilters(filters)}
-  showTimeSlot={true}
   showVenue={true}
   showRole={true}
+  showTimeSlot={true}
+  showSearch={true}
+  showSeverity={false}
+  venues={venues} // Array<{ id: string; name: string }>
+  roles={roles}   // Array<{ id: string; name: string }>
 />
+
+// Features:
+// - Multi-select for venues and roles
+// - Quick date filters (Today, This Week, Next Week, This Month)
+// - Filter persistence in localStorage
+// - Active filter badges with individual removal
+// - Search by staff name/email
+// - Time slot filtering
+// - Severity filtering (for conflicts report)
+```
+
+#### Multi-Select Component
+```tsx
+import { MultiSelect } from "@/components/ui/multi-select";
+
+const venueOptions = venues.map(v => ({ label: v.name, value: v.id }));
+
+<MultiSelect
+  options={venueOptions}
+  selected={selectedVenueIds}
+  onChange={setSelectedVenueIds}
+  placeholder="Select venues..."
+/>
+
+// Features:
+// - Searchable dropdown with Command component
+// - Selected items shown as badges in button
+// - Click X on badge to remove individual item
+// - Checkbox-style selection with visual feedback
 ```
 
 #### Date Range Picker
@@ -69,10 +102,23 @@ import { CoverageChart } from "@/components/reports/CoverageChart";
 import { ExportButton } from "@/components/reports/ExportButton";
 
 <ExportButton
-  reportType="matrix"
-  reportData={data}
-  filters={currentFilters}
+  reportType="matrix" // "matrix" | "coverage" | "conflicts" | "calendar" | "gaps"
+  reportData={rawData} // Store raw data from server action
+  formats={["csv", "excel", "pdf", "ical"]} // Optional: customize available formats
 />
+
+// Supported Formats:
+// - CSV: UTF-8 encoded, proper escaping
+// - Excel: Multi-sheet workbooks with formatting
+// - PDF: Landscape orientation, styled tables
+// - iCal: RFC 5545 compliant calendar events
+//
+// Features:
+// - Dropdown menu with format icons
+// - Loading states during generation
+// - Automatic file download
+// - Toast notifications on success/error
+// - Base64 encoding for binary formats
 ```
 
 #### Conflict Resolutions (AI-Powered)
