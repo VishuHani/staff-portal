@@ -8,12 +8,108 @@
 
 ## Current Status
 
-**Active Phase**: Phase 3 - Reporting System (Day 14/19 Complete - 74%) ✅
-**Next Phase**: Advanced Filtering & Search (Days 15-16)
+**Active Phase**: Phase 3 - Reporting System (Day 15/19 Complete - 79%) ✅
+**Next Phase**: Testing, Optimization & Polish (Days 16-17)
 
 ---
 
 ## Completed Work
+
+### 2025-11-12: Phase 3 Day 15 - Advanced Filtering & Multi-Select ✅
+
+**Overview**: Implemented advanced filtering capabilities including multi-select for venues/roles, quick date filter buttons, localStorage persistence, and active filter badges for better UX.
+
+**New Features**:
+- Multi-select filters for venues (select multiple simultaneously)
+- Multi-select filters for roles (select multiple simultaneously)
+- Quick filter buttons for common date ranges (Today, This Week, Next Week, This Month)
+- Filter persistence in localStorage (remembers user preferences)
+- Active filter badges with individual removal (click X to remove specific filters)
+- Enhanced filter count indicators showing selection counts
+
+**Components Created**:
+1. **src/components/ui/multi-select.tsx** (125 lines)
+   - Reusable multi-select component with Command + Popover
+   - Badge display in trigger button
+   - Search/filter options in dropdown
+   - Checkbox-style selection with checkmarks
+   - Individual item removal via badge X buttons
+
+**Components Updated**:
+2. **src/components/reports/ReportFilters.tsx** (427 lines)
+   - Added MultiSelect components for venues and roles
+   - Added 4 quick filter buttons for date ranges
+   - Implemented localStorage persistence logic
+   - Added active filter badges display section
+   - Extended FilterValues interface (venueIds[], roleIds[])
+   - Backward compatibility maintained (venueId, roleId)
+   - Enhanced state management with useEffect hooks
+
+3. **src/app/admin/reports/availability-matrix/page.tsx**
+   - Fetch roles alongside venues using Promise.all
+   - Pass roles prop to client component
+
+4. **src/app/admin/reports/availability-matrix/availability-matrix-client.tsx**
+   - Accept roles in component interface
+   - Pass roles to ReportFilters component
+
+**Feature Details**:
+
+**Multi-Select:**
+- Select multiple venues/roles at once
+- Displays selected items as badges in button
+- Shows count: "Venues (3 selected)"
+- Click badge to remove individual selection
+- Searchable dropdown with checkboxes
+
+**Quick Filters:**
+- "Today" button - Sets date range to today only
+- "This Week" - Current week (Monday-Sunday)
+- "Next Week" - Next week range
+- "This Month" - Current month range
+- Uses date-fns for accurate calculations
+
+**Filter Persistence:**
+- Auto-saves filters to localStorage on apply
+- Loads saved filters on component mount
+- Persists: venues, roles, search, severity, time slots
+- Date range excluded (often dynamic/context-specific)
+- Clears localStorage when "Clear" button clicked
+- Error handling with try/catch blocks
+
+**Active Filter Badges:**
+- Visual display of all active filters
+- Each filter shown as removable badge
+- Click X to quickly remove specific filter
+- Shows: venue names, role names, search query, time slots, severity level
+- Separated by border for visual clarity
+
+**Technical Implementation**:
+- Multi-select built with shadcn Command + Popover components
+- LocalStorage key: "reportFilters"
+- FilterValues extended with venueIds[], roleIds[] arrays
+- Backward compatible: First selection also sets venueId/roleId
+- JSON serialization for localStorage with error handling
+- Badge component with custom remove button handlers
+
+**User Experience**:
+- See all active filters at a glance
+- Remove filters individually without clearing all
+- One-click quick date filters for common ranges
+- Multi-select with visual feedback
+- Filter counts show selection quantities
+- Filters remembered across page reloads
+- Cleaner, more intuitive UI layout
+
+**Remaining Work** (Optional for Day 16):
+- Update other report pages to fetch/pass roles
+- All reports work with backward-compatible venueId/roleId
+- Add URL params for shareable filter links
+
+**Progress**: Phase 3 Day 15/19 Complete (79%)
+**Commit**: 086c493
+
+---
 
 ### 2025-11-12: Phase 3 Day 14 - Export Integration for Remaining Reports ✅
 
