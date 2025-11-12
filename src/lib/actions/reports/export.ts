@@ -96,7 +96,7 @@ function generateMatrixCSV(data: any): string {
     rows.push(row);
   });
 
-  return rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","")).join("\n");
+  return rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
 }
 
 function generateCoverageCSV(data: any): string {
