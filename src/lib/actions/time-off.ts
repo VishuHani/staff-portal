@@ -133,11 +133,6 @@ export async function getAllTimeOffRequests(filters?: FilterTimeOffRequestsInput
                 name: true,
               },
             },
-            store: {
-              select: {
-                name: true,
-              },
-            },
           },
         },
         reviewer: {

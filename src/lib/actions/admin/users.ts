@@ -44,7 +44,6 @@ export async function getAllUsers() {
             },
           },
         },
-        store: true, // Legacy field
         venues: {
           include: {
             venue: {
@@ -90,7 +89,6 @@ export async function getUserById(userId: string) {
             },
           },
         },
-        store: true,
         availability: {
           orderBy: {
             createdAt: "desc",
@@ -172,7 +170,7 @@ export async function createUser(data: CreateUserInput) {
     };
   }
 
-  const { email, password, firstName, lastName, phone, roleId, storeId, venueIds, primaryVenueId, active } = validatedFields.data;
+  const { email, password, firstName, lastName, phone, roleId, venueIds, primaryVenueId, active } = validatedFields.data;
 
   try {
     // Create user in BOTH Supabase Auth and Prisma database
@@ -183,7 +181,6 @@ export async function createUser(data: CreateUserInput) {
       lastName,
       phone: phone || null,
       roleId,
-      storeId: storeId || null,
       active,
       profileCompletedAt: new Date(), // Admin-created users have complete profiles
     });
@@ -210,7 +207,6 @@ export async function createUser(data: CreateUserInput) {
       where: { id: result.userId },
       include: {
         role: true,
-        store: true,
         venues: {
           include: {
             venue: {
@@ -251,7 +247,6 @@ export async function createUser(data: CreateUserInput) {
           lastName,
           phone,
           roleId,
-          storeId,
           active,
           venueIds,
         }),
@@ -284,7 +279,7 @@ export async function updateUser(data: UpdateUserInput) {
     };
   }
 
-  const { userId, email, firstName, lastName, phone, roleId, storeId, venueIds, primaryVenueId, active } = validatedFields.data;
+  const { userId, email, firstName, lastName, phone, roleId, venueIds, primaryVenueId, active } = validatedFields.data;
 
   try {
     // Get current user state before update
@@ -340,12 +335,10 @@ export async function updateUser(data: UpdateUserInput) {
         ...(lastName && { lastName }),
         ...(phone !== undefined && { phone }),
         ...(roleId && { roleId }),
-        ...(storeId !== undefined && { storeId }),
         ...(active !== undefined && { active }),
       },
       include: {
         role: true,
-        store: true,
         venues: {
           include: {
             venue: {
@@ -404,7 +397,6 @@ export async function updateUser(data: UpdateUserInput) {
           lastName: currentUser.lastName,
           phone: currentUser.phone,
           roleId: currentUser.roleId,
-          storeId: currentUser.storeId,
           active: currentUser.active,
         }),
         newValue: JSON.stringify({
@@ -413,7 +405,6 @@ export async function updateUser(data: UpdateUserInput) {
           lastName: user.lastName,
           phone: user.phone,
           roleId: user.roleId,
-          storeId: user.storeId,
           active: user.active,
         }),
       });
@@ -528,7 +519,6 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
       data: { active: newActiveStatus },
       include: {
         role: true,
-        store: true,
       },
     });
 
@@ -602,7 +592,7 @@ export async function getAllStores() {
   await requireAdmin();
 
   try {
-    const stores = await prisma.store.findMany({
+    const stores = await prisma.venue.findMany({
       where: {
         active: true,
       },

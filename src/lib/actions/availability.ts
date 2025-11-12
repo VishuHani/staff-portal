@@ -215,7 +215,6 @@ export async function bulkUpdateAvailability(data: BulkUpdateAvailabilityInput) 
  */
 export async function getAllUsersAvailability(filters?: {
   dayOfWeek?: number;
-  storeId?: string;
 }) {
   const user = await requireAuth();
 
@@ -236,7 +235,6 @@ export async function getAllUsersAvailability(filters?: {
         id: {
           in: sharedVenueUserIds,
         },
-        ...(filters?.storeId && { storeId: filters.storeId }),
       },
       select: {
         id: true,
@@ -246,12 +244,6 @@ export async function getAllUsersAvailability(filters?: {
         lastName: true,
         profileImage: true,
         role: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        store: {
           select: {
             id: true,
             name: true,

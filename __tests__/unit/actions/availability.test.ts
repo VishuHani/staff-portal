@@ -835,15 +835,15 @@ describe("getAllUsersAvailability", () => {
     mockCanAccess.mockResolvedValue(true);
     setupVenueUsers(testUsers.user3.id, [testUsers.user1.id]);
 
-    const storeId = "store-123";
     mockUserFindMany([]);
 
-    await availabilityActions.getAllUsersAvailability({ storeId });
+    await availabilityActions.getAllUsersAvailability({});
 
+    // Verify that venue-based filtering is applied via sharedVenueUserIds
     expect(prisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          storeId,
+          active: true,
         }),
       })
     );

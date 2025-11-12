@@ -22,7 +22,7 @@ export async function getAllVenues() {
   await requireAdmin();
 
   try {
-    const venues = await prisma.store.findMany({
+    const venues = await prisma.venue.findMany({
       include: {
         _count: {
           select: {
@@ -50,7 +50,7 @@ export async function getVenueById(venueId: string) {
   await requireAdmin();
 
   try {
-    const venue = await prisma.store.findUnique({
+    const venue = await prisma.venue.findUnique({
       where: { id: venueId },
       include: {
         userVenues: {
@@ -100,9 +100,9 @@ export async function getVenueStats() {
 
   try {
     const [total, active, inactive] = await Promise.all([
-      prisma.store.count(),
-      prisma.store.count({ where: { active: true } }),
-      prisma.store.count({ where: { active: false } }),
+      prisma.venue.count(),
+      prisma.venue.count({ where: { active: true } }),
+      prisma.venue.count({ where: { active: false } }),
     ]);
 
     return {
@@ -137,7 +137,7 @@ export async function createVenue(data: CreateVenueInput) {
 
   try {
     // Check if code already exists
-    const existingVenue = await prisma.store.findUnique({
+    const existingVenue = await prisma.venue.findUnique({
       where: { code },
     });
 
@@ -145,7 +145,7 @@ export async function createVenue(data: CreateVenueInput) {
       return { error: "A venue with this code already exists" };
     }
 
-    const venue = await prisma.store.create({
+    const venue = await prisma.venue.create({
       data: {
         name,
         code,
@@ -181,7 +181,7 @@ export async function updateVenue(data: UpdateVenueInput) {
   try {
     // Check if code is already taken by another venue
     if (code) {
-      const existingVenue = await prisma.store.findFirst({
+      const existingVenue = await prisma.venue.findFirst({
         where: {
           code,
           NOT: {
@@ -195,7 +195,7 @@ export async function updateVenue(data: UpdateVenueInput) {
       }
     }
 
-    const venue = await prisma.store.update({
+    const venue = await prisma.venue.update({
       where: { id: venueId },
       data: {
         ...(name && { name }),
@@ -251,18 +251,18 @@ export async function deleteVenue(data: DeleteVenueInput) {
       };
     }
 
-    // Check if this is a user's storeId (legacy field)
+    // Check if this is a user's venueId (legacy single-venue field)
     const legacyUserCount = await prisma.user.count({
-      where: { storeId: venueId },
+      where: { venueId: venueId },
     });
 
     if (legacyUserCount > 0) {
       return {
-        error: `Cannot delete venue: ${legacyUserCount} user${legacyUserCount !== 1 ? "s have" : " has"} this venue set as their store. Please update users first.`,
+        error: `Cannot delete venue: ${legacyUserCount} user${legacyUserCount !== 1 ? "s have" : " has"} this venue set as their primary venue. Please update users first.`,
       };
     }
 
-    await prisma.store.delete({
+    await prisma.venue.delete({
       where: { id: venueId },
     });
 
@@ -293,7 +293,7 @@ export async function toggleVenueActive(data: ToggleVenueActiveInput) {
 
   try {
     // Get current venue state
-    const venue = await prisma.store.findUnique({
+    const venue = await prisma.venue.findUnique({
       where: { id: venueId },
     });
 
@@ -304,7 +304,7 @@ export async function toggleVenueActive(data: ToggleVenueActiveInput) {
     const newActiveStatus = !venue.active;
 
     // Toggle the active status
-    const updatedVenue = await prisma.store.update({
+    const updatedVenue = await prisma.venue.update({
       where: { id: venueId },
       data: { active: newActiveStatus },
       include: {
@@ -334,7 +334,7 @@ export async function getActiveVenues() {
   await requireAdmin();
 
   try {
-    const venues = await prisma.store.findMany({
+    const venues = await prisma.venue.findMany({
       where: {
         active: true,
       },

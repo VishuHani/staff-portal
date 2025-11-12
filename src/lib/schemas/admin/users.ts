@@ -34,7 +34,6 @@ export const createUserSchema = z.object({
       "Password must contain at least one uppercase letter, one lowercase letter, and one number"
     ),
   roleId: z.string().cuid("Invalid role ID"),
-  storeId: z.string().cuid("Invalid store ID").optional(), // Legacy field, kept for backward compatibility
   venueIds: z
     .array(z.string().cuid("Invalid venue ID"))
     .min(1, "At least one venue must be selected")
@@ -81,7 +80,6 @@ export const updateUserSchema = z.object({
       { message: "Please enter a valid phone number" }
     ),
   roleId: z.string().cuid("Invalid role ID").optional(),
-  storeId: z.string().cuid("Invalid store ID").optional().nullable(), // Legacy field
   venueIds: z
     .array(z.string().cuid("Invalid venue ID"))
     .min(1, "At least one venue must be selected")
