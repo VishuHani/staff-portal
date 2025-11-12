@@ -2,6 +2,7 @@
 
 import { requireAuth, canAccess } from "@/lib/rbac/access";
 import { prisma } from "@/lib/prisma";
+import { computeEffectiveAvailability } from "@/lib/utils/availability";
 import {
   startOfDay,
   endOfDay,
