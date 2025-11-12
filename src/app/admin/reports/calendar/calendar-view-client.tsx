@@ -34,9 +34,10 @@ interface CalendarDay {
 
 interface CalendarViewClientProps {
   venues?: Array<{ id: string; name: string }>;
+  roles?: Array<{ id: string; name: string }>;
 }
 
-export function CalendarViewClient({ venues = [] }: CalendarViewClientProps) {
+export function CalendarViewClient({ venues = [], roles = [] }: CalendarViewClientProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [calendarData, setCalendarData] = useState<any>(null);
   const [rawCalendarData, setRawCalendarData] = useState<any>(null); // For export
@@ -152,10 +153,11 @@ export function CalendarViewClient({ venues = [] }: CalendarViewClientProps) {
       <ReportFilters
         onApplyFilters={handleApplyFilters}
         showVenue={true}
-        showRole={false}
+        showRole={true}
         showTimeSlot={false}
         showSearch={false}
         venues={venues}
+        roles={roles}
       />
 
       {/* Export Button */}

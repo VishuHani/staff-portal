@@ -15,9 +15,10 @@ import { Loader2 } from "lucide-react";
 
 interface CoverageAnalysisClientProps {
   venues?: Array<{ id: string; name: string }>;
+  roles?: Array<{ id: string; name: string }>;
 }
 
-export function CoverageAnalysisClient({ venues = [] }: CoverageAnalysisClientProps) {
+export function CoverageAnalysisClient({ venues = [], roles = [] }: CoverageAnalysisClientProps) {
   const [coverageData, setCoverageData] = useState<any>(null);
   const [rawCoverageData, setRawCoverageData] = useState<any>(null); // For export
   const [loading, setLoading] = useState(false);
@@ -74,6 +75,7 @@ export function CoverageAnalysisClient({ venues = [] }: CoverageAnalysisClientPr
         showTimeSlot={false}
         showSearch={false}
         venues={venues}
+        roles={roles}
       />
 
       {/* Export Button */}

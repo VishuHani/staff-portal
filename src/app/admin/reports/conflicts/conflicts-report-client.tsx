@@ -16,9 +16,10 @@ import { Label } from "@/components/ui/label";
 
 interface ConflictsReportClientProps {
   venues?: Array<{ id: string; name: string }>;
+  roles?: Array<{ id: string; name: string }>;
 }
 
-export function ConflictsReportClient({ venues = [] }: ConflictsReportClientProps) {
+export function ConflictsReportClient({ venues = [], roles = [] }: ConflictsReportClientProps) {
   const [conflictsData, setConflictsData] = useState<any>(null);
   const [rawConflictsData, setRawConflictsData] = useState<any>(null); // For export
   const [loading, setLoading] = useState(false);
@@ -100,11 +101,12 @@ export function ConflictsReportClient({ venues = [] }: ConflictsReportClientProp
       <ReportFilters
         onApplyFilters={handleApplyFilters}
         showVenue={true}
-        showRole={false}
+        showRole={true}
         showTimeSlot={false}
         showSearch={false}
         showSeverity={true}
         venues={venues}
+        roles={roles}
       />
 
       {/* Export Button */}
