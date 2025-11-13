@@ -679,6 +679,64 @@ TOTAL PROGRESS: 58% (11/19 days completed)
 **Blockers:**
 - None
 
+### November 14, 2025 (Bug Fixes & Refinements) ✅ COMPLETE
+- ✅ Fixed channel creation venue assignment bug
+  - Channels without venue assignments weren't showing in filtered views
+  - Added default to all venues: `venueIds = data.venueIds?.length > 0 ? data.venueIds : allVenues.map(v => v.id)`
+  - Added console logging for debugging (src/app/admin/channels/channels-page-client.tsx:97-110)
+- ✅ Fixed channel archiving with debug logging
+  - Added console logging for archive operations (src/app/admin/channels/channels-page-client.tsx:153-160)
+- ✅ Fixed misleading Export Reports text on dashboard
+  - Changed "Coming in Phase 4" to "✓ Available in All Reports"
+  - Export functionality is fully implemented (682 lines in export.ts)
+  - Location: src/app/admin/reports/page.tsx:193-195
+- ✅ Fixed Availability Matrix Server Action export error
+  - Error: "Server Actions must be async functions"
+  - Root cause: Next.js 16 requires ALL exported functions in "use server" files to be async
+  - Solution: Made generateExportFilename() private by removing export keyword
+  - Location: src/lib/actions/reports/export.ts:672
+- ✅ Fixed Coverage Analysis React key warning
+  - Changed fragment `<>` to `<React.Fragment key={day}>`
+  - Added React import
+  - Location: src/components/reports/CoverageHeatmap.tsx:116
+- ✅ Fixed Coverage Heatmap "data.map is not a function" error
+  - Added defensive array check: `const safeData = Array.isArray(data) ? data : []`
+  - Made max calculation null-safe
+  - All data references now use safeData
+  - Location: src/components/reports/CoverageHeatmap.tsx:31-49
+- ✅ Fixed Coverage Analysis data transformation mismatch
+  - Server returns: `{ summary, dailyCoverage, heatmap: {dow: {hour: count}} }`
+  - Components expect: `{ stats, dailyCoverage, heatmap: [{day, hour, count}] }`
+  - Added transformCoverageData() function (38 lines)
+  - Transforms heatmap from object to array with day names (Sunday-Saturday)
+  - Maps summary fields to stats fields
+  - Location: src/app/admin/reports/coverage/coverage-analysis-client.tsx:21-59
+
+**Technical Details:**
+- Heatmap transformation: `{0: {"00:00": 5}}` → `[{day: "Sunday", hour: 0, count: 5}]`
+- Stats mapping: `summary.totalStaff` → `stats.totalStaff`
+- Stats mapping: `summary.averageAvailability` → `stats.availableStaff`
+- Stats mapping: `summary.peakAvailability.count` → `stats.peakCoverage`
+
+**Files Changed:**
+- Modified: src/app/admin/channels/channels-page-client.tsx (venue assignment + logging)
+- Modified: src/app/admin/reports/page.tsx (export text fix)
+- Modified: src/lib/actions/reports/export.ts (removed export keyword)
+- Modified: src/components/reports/CoverageHeatmap.tsx (React key + defensive checks)
+- Modified: src/app/admin/reports/coverage/coverage-analysis-client.tsx (data transformation)
+- Added: src/components/ui/alert.tsx (new UI component)
+- Added: src/components/ui/progress.tsx (new UI component)
+- Added: src/lib/actions/audit.ts (audit logging)
+
+**Status:**
+- All bugs fixed and tested
+- Coverage Analysis now displays correctly with heatmap data
+- Channel creation/archiving working with proper venue assignments
+- No TypeScript errors, no console errors
+
+**Blockers:**
+- None
+
 ---
 
 ## 🚧 Current Blockers
@@ -748,6 +806,6 @@ TOTAL PROGRESS: 58% (11/19 days completed)
 
 ---
 
-**Last Updated:** November 11, 2025
+**Last Updated:** November 14, 2025
 **Next Review:** TBD
-**Status:** Planning Complete - Ready to Start
+**Status:** Phase 3 In Progress - Bug Fixes Complete
