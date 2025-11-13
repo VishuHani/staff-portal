@@ -891,6 +891,81 @@ export async function getChannelAnalytics(data: GetChannelAnalyticsInput) {
       };
     });
 
+    // Calculate trend data (last 12 weeks)
+    const weeks = 12;
+    const trendData: Array<{
+      week: string;
+      posts: number;
+      members: number;
+      cumulativeMembers: number;
+    }> = [];
+
+    const now = new Date();
+    for (let i = weeks - 1; i >= 0; i--) {
+      const weekEnd = new Date(now);
+      weekEnd.setDate(weekEnd.getDate() - (i * 7));
+
+      const weekStart = new Date(weekEnd);
+      weekStart.setDate(weekStart.getDate() - 7);
+
+      // Count posts in this week
+      const weekPosts = await prisma.post.count({
+        where: {
+          channelId,
+          createdAt: {
+            gte: weekStart,
+            lt: weekEnd,
+          },
+        },
+      });
+
+      // Count new members added in this week
+      const weekMembers = await prisma.channelMember.count({
+        where: {
+          channelId,
+          addedAt: {
+            gte: weekStart,
+            lt: weekEnd,
+          },
+        },
+      });
+
+      // Count total members at end of this week
+      const cumulativeMembers = await prisma.channelMember.count({
+        where: {
+          channelId,
+          addedAt: {
+            lt: weekEnd,
+          },
+        },
+      });
+
+      trendData.push({
+        week: weekEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        posts: weekPosts,
+        members: weekMembers,
+        cumulativeMembers,
+      });
+    }
+
+    // Calculate engagement metrics
+    const totalEngagement = await prisma.post.count({
+      where: { channelId },
+    });
+
+    const avgPostsPerMember = channel._count.members > 0
+      ? totalEngagement / channel._count.members
+      : 0;
+
+    // Calculate weekly averages
+    const avgPostsPerWeek = trendData.length > 0
+      ? trendData.reduce((sum, week) => sum + week.posts, 0) / trendData.length
+      : 0;
+
+    const avgMembersPerWeek = trendData.length > 0
+      ? trendData.reduce((sum, week) => sum + week.members, 0) / trendData.length
+      : 0;
+
     return {
       success: true,
       analytics: {
@@ -918,6 +993,14 @@ export async function getChannelAnalytics(data: GetChannelAnalyticsInput) {
           membersAddedLast30Days: recentMembers,
         },
         topContributors: topContributorsWithDetails,
+        trends: {
+          weeklyData: trendData,
+          metrics: {
+            avgPostsPerMember,
+            avgPostsPerWeek,
+            avgMembersPerWeek,
+          },
+        },
       },
     };
   } catch (error) {

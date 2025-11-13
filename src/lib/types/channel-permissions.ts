@@ -189,8 +189,14 @@ export function hasPermissionLevel(
   }
 
   // Map user role to hierarchy level
+  // Note: Database uses MEMBER, MODERATOR, CREATOR
+  // Permission system uses MEMBERS, MODERATORS, CREATORS
   const userLevel = userRole
-    ? PERMISSION_HIERARCHY[userRole]
+    ? userRole === "CREATOR"
+      ? PERMISSION_HIERARCHY.CREATORS
+      : userRole === "MODERATOR"
+      ? PERMISSION_HIERARCHY.MODERATORS
+      : PERMISSION_HIERARCHY.MEMBERS
     : isMember
     ? PERMISSION_HIERARCHY.MEMBERS
     : PERMISSION_HIERARCHY.EVERYONE;

@@ -19,6 +19,7 @@ export { MemberGrid, MemberGridCompact, MemberGridWide } from "./MemberGrid";
 
 // Analytics Components
 export { ChannelAnalytics, ChannelAnalyticsSummary } from "./ChannelAnalytics";
+export { ChannelTrends } from "./ChannelTrends";
 
 // Wizard Components
 export { ChannelCreationWizard, type ChannelCreationData } from "./ChannelCreationWizard";

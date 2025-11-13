@@ -4,7 +4,9 @@ import { Users, MessageSquare, TrendingUp, Calendar } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { UserAvatar } from "@/components/ui/user-avatar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RoleBadge } from "./RoleBadge";
+import { ChannelTrends } from "./ChannelTrends";
 import { getFullName } from "@/lib/utils/profile";
 
 interface ChannelAnalyticsData {
@@ -41,6 +43,19 @@ interface ChannelAnalyticsData {
     } | null;
     postCount: number;
   }>;
+  trends?: {
+    weeklyData: Array<{
+      week: string;
+      posts: number;
+      members: number;
+      cumulativeMembers: number;
+    }>;
+    metrics: {
+      avgPostsPerMember: number;
+      avgPostsPerWeek: number;
+      avgMembersPerWeek: number;
+    };
+  };
 }
 
 interface ChannelAnalyticsProps {
@@ -48,7 +63,7 @@ interface ChannelAnalyticsProps {
 }
 
 export function ChannelAnalytics({ data }: ChannelAnalyticsProps) {
-  const { channel, memberStats, recentActivity, topContributors } = data;
+  const { channel, memberStats, recentActivity, topContributors, trends } = data;
 
   // Calculate percentages for role distribution
   const rolePercentages = memberStats.byRole.map((r) => ({
@@ -57,7 +72,13 @@ export function ChannelAnalytics({ data }: ChannelAnalyticsProps) {
   }));
 
   return (
-    <div className="space-y-6">
+    <Tabs defaultValue="overview" className="space-y-6">
+      <TabsList className="grid w-full grid-cols-2">
+        <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="trends">Trends</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="overview" className="space-y-6">
       {/* Overview Stats */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -224,7 +245,26 @@ export function ChannelAnalytics({ data }: ChannelAnalyticsProps) {
           })}
         </CardContent>
       </Card>
-    </div>
+      </TabsContent>
+
+      <TabsContent value="trends" className="space-y-6">
+        {trends ? (
+          <ChannelTrends
+            channelName={channel.name}
+            weeklyData={trends.weeklyData}
+            metrics={trends.metrics}
+          />
+        ) : (
+          <Card>
+            <CardContent className="pt-6">
+              <p className="text-center text-muted-foreground">
+                No trend data available yet
+              </p>
+            </CardContent>
+          </Card>
+        )}
+      </TabsContent>
+    </Tabs>
   );
 }
 
