@@ -1,16 +1,23 @@
 import { requireAuth } from "@/lib/rbac/access";
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { ChannelsPageClient } from "./channels-page-client";
+import { ChannelDetailClient } from "./channel-detail-client";
 
-export const metadata = {
-  title: "Channel Management | Admin",
-  description: "Manage channels and members",
-};
+export async function generateMetadata({ params }: { params: { id: string } }) {
+  const channel = await prisma.channel.findUnique({
+    where: { id: params.id },
+    select: { name: true },
+  });
 
-async function getChannelsData() {
-  // Get all channels with member counts and creator info
-  const channels = await prisma.channel.findMany({
+  return {
+    title: channel ? `${channel.name} | Channel Management` : "Channel Not Found",
+  };
+}
+
+async function getChannelData(channelId: string) {
+  // Get channel with all details
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
     include: {
       _count: {
         select: {
@@ -26,30 +33,52 @@ async function getChannelsData() {
         },
       },
       members: {
-        where: {
-          role: { in: ["CREATOR", "MODERATOR"] },
-        },
-        take: 5,
         include: {
           user: {
             select: {
               id: true,
               firstName: true,
               lastName: true,
+              email: true,
               profileImage: true,
+              role: {
+                select: {
+                  name: true,
+                },
+              },
+              venues: {
+                include: {
+                  venue: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          addedByUser: {
+            select: {
+              firstName: true,
+              lastName: true,
             },
           },
         },
+        orderBy: [
+          { role: "asc" },
+          { addedAt: "desc" },
+        ],
       },
     },
-    orderBy: [
-      { archived: "asc" },
-      { name: "asc" },
-    ],
   });
 
-  // Get all active users for wizard
-  const users = await prisma.user.findMany({
+  if (!channel) {
+    return null;
+  }
+
+  // Get all active users for adding new members
+  const allUsers = await prisma.user.findMany({
     where: { active: true },
     select: {
       id: true,
@@ -81,38 +110,16 @@ async function getChannelsData() {
     ],
   });
 
-  // Get all roles for filtering
-  const roles = await prisma.role.findMany({
-    select: {
-      id: true,
-      name: true,
-    },
-    orderBy: { name: "asc" },
-  });
-
-  // Get all venues for filtering
-  const venues = await prisma.venue.findMany({
-    where: { active: true },
-    select: {
-      id: true,
-      name: true,
-      code: true,
-    },
-    orderBy: { name: "asc" },
-  });
-
   return {
-    channels,
-    users,
-    roles,
-    venues,
+    channel,
+    allUsers,
   };
 }
 
-export default async function AdminChannelsPage() {
+export default async function ChannelDetailPage({ params }: { params: { id: string } }) {
   const user = await requireAuth();
 
-  // Check if user has posts:manage permission (admin)
+  // Check if user has posts:manage permission
   const userWithRole = await prisma.user.findUnique({
     where: { id: user.id },
     include: {
@@ -136,14 +143,16 @@ export default async function AdminChannelsPage() {
     redirect("/dashboard");
   }
 
-  const data = await getChannelsData();
+  const data = await getChannelData(params.id);
+
+  if (!data) {
+    notFound();
+  }
 
   return (
-    <ChannelsPageClient
-      initialChannels={data.channels}
-      allUsers={data.users}
-      allRoles={data.roles}
-      allVenues={data.venues}
+    <ChannelDetailClient
+      channel={data.channel}
+      allUsers={data.allUsers}
       currentUserId={user.id}
     />
   );
