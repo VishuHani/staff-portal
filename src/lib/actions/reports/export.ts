@@ -667,9 +667,9 @@ export async function exportReport(options: ExportOptions) {
 // ============================================================================
 
 /**
- * Generate filename for export
+ * Generate filename for export (private helper function)
  */
-export function generateExportFilename(
+function generateExportFilename(
   reportType: ReportType,
   format: ExportFormat,
   venueId?: string

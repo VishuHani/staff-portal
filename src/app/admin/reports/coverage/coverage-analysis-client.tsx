@@ -18,6 +18,46 @@ interface CoverageAnalysisClientProps {
   roles?: Array<{ id: string; name: string }>;
 }
 
+// Day mapping for heatmap transformation
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// Transform server data to match component expectations
+function transformCoverageData(serverData: any) {
+  // Transform heatmap from object to array
+  const heatmapArray: Array<{ day: string; hour: number; count: number }> = [];
+
+  if (serverData.heatmap && typeof serverData.heatmap === 'object') {
+    for (const [dow, hours] of Object.entries(serverData.heatmap)) {
+      const dayOfWeek = parseInt(dow);
+      const dayName = DAY_NAMES[dayOfWeek];
+
+      if (hours && typeof hours === 'object') {
+        for (const [timeSlot, count] of Object.entries(hours)) {
+          // Extract hour from "HH:00" format
+          const hour = parseInt(timeSlot.split(':')[0]);
+          heatmapArray.push({
+            day: dayName,
+            hour,
+            count: count as number
+          });
+        }
+      }
+    }
+  }
+
+  // Transform summary to stats with correct field names
+  return {
+    stats: {
+      totalStaff: serverData.summary?.totalStaff || 0,
+      availableStaff: serverData.summary?.averageAvailability || 0, // Use average as "currently available"
+      averageCoverage: serverData.summary?.averageAvailability || 0,
+      peakCoverage: serverData.summary?.peakAvailability?.count || 0,
+    },
+    dailyCoverage: serverData.dailyCoverage || [],
+    heatmap: heatmapArray,
+  };
+}
+
 export function CoverageAnalysisClient({ venues = [], roles = [] }: CoverageAnalysisClientProps) {
   const [coverageData, setCoverageData] = useState<any>(null);
   const [rawCoverageData, setRawCoverageData] = useState<any>(null); // For export
@@ -45,8 +85,14 @@ export function CoverageAnalysisClient({ venues = [], roles = [] }: CoverageAnal
         });
 
         if (result.success) {
-          setCoverageData(result.data);
-          setRawCoverageData(result.data); // Store for export
+          console.log('[Coverage] Raw server data:', result.data);
+
+          // Transform server data to match component expectations
+          const transformed = transformCoverageData(result.data);
+          console.log('[Coverage] Transformed data:', transformed);
+
+          setCoverageData(transformed);
+          setRawCoverageData(result.data); // Store original for export
         } else {
           toast.error(result.error || "Failed to load coverage analysis");
         }

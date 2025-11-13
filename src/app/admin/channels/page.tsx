@@ -2,6 +2,9 @@ import { requireAuth } from "@/lib/rbac/access";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ChannelsPageClient } from "./channels-page-client";
+import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { getUnreadCount } from "@/lib/actions/notifications";
+import { getUnreadMessageCount } from "@/lib/actions/messages";
 
 export const metadata = {
   title: "Channel Management | Admin",
@@ -192,13 +195,33 @@ export default async function AdminChannelsPage() {
 
   const data = await getChannelsData(user.id, isManager, managerVenueIds);
 
+  // Get unread counts for header
+  const [unreadResult, messageCountResult] = await Promise.all([
+    getUnreadCount({ userId: user.id }),
+    getUnreadMessageCount(),
+  ]);
+
   return (
-    <ChannelsPageClient
-      initialChannels={data.channels}
-      allUsers={data.users}
-      allRoles={data.roles}
-      allVenues={data.venues}
-      currentUserId={user.id}
-    />
+    <DashboardLayout
+      user={{
+        id: user.id,
+        email: user.email,
+        firstName: userWithRole?.firstName,
+        lastName: userWithRole?.lastName,
+        role: {
+          name: userWithRole?.role.name || "STAFF",
+        },
+      }}
+      unreadCount={unreadResult.count || 0}
+      unreadMessageCount={messageCountResult.count || 0}
+    >
+      <ChannelsPageClient
+        initialChannels={data.channels}
+        allUsers={data.users}
+        allRoles={data.roles}
+        allVenues={data.venues}
+        currentUserId={user.id}
+      />
+    </DashboardLayout>
   );
 }

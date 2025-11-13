@@ -2,10 +2,14 @@ import { requireAuth } from "@/lib/rbac/access";
 import { redirect, notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ChannelSettingsClient } from "./settings-client";
+import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { getUnreadCount } from "@/lib/actions/notifications";
+import { getUnreadMessageCount } from "@/lib/actions/messages";
 
-export async function generateMetadata({ params }: { params: { id: string } }) {
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const channel = await prisma.channel.findUnique({
-    where: { id: params.id },
+    where: { id },
     select: { name: true },
   });
 
@@ -75,7 +79,8 @@ async function getChannelSettingsData(channelId: string, userId: string, isManag
   };
 }
 
-export default async function ChannelSettingsPage({ params }: { params: { id: string } }) {
+export default async function ChannelSettingsPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const user = await requireAuth();
 
   // Check if user has posts:manage permission (admin or manager)
@@ -118,18 +123,38 @@ export default async function ChannelSettingsPage({ params }: { params: { id: st
     ? userWithRole.venues.map((uv) => uv.venue.id)
     : null;
 
-  const data = await getChannelSettingsData(params.id, user.id, isManager, managerVenueIds);
+  const data = await getChannelSettingsData(id, user.id, isManager, managerVenueIds);
 
   if (!data) {
     notFound();
   }
 
+  // Get unread counts for header
+  const [unreadResult, messageCountResult] = await Promise.all([
+    getUnreadCount({ userId: user.id }),
+    getUnreadMessageCount(),
+  ]);
+
   return (
-    <ChannelSettingsClient
-      channel={data.channel}
-      venues={data.venues}
-      currentUserId={user.id}
-      isManager={isManager}
-    />
+    <DashboardLayout
+      user={{
+        id: user.id,
+        email: user.email,
+        firstName: userWithRole?.firstName,
+        lastName: userWithRole?.lastName,
+        role: {
+          name: userWithRole?.role.name || "STAFF",
+        },
+      }}
+      unreadCount={unreadResult.count || 0}
+      unreadMessageCount={messageCountResult.count || 0}
+    >
+      <ChannelSettingsClient
+        channel={data.channel}
+        venues={data.venues}
+        currentUserId={user.id}
+        isManager={isManager}
+      />
+    </DashboardLayout>
   );
 }

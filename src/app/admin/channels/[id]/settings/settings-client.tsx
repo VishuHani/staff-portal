@@ -435,7 +435,7 @@ export function ChannelSettingsClient({
             </div>
             <div>
               <Label className="text-muted-foreground">Created At</Label>
-              <p className="text-sm font-medium">
+              <p className="text-sm font-medium" suppressHydrationWarning>
                 {new Date(channel.createdAt).toLocaleDateString()}
               </p>
             </div>
@@ -452,7 +452,7 @@ export function ChannelSettingsClient({
           {channel.archived && channel.archivedAt && (
             <div>
               <Label className="text-muted-foreground">Archived At</Label>
-              <p className="text-sm font-medium">
+              <p className="text-sm font-medium" suppressHydrationWarning>
                 {new Date(channel.archivedAt).toLocaleDateString()}
               </p>
             </div>

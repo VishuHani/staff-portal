@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
@@ -28,8 +29,11 @@ export function CoverageHeatmap({ data, title, description }: CoverageHeatmapPro
   // Hours (0-23)
   const hours = Array.from({ length: 24 }, (_, i) => i);
 
+  // Ensure data is an array
+  const safeData = Array.isArray(data) ? data : [];
+
   // Find max count for color scaling
-  const maxCount = Math.max(...data.map((d) => d.count), 1);
+  const maxCount = safeData.length > 0 ? Math.max(...safeData.map((d) => d.count), 1) : 1;
 
   // Get color intensity based on count
   const getColorIntensity = (count: number) => {
@@ -43,7 +47,7 @@ export function CoverageHeatmap({ data, title, description }: CoverageHeatmapPro
 
   // Get data for specific day and hour
   const getCellData = (day: string, hour: number) => {
-    return data.find((d) => d.day === day && d.hour === hour) || { day, hour, count: 0 };
+    return safeData.find((d) => d.day === day && d.hour === hour) || { day, hour, count: 0 };
   };
 
   // Format hour for display
@@ -110,10 +114,9 @@ export function CoverageHeatmap({ data, title, description }: CoverageHeatmapPro
 
                   {/* Data Rows */}
                   {days.map((day) => (
-                    <>
+                    <React.Fragment key={day}>
                       {/* Day Label */}
                       <div
-                        key={`${day}-label`}
                         className="text-sm font-medium text-muted-foreground py-2 pr-2 flex items-center"
                       >
                         {day}
@@ -146,7 +149,7 @@ export function CoverageHeatmap({ data, title, description }: CoverageHeatmapPro
                           </TooltipProvider>
                         );
                       })}
-                    </>
+                    </React.Fragment>
                   ))}
                 </div>
               </div>

@@ -89,6 +89,13 @@ export function ChannelsPageClient({
 
   const handleCreateChannel = async (data: ChannelCreationData) => {
     try {
+      // Ensure venueIds are always provided - default to all venues if not specified
+      const venueIds = data.venueIds && data.venueIds.length > 0
+        ? data.venueIds
+        : allVenues.map(v => v.id);
+
+      console.log('[ChannelCreate] Creating channel:', { name: data.name, venueIds });
+
       // Step 1: Create the channel
       const channelResult = await createChannel({
         name: data.name,
@@ -96,11 +103,14 @@ export function ChannelsPageClient({
         type: data.type,
         icon: data.icon,
         color: data.color,
-        permissions: null, // Will add later in Phase 5
-        venueIds: data.venueIds, // Keep for backward compatibility
+        permissions: null,
+        venueIds,
       });
 
+      console.log('[ChannelCreate] Result:', channelResult);
+
       if (!channelResult.success || !channelResult.channel) {
+        console.error('[ChannelCreate] Failed:', channelResult.error);
         return { error: channelResult.error || "Failed to create channel" };
       }
 
@@ -140,18 +150,24 @@ export function ChannelsPageClient({
   const handleArchive = async (channelId: string, archived: boolean) => {
     setArchivingId(channelId);
     try {
+      console.log('[ChannelArchive] Archiving channel:', { channelId, newState: !archived });
+
       const result = await archiveChannel({
         id: channelId,
         archived: !archived,
       });
 
+      console.log('[ChannelArchive] Result:', result);
+
       if (result.success) {
         toast.success(archived ? "Channel restored" : "Channel archived");
         router.refresh();
       } else {
+        console.error('[ChannelArchive] Failed:', result.error);
         toast.error(result.error || "Failed to archive channel");
       }
     } catch (error) {
+      console.error('[ChannelArchive] Error:', error);
       toast.error("An unexpected error occurred");
     } finally {
       setArchivingId(null);

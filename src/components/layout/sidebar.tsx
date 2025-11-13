@@ -19,6 +19,7 @@ import {
   Lock,
   Megaphone,
   BarChart3,
+  Hash,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -80,6 +81,12 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       title: "Reports & Analytics",
       href: "/admin/reports",
       icon: BarChart3,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
+      title: "Channels",
+      href: "/admin/channels",
+      icon: Hash,
       roles: ["ADMIN", "MANAGER"],
     },
     {

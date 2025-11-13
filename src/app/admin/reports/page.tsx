@@ -190,9 +190,9 @@ export default async function ReportsPage() {
             <div className="space-y-2">
               <h3 className="font-medium">Export Reports</h3>
               <p className="text-sm text-muted-foreground">
-                Download reports in CSV, Excel, PDF, or iCal formats
+                Download reports in CSV, Excel, PDF, or iCal formats - available in all report views
               </p>
-              <Button variant="outline" size="sm">Coming in Phase 4</Button>
+              <Button variant="default" size="sm" disabled>✓ Available in All Reports</Button>
             </div>
           </div>
         </CardContent>
