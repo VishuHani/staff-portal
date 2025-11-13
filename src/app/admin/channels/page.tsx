@@ -8,9 +8,27 @@ export const metadata = {
   description: "Manage channels and members",
 };
 
-async function getChannelsData() {
+async function getChannelsData(userId: string, isManager: boolean, managerVenueIds: string[] | null) {
+  // Build channel filter based on user role
+  let channelWhere: any = {};
+
+  // If manager, filter to channels where all members are from manager's venues
+  if (isManager && managerVenueIds && managerVenueIds.length > 0) {
+    // Get channels assigned to manager's venues
+    const channelVenues = await prisma.channelVenue.findMany({
+      where: {
+        venueId: { in: managerVenueIds },
+      },
+      select: { channelId: true },
+    });
+
+    const channelIds = channelVenues.map((cv) => cv.channelId);
+    channelWhere.id = { in: channelIds };
+  }
+
   // Get all channels with member counts and creator info
   const channels = await prisma.channel.findMany({
+    where: channelWhere,
     include: {
       _count: {
         select: {
@@ -48,9 +66,21 @@ async function getChannelsData() {
     ],
   });
 
+  // Build user filter based on user role
+  let userWhere: any = { active: true };
+
+  // If manager, filter to users from manager's venues
+  if (isManager && managerVenueIds && managerVenueIds.length > 0) {
+    userWhere.venues = {
+      some: {
+        venueId: { in: managerVenueIds },
+      },
+    };
+  }
+
   // Get all active users for wizard
   const users = await prisma.user.findMany({
-    where: { active: true },
+    where: userWhere,
     select: {
       id: true,
       email: true,
@@ -90,9 +120,17 @@ async function getChannelsData() {
     orderBy: { name: "asc" },
   });
 
+  // Build venue filter based on user role
+  let venueWhere: any = { active: true };
+
+  // If manager, filter to only manager's venues
+  if (isManager && managerVenueIds && managerVenueIds.length > 0) {
+    venueWhere.id = { in: managerVenueIds };
+  }
+
   // Get all venues for filtering
   const venues = await prisma.venue.findMany({
-    where: { active: true },
+    where: venueWhere,
     select: {
       id: true,
       name: true,
@@ -112,7 +150,7 @@ async function getChannelsData() {
 export default async function AdminChannelsPage() {
   const user = await requireAuth();
 
-  // Check if user has posts:manage permission (admin)
+  // Check if user has posts:manage permission (admin or manager)
   const userWithRole = await prisma.user.findUnique({
     where: { id: user.id },
     include: {
@@ -121,6 +159,16 @@ export default async function AdminChannelsPage() {
           rolePermissions: {
             include: {
               permission: true,
+            },
+          },
+        },
+      },
+      venues: {
+        include: {
+          venue: {
+            select: {
+              id: true,
+              name: true,
             },
           },
         },
@@ -136,7 +184,13 @@ export default async function AdminChannelsPage() {
     redirect("/dashboard");
   }
 
-  const data = await getChannelsData();
+  // Check if user is a manager
+  const isManager = userWithRole?.role.name === "MANAGER";
+  const managerVenueIds = isManager && userWithRole.venues.length > 0
+    ? userWithRole.venues.map((uv) => uv.venue.id)
+    : null;
+
+  const data = await getChannelsData(user.id, isManager, managerVenueIds);
 
   return (
     <ChannelsPageClient

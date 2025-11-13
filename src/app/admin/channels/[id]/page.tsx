@@ -14,7 +14,7 @@ export async function generateMetadata({ params }: { params: { id: string } }) {
   };
 }
 
-async function getChannelData(channelId: string) {
+async function getChannelData(channelId: string, userId: string, isManager: boolean, managerVenueIds: string[] | null) {
   // Get channel with all details
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
@@ -77,9 +77,21 @@ async function getChannelData(channelId: string) {
     return null;
   }
 
+  // Build user filter based on user role
+  let userWhere: any = { active: true };
+
+  // If manager, filter to users from manager's venues
+  if (isManager && managerVenueIds && managerVenueIds.length > 0) {
+    userWhere.venues = {
+      some: {
+        venueId: { in: managerVenueIds },
+      },
+    };
+  }
+
   // Get all active users for adding new members
   const allUsers = await prisma.user.findMany({
-    where: { active: true },
+    where: userWhere,
     select: {
       id: true,
       email: true,
@@ -119,7 +131,7 @@ async function getChannelData(channelId: string) {
 export default async function ChannelDetailPage({ params }: { params: { id: string } }) {
   const user = await requireAuth();
 
-  // Check if user has posts:manage permission
+  // Check if user has posts:manage permission (admin or manager)
   const userWithRole = await prisma.user.findUnique({
     where: { id: user.id },
     include: {
@@ -128,6 +140,16 @@ export default async function ChannelDetailPage({ params }: { params: { id: stri
           rolePermissions: {
             include: {
               permission: true,
+            },
+          },
+        },
+      },
+      venues: {
+        include: {
+          venue: {
+            select: {
+              id: true,
+              name: true,
             },
           },
         },
@@ -143,7 +165,13 @@ export default async function ChannelDetailPage({ params }: { params: { id: stri
     redirect("/dashboard");
   }
 
-  const data = await getChannelData(params.id);
+  // Check if user is a manager
+  const isManager = userWithRole?.role.name === "MANAGER";
+  const managerVenueIds = isManager && userWithRole.venues.length > 0
+    ? userWithRole.venues.map((uv) => uv.venue.id)
+    : null;
+
+  const data = await getChannelData(params.id, user.id, isManager, managerVenueIds);
 
   if (!data) {
     notFound();

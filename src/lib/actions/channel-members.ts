@@ -29,16 +29,16 @@ import { getFullName } from "@/lib/utils/profile";
  * - Admins can manage all channels
  * - Channel creators can manage their channels
  * - Channel moderators can manage their channels
- * - Managers can manage channels scoped to their venue (TODO: Phase 6)
+ * - Managers can manage channels where all members are from their venue(s)
  */
 async function canManageChannel(
   userId: string,
   channelId: string
-): Promise<{ allowed: boolean; reason?: string }> {
+): Promise<{ allowed: boolean; reason?: string; isManager?: boolean }> {
   // Check if user has admin posts:manage permission
   const hasManagePermission = await canAccess("posts", "manage");
   if (hasManagePermission) {
-    return { allowed: true };
+    return { allowed: true, isManager: false };
   }
 
   // Check if user is creator or moderator of the channel
@@ -52,13 +52,98 @@ async function canManageChannel(
   });
 
   if (membership && ["CREATOR", "MODERATOR"].includes(membership.role)) {
-    return { allowed: true };
+    return { allowed: true, isManager: false };
+  }
+
+  // Check if user is a manager with venue-scoped access
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      role: {
+        include: {
+          rolePermissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      },
+      venues: {
+        include: {
+          venue: true,
+        },
+      },
+    },
+  });
+
+  // Check if manager role with posts:manage permission
+  const isManager =
+    user?.role.name === "MANAGER" &&
+    user.role.rolePermissions.some(
+      (rp) =>
+        rp.permission.resource === "posts" && rp.permission.action === "manage"
+    );
+
+  if (isManager && user.venues.length > 0) {
+    // Get manager's venue IDs
+    const managerVenueIds = user.venues.map((uv) => uv.venue.id);
+
+    // Get all channel members and check if they're all from manager's venues
+    const channelMembers = await prisma.channelMember.findMany({
+      where: { channelId },
+      include: {
+        user: {
+          include: {
+            venues: {
+              include: {
+                venue: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Check if all members are from manager's venues
+    const allMembersInManagerVenues = channelMembers.every((member) => {
+      return member.user.venues.some((uv) =>
+        managerVenueIds.includes(uv.venue.id)
+      );
+    });
+
+    if (allMembersInManagerVenues) {
+      return { allowed: true, isManager: true };
+    }
   }
 
   return {
     allowed: false,
     reason: "You don't have permission to manage this channel",
+    isManager: false,
   };
+}
+
+/**
+ * Helper: Get manager's venue IDs
+ */
+async function getManagerVenueIds(userId: string): Promise<string[] | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      role: true,
+      venues: {
+        include: {
+          venue: true,
+        },
+      },
+    },
+  });
+
+  if (user?.role.name === "MANAGER" && user.venues.length > 0) {
+    return user.venues.map((uv) => uv.venue.id);
+  }
+
+  return null;
 }
 
 /**
@@ -94,6 +179,46 @@ export async function addChannelMembers(data: AddChannelMembersInput) {
 
     if (channel.archived) {
       return { error: "Cannot add members to archived channel" };
+    }
+
+    // If user is a manager, verify all users being added are from their venues
+    if (canManage.isManager) {
+      const managerVenueIds = await getManagerVenueIds(user.id);
+
+      if (managerVenueIds && managerVenueIds.length > 0) {
+        // Get full user details including venues
+        const usersWithVenues = await prisma.user.findMany({
+          where: {
+            id: { in: userIds },
+          },
+          include: {
+            venues: {
+              include: {
+                venue: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        // Check if all users are from manager's venues
+        const usersNotInVenues = usersWithVenues.filter((u) => {
+          return !u.venues.some((uv) => managerVenueIds.includes(uv.venue.id));
+        });
+
+        if (usersNotInVenues.length > 0) {
+          const userNames = usersNotInVenues
+            .map((u) => getFullName(u))
+            .join(", ");
+          return {
+            error: `As a manager, you can only add members from your venue(s). The following users are not from your venues: ${userNames}`,
+          };
+        }
+      }
     }
 
     // Verify all users exist and are active
@@ -505,10 +630,21 @@ export async function getUsersForChannel(data: GetUsersForChannelInput) {
       ...(excludeUserIds && { id: { notIn: excludeUserIds } }),
     };
 
+    // If user is a manager, filter to only users from their venues
+    const managerVenueIds = await getManagerVenueIds(user.id);
+    if (managerVenueIds && managerVenueIds.length > 0) {
+      // Manager scoping: only show users from manager's venues
+      where.venues = {
+        some: {
+          venueId: { in: managerVenueIds },
+        },
+      };
+    }
+
     // Apply selection type filters
     switch (selectionType) {
       case "all":
-        // No additional filters
+        // No additional filters (manager venue filter already applied above)
         break;
 
       case "by_role":
@@ -522,11 +658,30 @@ export async function getUsersForChannel(data: GetUsersForChannelInput) {
         if (!venueIds || venueIds.length === 0) {
           return { error: "Venue IDs required for venue-based selection" };
         }
-        where.venues = {
-          some: {
-            venueId: { in: venueIds },
-          },
-        };
+        // If manager, ensure venue filter is combined with manager's venues
+        if (managerVenueIds && managerVenueIds.length > 0) {
+          // Intersect the requested venues with manager's venues
+          const allowedVenueIds = venueIds.filter((id) =>
+            managerVenueIds.includes(id)
+          );
+          if (allowedVenueIds.length === 0) {
+            return {
+              error:
+                "You don't have access to the selected venue(s). Please select from your assigned venues.",
+            };
+          }
+          where.venues = {
+            some: {
+              venueId: { in: allowedVenueIds },
+            },
+          };
+        } else {
+          where.venues = {
+            some: {
+              venueId: { in: venueIds },
+            },
+          };
+        }
         break;
 
       case "by_user":

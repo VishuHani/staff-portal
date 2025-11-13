@@ -18,6 +18,25 @@ import {
 } from "@/lib/schemas/channels";
 
 /**
+ * Get venue IDs for a manager user
+ * Returns null if user is not a manager
+ */
+async function getManagerVenueIds(userId: string): Promise<string[] | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      role: true,
+      venues: { include: { venue: true } },
+    },
+  });
+
+  if (user?.role.name === "MANAGER" && user.venues.length > 0) {
+    return user.venues.map((uv) => uv.venue.id);
+  }
+  return null;
+}
+
+/**
  * Get all channels (filtered) with unread counts
  * Filtered by venues: Users only see channels assigned to their venues
  */
@@ -138,10 +157,31 @@ export async function createChannel(data: CreateChannelInput) {
     };
   }
 
-  const { name, description, type, icon, color, permissions, venueIds } =
+  let { name, description, type, icon, color, permissions, venueIds } =
     validatedFields.data;
 
   try {
+    // If user is a manager, validate and restrict venue assignments
+    const managerVenueIds = await getManagerVenueIds(user.id);
+    if (managerVenueIds && managerVenueIds.length > 0) {
+      // Manager must assign channel to their venue(s)
+      if (!venueIds || venueIds.length === 0) {
+        // Auto-assign to all manager's venues
+        venueIds = managerVenueIds;
+      } else {
+        // Validate that all provided venueIds are within manager's venues
+        const invalidVenueIds = venueIds.filter(
+          (id) => !managerVenueIds.includes(id)
+        );
+        if (invalidVenueIds.length > 0) {
+          return {
+            error:
+              "As a manager, you can only create channels for your assigned venue(s)",
+          };
+        }
+      }
+    }
+
     // Check if channel name already exists
     const existing = await prisma.channel.findUnique({
       where: { name },
@@ -204,7 +244,7 @@ export async function updateChannel(data: UpdateChannelInput) {
     };
   }
 
-  const { id, venueIds, ...updateData } = validatedFields.data;
+  let { id, venueIds, ...updateData } = validatedFields.data;
 
   try {
     // Check if channel exists
@@ -214,6 +254,21 @@ export async function updateChannel(data: UpdateChannelInput) {
 
     if (!existing) {
       return { error: "Channel not found" };
+    }
+
+    // If user is a manager, validate venue assignments
+    const managerVenueIds = await getManagerVenueIds(user.id);
+    if (managerVenueIds && managerVenueIds.length > 0 && venueIds) {
+      // Validate that all provided venueIds are within manager's venues
+      const invalidVenueIds = venueIds.filter(
+        (venueId) => !managerVenueIds.includes(venueId)
+      );
+      if (invalidVenueIds.length > 0) {
+        return {
+          error:
+            "As a manager, you can only assign channels to your assigned venue(s)",
+        };
+      }
     }
 
     // If updating name, check for duplicates
