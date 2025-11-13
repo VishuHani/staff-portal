@@ -254,9 +254,9 @@ export function NewConversationDialog({
                     const userName = getFullName(user);
 
                     return (
-                      <div
+                      <label
                         key={user.id}
-                        onClick={() => !isDisabled && !creating && toggleUserSelection(user.id)}
+                        htmlFor={`user-checkbox-${user.id}`}
                         className={cn(
                           "flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-accent cursor-pointer",
                           isSelected && "bg-accent",
@@ -265,9 +265,10 @@ export function NewConversationDialog({
                       >
                         {/* Checkbox */}
                         <Checkbox
+                          id={`user-checkbox-${user.id}`}
                           checked={isSelected}
                           disabled={isDisabled || creating}
-                          className="pointer-events-none"
+                          onCheckedChange={() => toggleUserSelection(user.id)}
                         />
 
                         {/* Avatar */}
@@ -288,7 +289,7 @@ export function NewConversationDialog({
                             </p>
                           )}
                         </div>
-                      </div>
+                      </label>
                     );
                   })}
                 </div>
