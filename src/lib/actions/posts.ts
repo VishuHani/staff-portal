@@ -16,6 +16,71 @@ import {
   type PinPostInput,
   type FilterPostsInput,
 } from "@/lib/schemas/posts";
+import {
+  parseChannelPermissions,
+  hasPermissionLevel,
+  type ChannelPermissions,
+} from "@/lib/types/channel-permissions";
+
+/**
+ * Helper: Check if user has permission to perform action in channel
+ */
+async function checkChannelPermission(
+  userId: string,
+  channelId: string,
+  permissionKey: keyof Omit<ChannelPermissions, "isReadOnly" | "requiresApproval">
+): Promise<{ allowed: boolean; error?: string; role?: "CREATOR" | "MODERATOR" | "MEMBER" | null }> {
+  // Get channel with permissions
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: {
+      id: true,
+      archived: true,
+      permissions: true,
+      members: {
+        where: { userId },
+        select: { role: true },
+      },
+    },
+  });
+
+  if (!channel) {
+    return { allowed: false, error: "Channel not found" };
+  }
+
+  if (channel.archived) {
+    return { allowed: false, error: "Channel is archived" };
+  }
+
+  // Parse channel permissions
+  const permissions = parseChannelPermissions(channel.permissions);
+
+  // Check read-only mode
+  if (permissions.isReadOnly && permissionKey === "canCreatePosts") {
+    return { allowed: false, error: "Channel is in read-only mode" };
+  }
+
+  // Check if user is a member
+  const membership = channel.members[0];
+  const isMember = !!membership;
+  const userRole = membership?.role || null;
+
+  // Get required permission level
+  const requiredLevel = permissions[permissionKey];
+
+  // Check permission
+  const hasPermission = hasPermissionLevel(userRole, requiredLevel, isMember);
+
+  if (!hasPermission) {
+    return {
+      allowed: false,
+      error: `You don't have permission to perform this action in this channel`,
+      role: userRole,
+    };
+  }
+
+  return { allowed: true, role: userRole };
+}
 
 /**
  * Get posts with filtering and pagination
@@ -224,17 +289,15 @@ export async function createPost(data: CreatePostInput) {
   const { channelId, content, mediaUrls } = validatedFields.data;
 
   try {
-    // Verify channel exists and is not archived
-    const channel = await prisma.channel.findUnique({
-      where: { id: channelId },
-    });
+    // Check channel-level permission to create posts
+    const permissionCheck = await checkChannelPermission(
+      user.id,
+      channelId,
+      "canCreatePosts"
+    );
 
-    if (!channel) {
-      return { error: "Channel not found" };
-    }
-
-    if (channel.archived) {
-      return { error: "Cannot post to an archived channel" };
+    if (!permissionCheck.allowed) {
+      return { error: permissionCheck.error || "Permission denied" };
     }
 
     // Convert mediaUrls array to JSON string
@@ -299,17 +362,33 @@ export async function updatePost(data: UpdatePostInput) {
   const { id, content } = validatedFields.data;
 
   try {
-    // Check if post exists and user owns it
+    // Check if post exists
     const existingPost = await prisma.post.findUnique({
       where: { id },
+      select: {
+        id: true,
+        authorId: true,
+        channelId: true,
+      },
     });
 
     if (!existingPost) {
       return { error: "Post not found" };
     }
 
-    if (existingPost.authorId !== user.id) {
-      return { error: "You can only edit your own posts" };
+    // Check if user owns the post (for canEditOwnPosts)
+    const isOwnPost = existingPost.authorId === user.id;
+
+    // Check channel permission
+    const permissionKey = isOwnPost ? "canEditOwnPosts" : "canEditAnyPosts";
+    const permissionCheck = await checkChannelPermission(
+      user.id,
+      existingPost.channelId,
+      permissionKey
+    );
+
+    if (!permissionCheck.allowed) {
+      return { error: permissionCheck.error || "Permission denied" };
     }
 
     const post = await prisma.post.update({
@@ -371,17 +450,13 @@ export async function deletePost(data: DeletePostInput) {
   const { id } = validatedFields.data;
 
   try {
-    // Get users in shared venues for venue access check
-    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
-
+    // Check if post exists
     const existingPost = await prisma.post.findUnique({
       where: { id },
-      include: {
-        channel: {
-          include: {
-            venues: true,
-          },
-        },
+      select: {
+        id: true,
+        authorId: true,
+        channelId: true,
       },
     });
 
@@ -389,26 +464,19 @@ export async function deletePost(data: DeletePostInput) {
       return { error: "Post not found" };
     }
 
-    // VENUE FILTERING: Check if user has access to this post
-    if (!sharedVenueUserIds.includes(existingPost.authorId)) {
-      return { error: "Post not found" };
-    }
+    // Check if user owns the post (for canDeleteOwnPosts)
+    const isOwnPost = existingPost.authorId === user.id;
 
-    // Check if user owns the post or has moderate permission at the channel's venues
-    if (existingPost.authorId !== user.id) {
-      // VENUE-SCOPED PERMISSION CHECK: Check if user can moderate at ANY of the channel's venues
-      let hasModeratePermission = false;
+    // Check channel permission
+    const permissionKey = isOwnPost ? "canDeleteOwnPosts" : "canDeleteAnyPosts";
+    const permissionCheck = await checkChannelPermission(
+      user.id,
+      existingPost.channelId,
+      permissionKey
+    );
 
-      for (const channelVenue of existingPost.channel.venues) {
-        if (await canAccessVenue("posts", "moderate", channelVenue.venueId)) {
-          hasModeratePermission = true;
-          break;
-        }
-      }
-
-      if (!hasModeratePermission) {
-        return { error: "You don't have permission to delete this post" };
-      }
+    if (!permissionCheck.allowed) {
+      return { error: permissionCheck.error || "Permission denied" };
     }
 
     await prisma.post.delete({
@@ -441,15 +509,12 @@ export async function pinPost(data: PinPostInput) {
   const { id, pinned } = validatedFields.data;
 
   try {
-    // Get the post with channel venues to check permissions
+    // Get the post to check permissions
     const existingPost = await prisma.post.findUnique({
       where: { id },
-      include: {
-        channel: {
-          include: {
-            venues: true,
-          },
-        },
+      select: {
+        id: true,
+        channelId: true,
       },
     });
 
@@ -457,18 +522,15 @@ export async function pinPost(data: PinPostInput) {
       return { error: "Post not found" };
     }
 
-    // VENUE-SCOPED PERMISSION CHECK: Check if user can moderate at ANY of the channel's venues
-    let hasModeratePermission = false;
+    // Check channel permission to pin posts
+    const permissionCheck = await checkChannelPermission(
+      user.id,
+      existingPost.channelId,
+      "canPinPosts"
+    );
 
-    for (const channelVenue of existingPost.channel.venues) {
-      if (await canAccessVenue("posts", "moderate", channelVenue.venueId)) {
-        hasModeratePermission = true;
-        break;
-      }
-    }
-
-    if (!hasModeratePermission) {
-      return { error: "You don't have permission to pin posts" };
+    if (!permissionCheck.allowed) {
+      return { error: permissionCheck.error || "Permission denied" };
     }
 
     const post = await prisma.post.update({

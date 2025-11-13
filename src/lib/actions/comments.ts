@@ -13,6 +13,10 @@ import {
   type DeleteCommentInput,
 } from "@/lib/schemas/posts";
 import { notifyPostMention, notifyMessageReply } from "@/lib/services/notifications";
+import {
+  parseChannelPermissions,
+  hasPermissionLevel,
+} from "@/lib/types/channel-permissions";
 
 /**
  * Helper function to extract @mentions from comment content
@@ -107,7 +111,7 @@ export async function createComment(data: CreateCommentInput) {
   const { postId, parentId, content } = validatedFields.data;
 
   try {
-    // Verify post exists
+    // Verify post exists and get channel
     const post = await prisma.post.findUnique({
       where: { id: postId },
       select: {
@@ -117,11 +121,37 @@ export async function createComment(data: CreateCommentInput) {
             id: true,
           },
         },
+        channel: {
+          select: {
+            id: true,
+            archived: true,
+            permissions: true,
+            members: {
+              where: { userId: user.id },
+              select: { role: true },
+            },
+          },
+        },
       },
     });
 
     if (!post) {
       return { error: "Post not found" };
+    }
+
+    if (post.channel.archived) {
+      return { error: "Channel is archived" };
+    }
+
+    // Check channel permission to comment
+    const permissions = parseChannelPermissions(post.channel.permissions);
+    const membership = post.channel.members[0];
+    const isMember = !!membership;
+    const userRole = membership?.role || null;
+    const hasPermission = hasPermissionLevel(userRole, permissions.canComment, isMember);
+
+    if (!hasPermission) {
+      return { error: "You don't have permission to comment in this channel" };
     }
 
     // If this is a reply, verify parent comment exists
