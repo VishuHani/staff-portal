@@ -105,8 +105,17 @@ interface StaffingGap {
 // UTILITY FUNCTIONS
 // ============================================================================
 
-// Helper functions (timeToMinutes, checkTimeSlotOverlap, computeEffectiveAvailability)
+// Helper functions (checkTimeSlotOverlap, computeEffectiveAvailability)
 // are now imported from @/lib/utils/availability
+
+/**
+ * Convert time string (HH:mm) to minutes since midnight
+ * Used for coverage heatmap calculations
+ */
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
 
 // ============================================================================
 // MAIN SERVER ACTIONS
@@ -143,11 +152,21 @@ export async function getAvailabilityMatrix(filters: MatrixFilters) {
       active: true,
     };
 
-    if (filters.roleId) {
+    // Role filtering: Support both multi-select (roleIds) and single (roleId)
+    if (filters.roleIds && filters.roleIds.length > 0) {
+      where.roleId = { in: filters.roleIds };
+    } else if (filters.roleId) {
       where.roleId = filters.roleId;
     }
 
-    if (filters.venueId) {
+    // Venue filtering: Support both multi-select (venueIds) and single (venueId)
+    if (filters.venueIds && filters.venueIds.length > 0) {
+      where.venues = {
+        some: {
+          venueId: { in: filters.venueIds },
+        },
+      };
+    } else if (filters.venueId) {
       where.venues = {
         some: {
           venueId: filters.venueId,
@@ -156,11 +175,26 @@ export async function getAvailabilityMatrix(filters: MatrixFilters) {
     }
 
     if (filters.searchQuery) {
-      where.OR = [
-        { firstName: { contains: filters.searchQuery, mode: "insensitive" } },
-        { lastName: { contains: filters.searchQuery, mode: "insensitive" } },
-        { email: { contains: filters.searchQuery, mode: "insensitive" } },
-      ];
+      const searchTerm = filters.searchQuery.trim();
+      const searchWords = searchTerm.split(/\s+/); // Split by whitespace
+
+      if (searchWords.length > 1) {
+        // Multi-word search: Check if all words match (can be in any field)
+        where.AND = searchWords.map(word => ({
+          OR: [
+            { firstName: { contains: word, mode: "insensitive" } },
+            { lastName: { contains: word, mode: "insensitive" } },
+            { email: { contains: word, mode: "insensitive" } },
+          ],
+        }));
+      } else {
+        // Single word search: Check any field
+        where.OR = [
+          { firstName: { contains: searchTerm, mode: "insensitive" } },
+          { lastName: { contains: searchTerm, mode: "insensitive" } },
+          { email: { contains: searchTerm, mode: "insensitive" } },
+        ];
+      }
     }
 
     // Fetch users with their availability and time-off
@@ -272,7 +306,14 @@ export async function getCoverageAnalysis(filters: CoverageFilters) {
       active: true,
     };
 
-    if (filters.venueId) {
+    // Venue filtering: Support both multi-select (venueIds) and single (venueId)
+    if (filters.venueIds && filters.venueIds.length > 0) {
+      where.venues = {
+        some: {
+          venueId: { in: filters.venueIds },
+        },
+      };
+    } else if (filters.venueId) {
       where.venues = {
         some: {
           venueId: filters.venueId,
@@ -437,7 +478,14 @@ export async function getAvailabilityConflicts(filters: ConflictFilters) {
       active: true,
     };
 
-    if (filters.venueId) {
+    // Venue filtering: Support both multi-select (venueIds) and single (venueId)
+    if (filters.venueIds && filters.venueIds.length > 0) {
+      where.venues = {
+        some: {
+          venueId: { in: filters.venueIds },
+        },
+      };
+    } else if (filters.venueId) {
       where.venues = {
         some: {
           venueId: filters.venueId,
@@ -615,7 +663,14 @@ export async function getStaffingGaps(filters: GapFilters) {
       active: true,
     };
 
-    if (filters.venueId) {
+    // Venue filtering: Support both multi-select (venueIds) and single (venueId)
+    if (filters.venueIds && filters.venueIds.length > 0) {
+      where.venues = {
+        some: {
+          venueId: { in: filters.venueIds },
+        },
+      };
+    } else if (filters.venueId) {
       where.venues = {
         some: {
           venueId: filters.venueId,
@@ -772,7 +827,14 @@ export async function getConflictsReport(filters: any & { includeAIResolutions?:
       active: true,
     };
 
-    if (filters.venueId) {
+    // Venue filtering: Support both multi-select (venueIds) and single (venueId)
+    if (filters.venueIds && filters.venueIds.length > 0) {
+      where.venues = {
+        some: {
+          venueId: { in: filters.venueIds },
+        },
+      };
+    } else if (filters.venueId) {
       where.venues = {
         some: {
           venueId: filters.venueId,
