@@ -71,6 +71,7 @@ async function main() {
     { resource: "posts", action: "view", description: "View posts in accessible channels" },
     { resource: "posts", action: "edit_own", description: "Edit own posts" },
     { resource: "posts", action: "delete_own", description: "Delete own posts" },
+    { resource: "posts", action: "manage", description: "Manage channels and posts" },
     { resource: "posts", action: "moderate", description: "Pin/delete any posts, manage content" },
     { resource: "posts", action: "edit_all", description: "Edit any posts (admin)" },
     { resource: "posts", action: "delete_all", description: "Delete any posts (admin)" },
@@ -172,6 +173,7 @@ async function main() {
     "posts:view",
     "posts:edit_own",
     "posts:delete_own",
+    "posts:manage",
     "posts:moderate",
     // Messages
     "messages:send",
