@@ -254,13 +254,11 @@ export function NewConversationDialog({
                     const userName = getFullName(user);
 
                     return (
-                      <button
+                      <div
                         key={user.id}
-                        type="button"
-                        onClick={() => toggleUserSelection(user.id)}
-                        disabled={isDisabled || creating}
+                        onClick={() => !isDisabled && !creating && toggleUserSelection(user.id)}
                         className={cn(
-                          "flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-accent",
+                          "flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-accent cursor-pointer",
                           isSelected && "bg-accent",
                           isDisabled && "cursor-not-allowed opacity-50"
                         )}
@@ -290,7 +288,7 @@ export function NewConversationDialog({
                             </p>
                           )}
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
