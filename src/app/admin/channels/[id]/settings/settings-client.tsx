@@ -33,9 +33,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { updateChannel, archiveChannel } from "@/lib/actions/channels";
 import { toast } from "sonner";
 import { getFullName } from "@/lib/utils/profile";
+import { ChannelPermissionsEditor } from "@/components/channels";
+import {
+  type ChannelPermissions,
+  DEFAULT_CHANNEL_PERMISSIONS,
+  parseChannelPermissions,
+} from "@/lib/types/channel-permissions";
 
 interface Channel {
   id: string;
@@ -47,6 +54,7 @@ interface Channel {
   archived: boolean;
   archivedAt: Date | null;
   createdAt: Date;
+  permissions: any;
   creator: {
     firstName: string | null;
     lastName: string | null;
@@ -128,6 +136,9 @@ export function ChannelSettingsClient({
   const [selectedVenueIds, setSelectedVenueIds] = useState<string[]>(
     channel.venues.map((cv) => cv.venue.id)
   );
+  const [permissions, setPermissions] = useState<ChannelPermissions>(
+    parseChannelPermissions(channel.permissions)
+  );
 
   const handleVenueToggle = (venueId: string) => {
     setSelectedVenueIds((prev) =>
@@ -157,6 +168,7 @@ export function ChannelSettingsClient({
         type,
         icon,
         color,
+        permissions,
         venueIds: selectedVenueIds,
       });
 
@@ -201,7 +213,8 @@ export function ChannelSettingsClient({
     icon !== (channel.icon || "#️⃣") ||
     color !== (channel.color || "#3b82f6") ||
     JSON.stringify(selectedVenueIds.sort()) !==
-      JSON.stringify(channel.venues.map((cv) => cv.venue.id).sort());
+      JSON.stringify(channel.venues.map((cv) => cv.venue.id).sort()) ||
+    JSON.stringify(permissions) !== JSON.stringify(parseChannelPermissions(channel.permissions));
 
   return (
     <div className="container mx-auto p-6 space-y-6 max-w-4xl">
@@ -388,6 +401,21 @@ export function ChannelSettingsClient({
           </div>
         </CardContent>
       </Card>
+
+      {/* Channel Permissions */}
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-2xl font-bold">Channel Permissions</h2>
+          <p className="text-muted-foreground mt-1">
+            Control who can perform various actions in this channel
+          </p>
+        </div>
+        <ChannelPermissionsEditor
+          permissions={permissions}
+          onChange={setPermissions}
+          disabled={saving || archiving}
+        />
+      </div>
 
       {/* Channel Info */}
       <Card>

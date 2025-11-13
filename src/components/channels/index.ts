@@ -22,3 +22,6 @@ export { ChannelAnalytics, ChannelAnalyticsSummary } from "./ChannelAnalytics";
 
 // Wizard Components
 export { ChannelCreationWizard, type ChannelCreationData } from "./ChannelCreationWizard";
+
+// Permissions Components
+export { ChannelPermissionsEditor } from "./ChannelPermissionsEditor";
