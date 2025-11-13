@@ -33,7 +33,7 @@ async function migrateChannelsToVenues() {
     console.log();
 
     // Get all active venues (stores)
-    const venues = await prisma.store.findMany({
+    const venues = await prisma.venue.findMany({
       where: {
         active: true,
       },

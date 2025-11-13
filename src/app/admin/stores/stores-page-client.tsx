@@ -36,7 +36,7 @@ interface StoresPageClientProps {
 /**
  * StoresPageClient Component
  *
- * Client component for venue/store management page.
+ * Client component for venue management page.
  * Handles dialogs, state management, and page interactions.
  */
 export function StoresPageClient({ venues, stats }: StoresPageClientProps) {
@@ -70,7 +70,7 @@ export function StoresPageClient({ venues, stats }: StoresPageClientProps) {
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Venue Management</h2>
           <p className="mt-2 text-muted-foreground">
-            Manage all venues/stores in the system
+            Manage all venues in the system
           </p>
         </div>
         <Button onClick={handleCreate}>

@@ -18,6 +18,7 @@ import {
   FileText,
   Lock,
   Megaphone,
+  BarChart3,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -76,6 +77,12 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       roles: ["ADMIN", "MANAGER"],
     },
     {
+      title: "Reports & Analytics",
+      href: "/admin/reports",
+      icon: BarChart3,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
       title: "User Management",
       href: "/admin/users",
       icon: Users,
@@ -88,7 +95,7 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       roles: ["ADMIN"],
     },
     {
-      title: "Store Management",
+      title: "Venue Management",
       href: "/admin/stores",
       icon: Store,
       roles: ["ADMIN"],

@@ -92,7 +92,7 @@ async function main() {
     // Step 4: Validate stores exist
     console.log("🔍 Validating stores...");
     const storeIds = [...new Set(usersToMigrate.map((user) => user.storeId).filter(Boolean))];
-    const stores = await prisma.store.findMany({
+    const stores = await prisma.venue.findMany({
       where: { id: { in: storeIds as string[] } },
     });
 

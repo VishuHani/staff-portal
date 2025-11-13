@@ -160,6 +160,8 @@ export async function createChannel(data: CreateChannelInput) {
         icon,
         color,
         permissions,
+        createdBy: user.id,
+        memberCount: 0, // Will be updated when members are added
       },
     });
 

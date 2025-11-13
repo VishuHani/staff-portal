@@ -6,7 +6,7 @@ async function check() {
     users: await prisma.user.count(),
     roles: await prisma.role.count(),
     permissions: await prisma.permission.count(),
-    stores: await prisma.store.count(),
+    stores: await prisma.venue.count(),
     channels: await prisma.channel.count(),
     posts: await prisma.post.count(),
     messages: await prisma.message.count(),

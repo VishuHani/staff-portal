@@ -240,7 +240,7 @@ export async function getCurrentUser() {
           },
         },
       },
-      store: true,
+      venue: true,
       venues: {
         include: {
           venue: {

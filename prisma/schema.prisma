@@ -13,7 +13,7 @@ model User {
   email                   String                    @unique
   password                String?
   roleId                  String
-  storeId                 String?
+  venueId                 String?
   active                  Boolean                   @default(true)
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
@@ -24,6 +24,7 @@ model User {
   phone                   String?
   profileCompletedAt      DateTime?
   profileImage            String?
+  aiQueries               AIQuery[]
   auditLogs               AuditLog[]
   availability            Availability[]
   comments                Comment[]
@@ -39,14 +40,18 @@ model User {
   grantedPermissions      UserVenuePermission[]     @relation("GrantedPermissions")
   venuePermissions        UserVenuePermission[]     @relation("UserPermissions")
   venues                  UserVenue[]
+  // NEW: Channel relations
+  createdChannels         Channel[]                 @relation("CreatedChannels")
+  channelMemberships      ChannelMember[]           @relation("ChannelMemberships")
+  addedMembers            ChannelMember[]           @relation("AddedChannelMembers")
   role                    Role                      @relation(fields: [roleId], references: [id])
-  store                   Store?                    @relation(fields: [storeId], references: [id])
+  venue                   Venue?                    @relation(fields: [venueId], references: [id])
 
   @@index([email])
   @@index([firstName])
   @@index([lastName])
   @@index([roleId])
-  @@index([storeId])
+  @@index([venueId])
   @@map("users")
 }
 
@@ -102,7 +107,7 @@ model UserVenuePermission {
   grantedByUser User       @relation("GrantedPermissions", fields: [grantedBy], references: [id])
   permission    Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
   user          User       @relation("UserPermissions", fields: [userId], references: [id], onDelete: Cascade)
-  venue         Store      @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  venue         Venue      @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@unique([userId, venueId, permissionId])
   @@index([userId])
@@ -112,7 +117,7 @@ model UserVenuePermission {
   @@map("user_venue_permissions")
 }
 
-model Store {
+model Venue {
   id                   String                @id @default(cuid())
   name                 String
   code                 String                @unique
@@ -124,7 +129,7 @@ model Store {
   userVenues           UserVenue[]
   users                User[]
 
-  @@map("stores")
+  @@map("venues")
 }
 
 model UserVenue {
@@ -134,7 +139,7 @@ model UserVenue {
   isPrimary Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  venue     Store    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@unique([userId, venueId])
   @@index([userId])
@@ -184,20 +189,28 @@ model TimeOffRequest {
 }
 
 model Channel {
-  id          String         @id @default(cuid())
-  name        String         @unique
+  id          String           @id @default(cuid())
+  name        String           @unique
   type        String
-  permissions String?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  archived    Boolean        @default(false)
+  permissions Json?            // Changed from String? to Json?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  archived    Boolean          @default(false)
   archivedAt  DateTime?
   color       String?
   description String?
   icon        String?
-  venues      ChannelVenue[]
+  // NEW FIELDS
+  createdBy   String?          // User ID of creator (nullable for migration, will be required later)
+  memberCount Int              @default(0) // Denormalized for performance
+  // Relations
+  creator     User?            @relation("CreatedChannels", fields: [createdBy], references: [id])
+  members     ChannelMember[]  // NEW: Direct member tracking
+  venues      ChannelVenue[]   // Keep for migration compatibility
   posts       Post[]
 
+  @@index([createdBy])
+  @@index([memberCount])
   @@map("channels")
 }
 
@@ -207,12 +220,33 @@ model ChannelVenue {
   venueId   String
   createdAt DateTime @default(now())
   channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  venue     Store    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@unique([channelId, venueId])
   @@index([channelId])
   @@index([venueId])
   @@map("channel_venues")
+}
+
+model ChannelMember {
+  id        String   @id @default(cuid())
+  channelId String
+  userId    String
+  role      String   @default("MEMBER") // CREATOR, MODERATOR, MEMBER
+  // Audit fields
+  addedBy   String   // User ID who added this member
+  addedAt   DateTime @default(now())
+  addedVia  String?  // "manual", "role_based", "venue_based", "bulk_import"
+  // Relations
+  channel     Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user        User    @relation("ChannelMemberships", fields: [userId], references: [id], onDelete: Cascade)
+  addedByUser User    @relation("AddedChannelMembers", fields: [addedBy], references: [id])
+
+  @@unique([channelId, userId])
+  @@index([channelId])
+  @@index([userId])
+  @@index([addedBy])
+  @@map("channel_members")
 }
 
 model Post {
@@ -469,4 +503,42 @@ enum NotificationChannel {
   EMAIL
   PUSH
   SMS
+}
+
+model AvailabilitySnapshot {
+  id             String   @id @default(cuid())
+  venueId        String?
+  snapshotDate   DateTime
+  totalStaff     Int
+  availableStaff Int
+  coverage       Json
+  createdAt      DateTime @default(now())
+
+  @@index([venueId, snapshotDate])
+  @@map("availability_snapshots")
+}
+
+model ReportCache {
+  id         String   @id @default(cuid())
+  reportType String
+  filters    Json
+  data       Json
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+
+  @@index([reportType, expiresAt])
+  @@map("report_cache")
+}
+
+model AIQuery {
+  id        String   @id @default(cuid())
+  userId    String
+  query     String
+  response  Json
+  filters   Json
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("ai_queries")
 }

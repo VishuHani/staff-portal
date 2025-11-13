@@ -8,7 +8,7 @@ async function main() {
 
   // Get admin role and store
   const adminRole = await prisma.role.findUnique({ where: { name: 'ADMIN' } });
-  const mainStore = await prisma.store.findUnique({ where: { code: 'MAIN' } });
+  const mainStore = await prisma.venue.findUnique({ where: { code: 'MAIN' } });
 
   if (!adminRole) {
     console.error('❌ Admin role not found');

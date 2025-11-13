@@ -99,6 +99,7 @@ async function main() {
     // ===== REPORTS PERMISSIONS =====
     { resource: "reports", action: "view_team", description: "View reports for assigned venues" },
     { resource: "reports", action: "export_team", description: "Export data for assigned venues" },
+    { resource: "reports", action: "view_ai", description: "Access AI-powered features and analytics" },
     { resource: "reports", action: "view_all", description: "View all reports (admin)" },
     { resource: "reports", action: "export_all", description: "Export all data (admin)" },
 
@@ -190,6 +191,7 @@ async function main() {
     // Reports
     "reports:view_team",
     "reports:export_team",
+    "reports:view_ai",
   ];
 
   for (const permName of managerPermissionNames) {
@@ -260,7 +262,7 @@ async function main() {
 
   // Create a default store
   console.log("Creating default store...");
-  const defaultStore = await prisma.store.upsert({
+  const defaultStore = await prisma.venue.upsert({
     where: { code: "MAIN" },
     update: {},
     create: {

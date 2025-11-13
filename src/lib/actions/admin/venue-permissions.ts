@@ -200,7 +200,7 @@ export async function grantUserVenuePermission(
     }
 
     // Check if venue exists
-    const venue = await prisma.store.findUnique({
+    const venue = await prisma.venue.findUnique({
       where: { id: venueId },
       select: { id: true, active: true, name: true },
     });
@@ -421,7 +421,7 @@ export async function bulkUpdateUserVenuePermissions(
     }
 
     // Validate venue
-    const venue = await prisma.store.findUnique({
+    const venue = await prisma.venue.findUnique({
       where: { id: venueId },
       select: { id: true, active: true, name: true },
     });
