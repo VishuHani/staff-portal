@@ -175,49 +175,51 @@ export async function createTimeOffRequest(data: CreateTimeOffRequestInput) {
   const { startDate, endDate, type, reason } = validatedFields.data;
 
   try {
-    // Check for overlapping requests
-    const overlapping = await prisma.timeOffRequest.findFirst({
-      where: {
-        userId: user.id,
-        status: { in: ["PENDING", "APPROVED"] },
-        OR: [
-          {
-            AND: [
-              { startDate: { lte: startDate } },
-              { endDate: { gte: startDate } },
-            ],
-          },
-          {
-            AND: [
-              { startDate: { lte: endDate } },
-              { endDate: { gte: endDate } },
-            ],
-          },
-          {
-            AND: [
-              { startDate: { gte: startDate } },
-              { endDate: { lte: endDate } },
-            ],
-          },
-        ],
-      },
-    });
+    // Use transaction to prevent race condition when checking for overlaps
+    const request = await prisma.$transaction(async (tx) => {
+      // Check for overlapping requests
+      const overlapping = await tx.timeOffRequest.findFirst({
+        where: {
+          userId: user.id,
+          status: { in: ["PENDING", "APPROVED"] },
+          OR: [
+            {
+              AND: [
+                { startDate: { lte: startDate } },
+                { endDate: { gte: startDate } },
+              ],
+            },
+            {
+              AND: [
+                { startDate: { lte: endDate } },
+                { endDate: { gte: endDate } },
+              ],
+            },
+            {
+              AND: [
+                { startDate: { gte: startDate } },
+                { endDate: { lte: endDate } },
+              ],
+            },
+          ],
+        },
+      });
 
-    if (overlapping) {
-      return {
-        error: `You already have a ${overlapping.status.toLowerCase()} time-off request for overlapping dates`,
-      };
-    }
+      if (overlapping) {
+        throw new Error(`You already have a ${overlapping.status.toLowerCase()} time-off request for overlapping dates`);
+      }
 
-    const request = await prisma.timeOffRequest.create({
-      data: {
-        userId: user.id,
-        startDate,
-        endDate,
-        type,
-        reason,
-        status: "PENDING",
-      },
+      // Create the request within transaction
+      return await tx.timeOffRequest.create({
+        data: {
+          userId: user.id,
+          startDate,
+          endDate,
+          type,
+          reason,
+          status: "PENDING",
+        },
+      });
     });
 
     // Notify managers/admins about new time-off request
@@ -268,8 +270,14 @@ export async function createTimeOffRequest(data: CreateTimeOffRequestInput) {
     revalidatePath("/admin/time-off");
 
     return { success: true, request };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating time-off request:", error);
+
+    // Check if error is about overlapping requests (from transaction)
+    if (error.message && error.message.includes("overlapping dates")) {
+      return { error: error.message };
+    }
+
     return { error: "Failed to create time-off request" };
   }
 }
