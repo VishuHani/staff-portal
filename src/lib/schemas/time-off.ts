@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { startOfDay } from "date-fns";
 
 /**
  * Time-off request types
@@ -19,18 +20,22 @@ export const TIME_OFF_STATUSES = [
 
 /**
  * Helper function to validate date range
+ * Normalizes dates to start of day (UTC) for consistent comparison
  */
 export function validateDateRange(startDate: Date, endDate: Date): boolean {
-  return endDate >= startDate;
+  const normalizedStart = startOfDay(startDate);
+  const normalizedEnd = startOfDay(endDate);
+  return normalizedEnd >= normalizedStart;
 }
 
 /**
  * Helper function to check if dates are in the future
+ * Uses UTC midnight for timezone-consistent validation
  */
 export function isDateInFuture(date: Date): boolean {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return date >= today;
+  const today = startOfDay(new Date());
+  const normalizedDate = startOfDay(date);
+  return normalizedDate >= today;
 }
 
 /**
