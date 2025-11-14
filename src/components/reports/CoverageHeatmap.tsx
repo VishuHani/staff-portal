@@ -26,11 +26,15 @@ export function CoverageHeatmap({ data, title, description }: CoverageHeatmapPro
   // Days of the week
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-  // Hours (0-23)
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-
   // Ensure data is an array
   const safeData = Array.isArray(data) ? data : [];
+
+  // Dynamically determine hours from data (allows filtering to business hours)
+  const hoursInData = safeData.length > 0
+    ? Array.from(new Set(safeData.map(d => d.hour))).sort((a, b) => a - b)
+    : Array.from({ length: 24 }, (_, i) => i);
+
+  const hours = hoursInData;
 
   // Find max count for color scaling
   const maxCount = safeData.length > 0 ? Math.max(...safeData.map((d) => d.count), 1) : 1;

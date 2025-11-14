@@ -321,6 +321,65 @@ export async function getCoverageAnalysis(filters: CoverageFilters) {
       };
     }
 
+    // Fetch venue business hours for filtering heatmap
+    let venueBusinessHours: { startHour: number; endHour: number; operatingDays: number[] } | null = null;
+
+    if (filters.venueIds && filters.venueIds.length > 0) {
+      // Multiple venues: get min start and max end hours across all venues
+      const venues = await prisma.venue.findMany({
+        where: { id: { in: filters.venueIds } },
+        select: {
+          businessHoursStart: true,
+          businessHoursEnd: true,
+          operatingDays: true,
+        },
+      });
+
+      if (venues.length > 0) {
+        const startHours = venues.map(v => parseInt(v.businessHoursStart.split(":")[0]));
+        const endHours = venues.map(v => {
+          const [hour, min] = v.businessHoursEnd.split(":").map(Number);
+          // If end time has minutes, round up to next hour for display
+          return min > 0 ? hour + 1 : hour;
+        });
+
+        // Get union of all operating days
+        const allOperatingDays = new Set<number>();
+        venues.forEach(v => {
+          const days = v.operatingDays as number[];
+          days.forEach(d => allOperatingDays.add(d));
+        });
+
+        venueBusinessHours = {
+          startHour: Math.min(...startHours),
+          endHour: Math.max(...endHours),
+          operatingDays: Array.from(allOperatingDays),
+        };
+      }
+    } else if (filters.venueId) {
+      // Single venue: use its exact hours
+      const venue = await prisma.venue.findUnique({
+        where: { id: filters.venueId },
+        select: {
+          businessHoursStart: true,
+          businessHoursEnd: true,
+          operatingDays: true,
+        },
+      });
+
+      if (venue) {
+        const startHour = parseInt(venue.businessHoursStart.split(":")[0]);
+        const [endHourRaw, endMin] = venue.businessHoursEnd.split(":").map(Number);
+        const endHour = endMin > 0 ? endHourRaw + 1 : endHourRaw;
+
+        venueBusinessHours = {
+          startHour,
+          endHour,
+          operatingDays: venue.operatingDays as number[],
+        };
+      }
+    }
+
     // Fetch users
     const users = await prisma.user.findMany({
       where,
@@ -397,10 +456,23 @@ export async function getCoverageAnalysis(filters: CoverageFilters) {
     const lowDay = dailyCoverage.find((d) => d.availableStaff === minAvailability);
 
     // Generate heatmap (day of week × hour)
+    // Filter to business hours if venue is specified
     const heatmap: Record<number, Record<string, number>> = {};
+
+    // Determine hour range for heatmap
+    const hourStart = venueBusinessHours?.startHour ?? 0;
+    const hourEnd = venueBusinessHours?.endHour ?? 24;
+    const operatingDays = venueBusinessHours?.operatingDays ?? [0, 1, 2, 3, 4, 5, 6];
+
     for (let dow = 0; dow < 7; dow++) {
       heatmap[dow] = {};
-      for (let hour = 0; hour < 24; hour++) {
+
+      // Skip days that are not in operating days
+      if (!operatingDays.includes(dow)) {
+        continue;
+      }
+
+      for (let hour = hourStart; hour < hourEnd; hour++) {
         const timeSlot = `${hour.toString().padStart(2, "0")}:00`;
         let count = 0;
 
