@@ -133,7 +133,17 @@ export async function createVenue(data: CreateVenueInput) {
     };
   }
 
-  const { name, code, address, phone, email, active } = validatedFields.data;
+  const {
+    name,
+    code,
+    address,
+    phone,
+    email,
+    active,
+    businessHoursStart,
+    businessHoursEnd,
+    operatingDays
+  } = validatedFields.data;
 
   try {
     // Check if code already exists
@@ -150,6 +160,9 @@ export async function createVenue(data: CreateVenueInput) {
         name,
         code,
         active,
+        businessHoursStart,
+        businessHoursEnd,
+        operatingDays,
       },
     });
 
@@ -176,7 +189,18 @@ export async function updateVenue(data: UpdateVenueInput) {
     };
   }
 
-  const { venueId, name, code, address, phone, email, active } = validatedFields.data;
+  const {
+    venueId,
+    name,
+    code,
+    address,
+    phone,
+    email,
+    active,
+    businessHoursStart,
+    businessHoursEnd,
+    operatingDays,
+  } = validatedFields.data;
 
   try {
     // Check if code is already taken by another venue
@@ -201,6 +225,9 @@ export async function updateVenue(data: UpdateVenueInput) {
         ...(name && { name }),
         ...(code && { code }),
         ...(active !== undefined && { active }),
+        ...(businessHoursStart && { businessHoursStart }),
+        ...(businessHoursEnd && { businessHoursEnd }),
+        ...(operatingDays && { operatingDays }),
       },
       include: {
         _count: {
@@ -343,6 +370,9 @@ export async function getActiveVenues() {
         name: true,
         code: true,
         active: true,
+        businessHoursStart: true,
+        businessHoursEnd: true,
+        operatingDays: true,
       },
       orderBy: {
         name: "asc",

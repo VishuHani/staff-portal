@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   createVenueSchema,
   updateVenueSchema,
@@ -30,6 +31,9 @@ interface Venue {
   name: string;
   code: string;
   active: boolean;
+  businessHoursStart?: string;
+  businessHoursEnd?: string;
+  operatingDays?: number[];
 }
 
 interface VenueDialogProps {
@@ -81,15 +85,22 @@ export function VenueDialog({
           name: venue.name,
           code: venue.code,
           active: venue.active,
+          businessHoursStart: venue.businessHoursStart || "08:00",
+          businessHoursEnd: venue.businessHoursEnd || "22:00",
+          operatingDays: venue.operatingDays || [1, 2, 3, 4, 5],
         }
       : {
           name: "",
           code: "",
           active: true,
+          businessHoursStart: "08:00",
+          businessHoursEnd: "22:00",
+          operatingDays: [1, 2, 3, 4, 5],
         },
   });
 
   const activeValue = watch("active");
+  const operatingDaysValue = watch("operatingDays") || [];
 
   const onSubmit = async (data: FormData) => {
     setLoading(true);
@@ -189,6 +200,80 @@ export function VenueDialog({
             {errors.code && (
               <p className="text-sm text-red-600">{errors.code.message}</p>
             )}
+          </div>
+
+          {/* Business Hours */}
+          <div className="space-y-3 rounded-lg border p-4">
+            <Label className="text-base">Business Hours</Label>
+            <p className="text-xs text-gray-500">
+              Define when this venue operates. Availability can only be set within these hours.
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="businessHoursStart">Opening Time</Label>
+                <Input
+                  id="businessHoursStart"
+                  type="time"
+                  {...register("businessHoursStart")}
+                  disabled={loading}
+                />
+                {errors.businessHoursStart && (
+                  <p className="text-sm text-red-600">{errors.businessHoursStart.message}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="businessHoursEnd">Closing Time</Label>
+                <Input
+                  id="businessHoursEnd"
+                  type="time"
+                  {...register("businessHoursEnd")}
+                  disabled={loading}
+                />
+                {errors.businessHoursEnd && (
+                  <p className="text-sm text-red-600">{errors.businessHoursEnd.message}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Operating Days */}
+            <div className="space-y-2">
+              <Label>Operating Days</Label>
+              <div className="grid grid-cols-7 gap-2">
+                {[
+                  { label: "Sun", value: 0 },
+                  { label: "Mon", value: 1 },
+                  { label: "Tue", value: 2 },
+                  { label: "Wed", value: 3 },
+                  { label: "Thu", value: 4 },
+                  { label: "Fri", value: 5 },
+                  { label: "Sat", value: 6 },
+                ].map((day) => (
+                  <div key={day.value} className="flex flex-col items-center space-y-1">
+                    <Label htmlFor={`day-${day.value}`} className="text-xs cursor-pointer">
+                      {day.label}
+                    </Label>
+                    <Checkbox
+                      id={`day-${day.value}`}
+                      checked={operatingDaysValue.includes(day.value)}
+                      onCheckedChange={(checked) => {
+                        const current = operatingDaysValue;
+                        if (checked) {
+                          setValue("operatingDays", [...current, day.value].sort());
+                        } else {
+                          setValue("operatingDays", current.filter((d: number) => d !== day.value));
+                        }
+                      }}
+                      disabled={loading}
+                    />
+                  </div>
+                ))}
+              </div>
+              {errors.operatingDays && (
+                <p className="text-sm text-red-600">{errors.operatingDays.message}</p>
+              )}
+            </div>
           </div>
 
           {/* Active Status */}

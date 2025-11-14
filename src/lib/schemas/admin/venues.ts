@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+// Time format validation helper (HH:mm)
+const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+
 // Create venue schema
 export const createVenueSchema = z.object({
   name: z
@@ -33,7 +36,33 @@ export const createVenueSchema = z.object({
     .optional()
     .or(z.literal("")),
   active: z.boolean().default(true),
-});
+  // Business Hours - NEW
+  businessHoursStart: z
+    .string()
+    .regex(timeRegex, "Start time must be in HH:mm format (e.g., 08:00)")
+    .default("08:00"),
+  businessHoursEnd: z
+    .string()
+    .regex(timeRegex, "End time must be in HH:mm format (e.g., 22:00)")
+    .default("22:00"),
+  operatingDays: z
+    .array(z.number().min(0).max(6))
+    .min(1, "Select at least one operating day")
+    .default([1, 2, 3, 4, 5]), // Mon-Fri
+}).refine(
+  (data) => {
+    // Validate businessHoursEnd > businessHoursStart
+    const [startHour, startMin] = data.businessHoursStart.split(":").map(Number);
+    const [endHour, endMin] = data.businessHoursEnd.split(":").map(Number);
+    const startMinutes = startHour * 60 + startMin;
+    const endMinutes = endHour * 60 + endMin;
+    return endMinutes > startMinutes;
+  },
+  {
+    message: "Business closing time must be after opening time",
+    path: ["businessHoursEnd"],
+  }
+);
 
 // Update venue schema
 export const updateVenueSchema = z.object({
@@ -69,7 +98,36 @@ export const updateVenueSchema = z.object({
     .optional()
     .or(z.literal("")),
   active: z.boolean().optional(),
-});
+  // Business Hours - NEW
+  businessHoursStart: z
+    .string()
+    .regex(timeRegex, "Start time must be in HH:mm format (e.g., 08:00)")
+    .optional(),
+  businessHoursEnd: z
+    .string()
+    .regex(timeRegex, "End time must be in HH:mm format (e.g., 22:00)")
+    .optional(),
+  operatingDays: z
+    .array(z.number().min(0).max(6))
+    .min(1, "Select at least one operating day")
+    .optional(),
+}).refine(
+  (data) => {
+    // Validate businessHoursEnd > businessHoursStart (if both provided)
+    if (data.businessHoursStart && data.businessHoursEnd) {
+      const [startHour, startMin] = data.businessHoursStart.split(":").map(Number);
+      const [endHour, endMin] = data.businessHoursEnd.split(":").map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+      return endMinutes > startMinutes;
+    }
+    return true;
+  },
+  {
+    message: "Business closing time must be after opening time",
+    path: ["businessHoursEnd"],
+  }
+);
 
 // Delete venue schema
 export const deleteVenueSchema = z.object({
