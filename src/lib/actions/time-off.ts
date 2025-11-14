@@ -382,6 +382,7 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
 
   try {
     // Get the request with requester's venue information
+    // Include version field for optimistic locking
     const request = await prisma.timeOffRequest.findUnique({
       where: { id },
       include: {
@@ -401,6 +402,9 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
     if (!request) {
       return { error: "Time-off request not found" };
     }
+
+    // Store the current version for optimistic locking
+    const currentVersion = request.version;
 
     // Get requester's primary venue
     const requesterPrimaryVenue = request.user.venues.find((uv) => uv.isPrimary);
@@ -437,14 +441,31 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
       return { error: `This request has already been ${request.status.toLowerCase()}` };
     }
 
-    const updated = await prisma.timeOffRequest.update({
-      where: { id },
+    // Optimistic locking: Update only if version matches
+    const updated = await prisma.timeOffRequest.updateMany({
+      where: {
+        id,
+        version: currentVersion, // Only update if version hasn't changed
+      },
       data: {
         status,
         reviewedBy: user.id,
         reviewedAt: new Date(),
         notes,
+        version: { increment: 1 }, // Increment version
       },
+    });
+
+    // Check if update was successful (row count > 0 means version matched)
+    if (updated.count === 0) {
+      return {
+        error: "This request has been modified by another user. Please refresh and try again."
+      };
+    }
+
+    // Fetch the updated request with user details for notifications
+    const updatedRequest = await prisma.timeOffRequest.findUnique({
+      where: { id },
       include: {
         user: {
           select: {
@@ -464,11 +485,15 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
       },
     });
 
+    if (!updatedRequest) {
+      return { error: "Failed to fetch updated request" };
+    }
+
     // Create audit log
     try {
-      const requesterName = updated.user.firstName && updated.user.lastName
-        ? `${updated.user.firstName} ${updated.user.lastName}`
-        : updated.user.email;
+      const requesterName = updatedRequest.user.firstName && updatedRequest.user.lastName
+        ? `${updatedRequest.user.firstName} ${updatedRequest.user.lastName}`
+        : updatedRequest.user.email;
 
       await createAuditLog({
         userId: user.id,
@@ -535,7 +560,7 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
     revalidatePath("/time-off");
     revalidatePath("/admin/time-off");
 
-    return { success: true, request: updated };
+    return { success: true, request: updatedRequest };
   } catch (error) {
     console.error("Error reviewing time-off request:", error);
     return { error: "Failed to review time-off request" };
