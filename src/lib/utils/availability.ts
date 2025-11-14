@@ -2,6 +2,7 @@ import {
   eachDayOfInterval,
   getDay,
   isWithinInterval,
+  startOfDay,
 } from "date-fns";
 
 /**
@@ -58,8 +59,10 @@ export function computeEffectiveAvailability(
   const result: Record<string, AvailabilityStatus> = {};
 
   for (const date of dates) {
-    const dateStr = date.toISOString();
-    const dayOfWeek = getDay(date); // 0 (Sunday) - 6 (Saturday)
+    // Normalize date to start of day to avoid time component issues
+    const normalizedDate = startOfDay(date);
+    const dateStr = normalizedDate.toISOString();
+    const dayOfWeek = getDay(normalizedDate); // 0 (Sunday) - 6 (Saturday)
 
     // Get recurring availability for this day of week
     const recurring = user.availability.find(
@@ -67,10 +70,14 @@ export function computeEffectiveAvailability(
     );
 
     // Check if user has approved time-off on this date
+    // Normalize time-off dates to start of day for accurate boundary comparison
     const timeOff = user.timeOffRequests.find(
       (to: any) =>
         to.status === "APPROVED" &&
-        isWithinInterval(date, { start: to.startDate, end: to.endDate })
+        isWithinInterval(normalizedDate, {
+          start: startOfDay(new Date(to.startDate)),
+          end: startOfDay(new Date(to.endDate))
+        })
     );
 
     // Time-off overrides recurring availability

@@ -15,6 +15,103 @@ import {
 } from "@/lib/schemas/availability";
 
 /**
+ * Convert time string (HH:mm) to minutes since midnight
+ */
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+/**
+ * Validate availability against venue business hours
+ */
+async function validateAgainstBusinessHours(
+  userId: string,
+  dayOfWeek: number,
+  startTime: string | null,
+  endTime: string | null,
+  isAvailable: boolean,
+  isAllDay: boolean
+): Promise<{ valid: boolean; error?: string }> {
+  // If not available, no need to validate
+  if (!isAvailable) {
+    return { valid: true };
+  }
+
+  // Get user's primary venue
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      venueId: true,
+      userVenues: {
+        where: { isPrimary: true },
+        take: 1,
+        select: {
+          venue: {
+            select: {
+              businessHoursStart: true,
+              businessHoursEnd: true,
+              operatingDays: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!user) {
+    return { valid: false, error: "User not found" };
+  }
+
+  // Get venue (from primary UserVenue or fallback to venueId)
+  const venue = user.userVenues[0]?.venue || (user.venueId ? await prisma.venue.findUnique({
+    where: { id: user.venueId },
+    select: {
+      businessHoursStart: true,
+      businessHoursEnd: true,
+      operatingDays: true,
+      name: true,
+    },
+  }) : null);
+
+  if (!venue) {
+    // No venue assigned, allow any hours for now
+    return { valid: true };
+  }
+
+  // Check if day is in operating days
+  const operatingDays = venue.operatingDays as number[];
+  if (!operatingDays.includes(dayOfWeek)) {
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    return {
+      valid: false,
+      error: `${venue.name} is not open on ${dayNames[dayOfWeek]}. Operating days: ${operatingDays.map(d => dayNames[d]).join(", ")}`,
+    };
+  }
+
+  // If all-day, check if it fits within business hours
+  if (isAllDay || !startTime || !endTime) {
+    return { valid: true };
+  }
+
+  // Validate time range is within business hours
+  const businessStart = timeToMinutes(venue.businessHoursStart);
+  const businessEnd = timeToMinutes(venue.businessHoursEnd);
+  const availStart = timeToMinutes(startTime);
+  const availEnd = timeToMinutes(endTime);
+
+  if (availStart < businessStart || availEnd > businessEnd) {
+    return {
+      valid: false,
+      error: `Availability times (${startTime}-${endTime}) must be within ${venue.name}'s business hours (${venue.businessHoursStart}-${venue.businessHoursEnd})`,
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Get current user's availability for all days of the week
  */
 export async function getMyAvailability() {
@@ -88,6 +185,20 @@ export async function updateAvailability(data: UpdateAvailabilityInput) {
     if (!validateTimeRange(startTime, endTime)) {
       return { error: "End time must be after start time" };
     }
+  }
+
+  // Validate against venue business hours
+  const businessHoursValidation = await validateAgainstBusinessHours(
+    user.id,
+    dayOfWeek,
+    finalStartTime,
+    finalEndTime,
+    isAvailable,
+    isAllDay
+  );
+
+  if (!businessHoursValidation.valid) {
+    return { error: businessHoursValidation.error || "Invalid business hours" };
   }
 
   try {
@@ -168,6 +279,22 @@ export async function bulkUpdateAvailability(data: BulkUpdateAvailabilityInput) 
       endTime: finalEndTime,
     };
   });
+
+  // Validate each day against venue business hours
+  for (const day of processedData) {
+    const validation = await validateAgainstBusinessHours(
+      user.id,
+      day.dayOfWeek,
+      day.startTime,
+      day.endTime,
+      day.isAvailable,
+      day.isAllDay
+    );
+
+    if (!validation.valid) {
+      return { error: validation.error || "Invalid business hours" };
+    }
+  }
 
   try {
     // Update all days in a transaction
