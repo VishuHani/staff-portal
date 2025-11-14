@@ -113,37 +113,43 @@ async function validateAgainstBusinessHours(
 
 /**
  * Get current user's availability for all days of the week
+ * Wrapped in transaction to prevent race conditions when creating defaults
  */
 export async function getMyAvailability() {
   const user = await requireAuth();
 
   try {
-    const availability = await prisma.availability.findMany({
-      where: { userId: user.id },
-      orderBy: { dayOfWeek: "asc" },
-    });
+    // Use transaction to ensure atomicity when creating missing days
+    const allDays = await prisma.$transaction(async (tx) => {
+      const availability = await tx.availability.findMany({
+        where: { userId: user.id },
+        orderBy: { dayOfWeek: "asc" },
+      });
 
-    // Ensure all 7 days exist (create defaults if missing)
-    const allDays = [];
-    for (let day = 0; day < 7; day++) {
-      const existing = availability.find((a) => a.dayOfWeek === day);
-      if (existing) {
-        allDays.push(existing);
-      } else {
-        // Create default availability for missing days
-        const newAvailability = await prisma.availability.create({
-          data: {
-            userId: user.id,
-            dayOfWeek: day,
-            isAvailable: false,
-            isAllDay: false,
-            startTime: null,
-            endTime: null,
-          },
-        });
-        allDays.push(newAvailability);
+      // Ensure all 7 days exist (create defaults if missing)
+      const results = [];
+      for (let day = 0; day < 7; day++) {
+        const existing = availability.find((a) => a.dayOfWeek === day);
+        if (existing) {
+          results.push(existing);
+        } else {
+          // Create default availability for missing days within transaction
+          const newAvailability = await tx.availability.create({
+            data: {
+              userId: user.id,
+              dayOfWeek: day,
+              isAvailable: false,
+              isAllDay: false,
+              startTime: null,
+              endTime: null,
+            },
+          });
+          results.push(newAvailability);
+        }
       }
-    }
+
+      return results;
+    });
 
     return { success: true, availability: allDays };
   } catch (error) {
