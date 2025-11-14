@@ -124,6 +124,10 @@ model Venue {
   active               Boolean               @default(true)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
+  // Business Hours - NEW
+  businessHoursStart   String                @default("08:00") // HH:mm format
+  businessHoursEnd     String                @default("22:00") // HH:mm format
+  operatingDays        Json                  @default("[1,2,3,4,5]") // Array of 0-6 (Sunday-Saturday), default Mon-Fri
   channelVenues        ChannelVenue[]
   userVenuePermissions UserVenuePermission[]
   userVenues           UserVenue[]
@@ -177,6 +181,7 @@ model TimeOffRequest {
   reviewedBy String?
   reviewedAt DateTime?
   notes      String?
+  version    Int       @default(0) // Optimistic locking - NEW
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   reviewer   User?     @relation("ReviewedBy", fields: [reviewedBy], references: [id])
