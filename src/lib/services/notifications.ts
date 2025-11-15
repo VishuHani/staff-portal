@@ -280,6 +280,7 @@ export async function notifyTimeOffSubmitted(
 
 /**
  * Notify requester when time-off is approved
+ * Also notifies the approver to confirm their action
  */
 export async function notifyTimeOffApproved(
   requestId: string,
@@ -291,17 +292,41 @@ export async function notifyTimeOffApproved(
 ) {
   const dateRange = `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`;
 
-  return createNotification({
+  // Get requester's name for approver notification
+  const requester = await prisma.user.findUnique({
+    where: { id: requesterId },
+    select: { firstName: true, lastName: true, email: true },
+  });
+
+  const requesterName = requester?.firstName && requester?.lastName
+    ? `${requester.firstName} ${requester.lastName}`
+    : requester?.email || "Unknown";
+
+  // Notify requester
+  const requesterNotification = createNotification({
     userId: requesterId,
     type: "TIME_OFF_APPROVED",
     title: "Time off request approved",
     message: `Your time off request for ${dateRange} has been approved by ${approverName}`,
     link: `/time-off?request=${requestId}`,
   });
+
+  // Notify approver (confirmation of their action)
+  const approverNotification = createNotification({
+    userId: approverId,
+    type: "TIME_OFF_APPROVED",
+    title: "Time off request approved",
+    message: `You approved ${requesterName}'s time off request for ${dateRange}`,
+    link: `/time-off?request=${requestId}`,
+  });
+
+  // Send both notifications in parallel
+  return Promise.all([requesterNotification, approverNotification]);
 }
 
 /**
  * Notify requester when time-off is rejected
+ * Also notifies the rejector to confirm their action
  */
 export async function notifyTimeOffRejected(
   requestId: string,
@@ -314,7 +339,18 @@ export async function notifyTimeOffRejected(
 ) {
   const dateRange = `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`;
 
-  return createNotification({
+  // Get requester's name for rejector notification
+  const requester = await prisma.user.findUnique({
+    where: { id: requesterId },
+    select: { firstName: true, lastName: true, email: true },
+  });
+
+  const requesterName = requester?.firstName && requester?.lastName
+    ? `${requester.firstName} ${requester.lastName}`
+    : requester?.email || "Unknown";
+
+  // Notify requester
+  const requesterNotification = createNotification({
     userId: requesterId,
     type: "TIME_OFF_REJECTED",
     title: "Time off request rejected",
@@ -323,6 +359,20 @@ export async function notifyTimeOffRejected(
       : `Your time off request for ${dateRange} was rejected by ${rejectorName}`,
     link: `/time-off?request=${requestId}`,
   });
+
+  // Notify rejector (confirmation of their action)
+  const rejectorNotification = createNotification({
+    userId: rejectorId,
+    type: "TIME_OFF_REJECTED",
+    title: "Time off request rejected",
+    message: reason
+      ? `You rejected ${requesterName}'s time off request for ${dateRange}: ${reason}`
+      : `You rejected ${requesterName}'s time off request for ${dateRange}`,
+    link: `/time-off?request=${requestId}`,
+  });
+
+  // Send both notifications in parallel
+  return Promise.all([requesterNotification, rejectorNotification]);
 }
 
 /**

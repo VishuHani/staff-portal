@@ -222,12 +222,12 @@ export async function updateVenue(data: UpdateVenueInput) {
     const venue = await prisma.venue.update({
       where: { id: venueId },
       data: {
-        ...(name && { name }),
-        ...(code && { code }),
+        ...(name !== undefined && { name }),
+        ...(code !== undefined && { code }),
         ...(active !== undefined && { active }),
-        ...(businessHoursStart && { businessHoursStart }),
-        ...(businessHoursEnd && { businessHoursEnd }),
-        ...(operatingDays && { operatingDays }),
+        ...(businessHoursStart !== undefined && { businessHoursStart }),
+        ...(businessHoursEnd !== undefined && { businessHoursEnd }),
+        ...(operatingDays !== undefined && { operatingDays }),
       },
       include: {
         _count: {

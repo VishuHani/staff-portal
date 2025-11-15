@@ -3,15 +3,27 @@ import { getCurrentUser } from "@/lib/actions/auth";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { getUnreadCount } from "@/lib/actions/notifications";
 import { getUnreadMessageCount } from "@/lib/actions/messages";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { getStaffDashboardData } from "@/lib/actions/dashboard/staff-dashboard";
+import { getManagerDashboardData } from "@/lib/actions/dashboard/manager-dashboard";
+import { getAdminDashboardData } from "@/lib/actions/dashboard/admin-dashboard";
+import { WeekAtGlance } from "@/components/dashboard/staff/WeekAtGlance";
+import { StaffKPICards } from "@/components/dashboard/staff/StaffKPICards";
+import { QuickActions } from "@/components/dashboard/staff/QuickActions";
+import { RecentActivityFeed } from "@/components/dashboard/staff/RecentActivityFeed";
+import { PersonalStatsChart } from "@/components/dashboard/staff/PersonalStatsChart";
+import { HeroStatsBar } from "@/components/dashboard/manager/HeroStatsBar";
+import { CoverageHeatmap } from "@/components/dashboard/manager/CoverageHeatmap";
+import { TeamAvailabilityPie } from "@/components/dashboard/manager/TeamAvailabilityPie";
+import { CoverageTrendChart } from "@/components/dashboard/manager/CoverageTrendChart";
+import { AIInsightsPanel } from "@/components/dashboard/manager/AIInsightsPanel";
+import { TeamSnapshotTable } from "@/components/dashboard/manager/TeamSnapshotTable";
+import { GlobalStatsCards } from "@/components/dashboard/admin/GlobalStatsCards";
+import { VenueComparisonChart } from "@/components/dashboard/admin/VenueComparisonChart";
+import { UserActivityHeatmap } from "@/components/dashboard/admin/UserActivityHeatmap";
+import { ActionDistributionPie } from "@/components/dashboard/admin/ActionDistributionPie";
+import { RoleDistributionDonut } from "@/components/dashboard/admin/RoleDistributionDonut";
+import { ApprovalTurnaroundChart } from "@/components/dashboard/admin/ApprovalTurnaroundChart";
+import { AuditLogFeed } from "@/components/dashboard/admin/AuditLogFeed";
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
@@ -25,140 +37,197 @@ export default async function DashboardPage() {
     getUnreadMessageCount(),
   ]);
 
+  // Get role-specific dashboard data
+  const userRole = user.role.name;
+
+  // Staff Dashboard
+  if (userRole === "STAFF") {
+    const dashboardData = await getStaffDashboardData();
+
+    return (
+      <DashboardLayout
+        user={user}
+        unreadCount={unreadResult.count || 0}
+        unreadMessageCount={messageCountResult.count || 0}
+      >
+        <div className="space-y-6">
+          {/* Welcome Section */}
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight">
+              Welcome back, {user.firstName}!
+            </h2>
+            <p className="mt-2 text-muted-foreground">
+              Here's your dashboard overview
+            </p>
+          </div>
+
+          {/* Week at a Glance */}
+          {dashboardData.success && (
+            <WeekAtGlance summary={dashboardData.data.weeklySummary} />
+          )}
+
+          {/* KPI Cards */}
+          {dashboardData.success && (
+            <StaffKPICards kpis={dashboardData.data.kpis} />
+          )}
+
+          {/* Quick Actions */}
+          <QuickActions unreadMessageCount={messageCountResult.count || 0} />
+
+          {/* Two Column Layout */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Recent Activity */}
+            {dashboardData.success && (
+              <RecentActivityFeed notifications={dashboardData.data.recentActivity} />
+            )}
+
+            {/* Personal Stats Chart */}
+            {dashboardData.success && (
+              <PersonalStatsChart trends={dashboardData.data.trends} />
+            )}
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  // Manager Dashboard
+  if (userRole === "MANAGER") {
+    const dashboardData = await getManagerDashboardData();
+
+    return (
+      <DashboardLayout
+        user={user}
+        unreadCount={unreadResult.count || 0}
+        unreadMessageCount={messageCountResult.count || 0}
+      >
+        <div className="space-y-6">
+          {/* Welcome Section */}
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight">
+              Welcome back, {user.firstName}!
+            </h2>
+            <p className="mt-2 text-muted-foreground">
+              Here's your team management dashboard
+            </p>
+          </div>
+
+          {/* Hero Stats Bar */}
+          {dashboardData.success && (
+            <HeroStatsBar stats={dashboardData.data.heroStats} />
+          )}
+
+          {/* Main Visualizations Grid */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Coverage Heatmap */}
+            {dashboardData.success && (
+              <CoverageHeatmap heatmap={dashboardData.data.heatmap} />
+            )}
+
+            {/* Team Availability Pie */}
+            {dashboardData.success && (
+              <TeamAvailabilityPie distribution={dashboardData.data.distribution} />
+            )}
+
+            {/* Coverage Trend Chart */}
+            {dashboardData.success && (
+              <CoverageTrendChart trends={dashboardData.data.trend} />
+            )}
+
+            {/* AI Insights Panel */}
+            {dashboardData.success && (
+              <AIInsightsPanel insights={dashboardData.data.insights} />
+            )}
+          </div>
+
+          {/* Team Snapshot Table */}
+          {dashboardData.success && (
+            <TeamSnapshotTable snapshot={dashboardData.data.snapshot} />
+          )}
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  // Admin Dashboard
+  if (userRole === "ADMIN") {
+    const dashboardData = await getAdminDashboardData();
+
+    return (
+      <DashboardLayout
+        user={user}
+        unreadCount={unreadResult.count || 0}
+        unreadMessageCount={messageCountResult.count || 0}
+      >
+        <div className="space-y-6">
+          {/* Welcome Section */}
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight">
+              Welcome back, {user.firstName}!
+            </h2>
+            <p className="mt-2 text-muted-foreground">
+              System-wide administration dashboard
+            </p>
+          </div>
+
+          {/* Global Stats Cards */}
+          {dashboardData.success && (
+            <GlobalStatsCards stats={dashboardData.data.globalStats} />
+          )}
+
+          {/* Venue Comparison Chart */}
+          {dashboardData.success && (
+            <VenueComparisonChart comparison={dashboardData.data.venueComparison} />
+          )}
+
+          {/* System Activity Grid (2x2) */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* User Activity Heatmap */}
+            {dashboardData.success && (
+              <UserActivityHeatmap heatmap={dashboardData.data.activityHeatmap} />
+            )}
+
+            {/* Action Distribution Pie */}
+            {dashboardData.success && (
+              <ActionDistributionPie distribution={dashboardData.data.actionDistribution} />
+            )}
+
+            {/* Role Distribution Donut */}
+            {dashboardData.success && (
+              <RoleDistributionDonut distribution={dashboardData.data.roleDistribution} />
+            )}
+
+            {/* Approval Turnaround Chart */}
+            {dashboardData.success && (
+              <ApprovalTurnaroundChart metrics={dashboardData.data.approvalMetrics} />
+            )}
+          </div>
+
+          {/* Audit Log Feed */}
+          {dashboardData.success && (
+            <AuditLogFeed logs={dashboardData.data.auditLogs} />
+          )}
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  // Fallback (should never reach here)
   return (
     <DashboardLayout
       user={user}
       unreadCount={unreadResult.count || 0}
       unreadMessageCount={messageCountResult.count || 0}
     >
-      <div className="space-y-8">
-        {/* Welcome Section */}
+      <div className="space-y-6">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Welcome back!</h2>
+          <h2 className="text-3xl font-bold tracking-tight">
+            Welcome back, {user.firstName}!
+          </h2>
           <p className="mt-2 text-muted-foreground">
-            Here's an overview of your account
+            Dashboard loading...
           </p>
         </div>
-
-        {/* Dashboard Grid */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {/* Profile Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Your Profile</CardTitle>
-              <CardDescription>Account information</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">
-                  Email
-                </p>
-                <p className="text-sm">{user.email}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">
-                  Role
-                </p>
-                <Badge variant="secondary">{user.role.name}</Badge>
-              </div>
-              {user.store && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">
-                    Store
-                  </p>
-                  <p className="text-sm">{user.store.name}</p>
-                </div>
-              )}
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">
-                  Status
-                </p>
-                {user.active ? (
-                  <Badge variant="default" className="bg-green-600">
-                    Active
-                  </Badge>
-                ) : (
-                  <Badge variant="destructive">Inactive</Badge>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Permissions Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Permissions</CardTitle>
-              <CardDescription>Your access level</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-1">
-                {user.role.rolePermissions.map((rp) => (
-                  <div
-                    key={rp.permission.id}
-                    className="text-sm text-muted-foreground"
-                  >
-                    • {rp.permission.resource}:{rp.permission.action}
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Quick Actions Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
-              <CardDescription>Common tasks</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Button className="w-full" variant="outline" disabled>
-                View Availability
-              </Button>
-              <Button className="w-full" variant="outline" disabled>
-                Request Time Off
-              </Button>
-              <Button className="w-full" variant="outline" disabled>
-                View Messages
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Coming Soon Card */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Coming Soon</CardTitle>
-            <CardDescription>Features in development</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Availability Management
-              </li>
-              <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Time-Off Requests
-              </li>
-              <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Team Communication
-              </li>
-              <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Direct Messaging
-              </li>
-              <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Schedule Viewing
-              </li>
-              <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Notifications
-              </li>
-            </ul>
-          </CardContent>
-        </Card>
       </div>
     </DashboardLayout>
   );

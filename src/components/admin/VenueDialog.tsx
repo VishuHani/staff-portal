@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Building2, Loader2 } from "lucide-react";
@@ -98,6 +98,34 @@ export function VenueDialog({
           operatingDays: [1, 2, 3, 4, 5],
         },
   });
+
+  // Reset form when venue changes or dialog opens
+  useEffect(() => {
+    if (open) {
+      if (venue) {
+        // Editing existing venue - populate form
+        reset({
+          venueId: venue.id,
+          name: venue.name,
+          code: venue.code,
+          active: venue.active,
+          businessHoursStart: venue.businessHoursStart || "08:00",
+          businessHoursEnd: venue.businessHoursEnd || "22:00",
+          operatingDays: venue.operatingDays || [1, 2, 3, 4, 5],
+        });
+      } else {
+        // Creating new venue - clear form
+        reset({
+          name: "",
+          code: "",
+          active: true,
+          businessHoursStart: "08:00",
+          businessHoursEnd: "22:00",
+          operatingDays: [1, 2, 3, 4, 5],
+        });
+      }
+    }
+  }, [open, venue, reset]);
 
   const activeValue = watch("active");
   const operatingDaysValue = watch("operatingDays") || [];

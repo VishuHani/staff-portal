@@ -24,6 +24,7 @@ import {
 } from "@/lib/services/notifications";
 import { getCurrentUser } from "@/lib/actions/auth";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
+import { NotificationType } from "@prisma/client";
 
 /**
  * Get all users with their roles and stores
@@ -200,6 +201,40 @@ export async function createUser(data: CreateUserInput) {
       await prisma.userVenue.createMany({
         data: userVenueData,
       });
+    }
+
+    // Initialize notification preferences for all notification types (EMAIL + IN_APP enabled by default)
+    const notificationTypes: NotificationType[] = [
+      "NEW_MESSAGE",
+      "MESSAGE_REPLY",
+      "MESSAGE_MENTION",
+      "MESSAGE_REACTION",
+      "POST_MENTION",
+      "POST_PINNED",
+      "POST_DELETED",
+      "TIME_OFF_REQUEST",
+      "TIME_OFF_APPROVED",
+      "TIME_OFF_REJECTED",
+      "TIME_OFF_CANCELLED",
+      "USER_CREATED",
+      "USER_UPDATED",
+      "ROLE_CHANGED",
+      "SYSTEM_ANNOUNCEMENT",
+      "GROUP_REMOVED",
+    ];
+
+    try {
+      await prisma.notificationPreference.createMany({
+        data: notificationTypes.map((type) => ({
+          userId: result.userId!,
+          type,
+          enabled: true,
+          channels: ["IN_APP", "EMAIL"],
+        })),
+      });
+    } catch (error) {
+      console.error("Error creating notification preferences:", error);
+      // Don't fail user creation if preference initialization fails
     }
 
     // Fetch the created user with relations for the response

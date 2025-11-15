@@ -26,11 +26,11 @@ export async function getUserNotificationPreference(
       },
     });
 
-    // Default preferences if none exist: IN_APP enabled only
+    // Default preferences if none exist: IN_APP + EMAIL enabled
     if (!preference) {
       return {
         enabled: true,
-        channels: ["IN_APP" as NotificationChannel],
+        channels: ["IN_APP" as NotificationChannel, "EMAIL" as NotificationChannel],
       };
     }
 

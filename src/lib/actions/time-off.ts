@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess, canAccessVenue } from "@/lib/rbac/access";
-import { getSharedVenueUsers } from "@/lib/utils/venue";
+import { getSharedVenueUsers, getUserVenueIds } from "@/lib/utils/venue";
 import {
   createTimeOffRequestSchema,
   updateTimeOffRequestSchema,
@@ -224,16 +224,25 @@ export async function createTimeOffRequest(data: CreateTimeOffRequestInput) {
 
     // Notify managers/admins about new time-off request
     try {
-      // VENUE FILTERING: Get users from shared venues
-      const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+      // VENUE FILTERING: Get requester's venues (not all venues admin has access to)
+      const requesterVenueIds = await getUserVenueIds(user.id);
 
-      // Get all users with permission to review time-off requests from shared venues
+      // Get all MANAGERS with permission to review time-off requests from requester's venues
+      // EXCLUDES admins from venue-specific notifications
       const approvers = await prisma.user.findMany({
         where: {
-          // VENUE FILTERING: Only notify approvers from shared venues
-          id: { in: sharedVenueUserIds },
           active: true,
+          // Only users in requester's venues
+          venues: {
+            some: {
+              venueId: {
+                in: requesterVenueIds,
+              },
+            },
+          },
+          // Must have approval permission
           role: {
+            name: { not: "ADMIN" }, // EXCLUDE ADMINS from venue-specific notifications
             rolePermissions: {
               some: {
                 permission: {

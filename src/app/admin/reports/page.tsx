@@ -2,7 +2,7 @@ import { requireAdmin } from "@/lib/rbac/access";
 import { getReportsDashboardData } from "@/lib/actions/reports/availability-reports";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Calendar, Clock, TrendingUp, BarChart3, Activity, Sparkles } from "lucide-react";
+import { Users, Calendar, Clock, TrendingUp, BarChart3, Activity, Sparkles, CalendarOff } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ReportsDashboardClient } from "./reports-dashboard-client";
@@ -31,6 +31,13 @@ export default async function ReportsPage() {
       icon: Calendar,
       href: "/admin/reports/availability-matrix",
       color: "text-blue-600",
+    },
+    {
+      title: "Time-Off Report",
+      description: "Track time-off requests and coverage impact",
+      icon: CalendarOff,
+      href: "/admin/reports/time-off",
+      color: "text-red-600",
     },
     {
       title: "Coverage Analysis",

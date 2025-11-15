@@ -42,8 +42,7 @@ async function validateAgainstBusinessHours(
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
-      venueId: true,
-      userVenues: {
+      venues: {
         where: { isPrimary: true },
         take: 1,
         select: {
@@ -64,16 +63,8 @@ async function validateAgainstBusinessHours(
     return { valid: false, error: "User not found" };
   }
 
-  // Get venue (from primary UserVenue or fallback to venueId)
-  const venue = user.userVenues[0]?.venue || (user.venueId ? await prisma.venue.findUnique({
-    where: { id: user.venueId },
-    select: {
-      businessHoursStart: true,
-      businessHoursEnd: true,
-      operatingDays: true,
-      name: true,
-    },
-  }) : null);
+  // Get venue from primary UserVenue
+  const venue = user.venues[0]?.venue;
 
   if (!venue) {
     // No venue assigned, allow any hours for now

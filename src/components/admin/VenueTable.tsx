@@ -37,6 +37,9 @@ interface Venue {
   name: string;
   code: string;
   active: boolean;
+  businessHoursStart?: string;
+  businessHoursEnd?: string;
+  operatingDays?: number[];
   _count?: {
     userVenues: number;
   };
