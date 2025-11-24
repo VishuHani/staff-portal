@@ -1,27 +1,164 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAdmin, requireAnyPermission } from "@/lib/rbac/access";
 import {
   type PermissionResource,
   type PermissionAction,
   type Permission,
+  isAdmin,
 } from "@/lib/rbac/permissions";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
+import { getCurrentUser } from "@/lib/actions/auth";
+import { getUserVenueIds } from "@/lib/utils/venue";
 
 /**
  * VENUE-SCOPED PERMISSION MANAGEMENT ACTIONS
  *
- * These server actions allow admins to manage venue-specific permissions for users.
- * All actions require admin role and include comprehensive error handling.
+ * These server actions allow admins and managers to manage venue-specific permissions for users.
+ * Includes comprehensive permission hierarchy checks and error handling.
  *
  * Use Cases:
  * - Grant a manager access to reports at a specific venue
  * - Give a manager permission to edit team schedules at their venue
  * - Remove venue-specific permissions when a user changes roles
  * - Bulk update permissions when assigning a user to a new venue
+ *
+ * Permission Hierarchy:
+ * - Admins can manage permissions for anyone (except themselves)
+ * - Managers can manage permissions for STAFF users at their assigned venues
+ * - Managers can view their own permissions (read-only)
+ * - Managers cannot manage other managers or admins
+ * - Staff cannot manage any permissions
  */
+
+/**
+ * Check if current user can manage venue permissions for target user
+ *
+ * @param currentUserId - The ID of the user attempting to manage permissions
+ * @param targetUserId - The ID of the user whose permissions are being managed
+ * @param venueId - The venue ID for scoped check
+ * @param isReadOnly - If true, only checks read permission (viewing own permissions)
+ * @returns Object with allowed status and optional error message
+ */
+async function canManageUserVenuePermissions(
+  currentUserId: string,
+  targetUserId: string,
+  venueId: string,
+  isReadOnly: boolean = false
+): Promise<{ allowed: boolean; error?: string }> {
+  try {
+    // Get current user with role
+    const currentUser = await prisma.user.findUnique({
+      where: { id: currentUserId },
+      include: {
+        role: true,
+      },
+    });
+
+    if (!currentUser || !currentUser.active) {
+      return { allowed: false, error: "Current user not found or inactive" };
+    }
+
+    // Get target user with role
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      include: {
+        role: true,
+      },
+    });
+
+    if (!targetUser) {
+      return { allowed: false, error: "Target user not found" };
+    }
+
+    // Check if current user is admin
+    const currentUserIsAdmin = await isAdmin(currentUserId);
+
+    // Rule 1: Admins can manage everyone
+    if (currentUserIsAdmin) {
+      // Admins can view anyone (including themselves in read-only mode)
+      if (isReadOnly) {
+        return { allowed: true };
+      }
+      // Admins cannot edit their own permissions
+      if (currentUserId === targetUserId) {
+        return { allowed: false, error: "Cannot edit your own permissions" };
+      }
+      return { allowed: true };
+    }
+
+    // Rule 2: Managers can view their own permissions (read-only)
+    if (currentUserId === targetUserId && isReadOnly) {
+      return { allowed: true };
+    }
+
+    // Rule 3: Cannot manage yourself (unless admin or read-only already checked)
+    if (currentUserId === targetUserId) {
+      return { allowed: false, error: "Cannot edit your own permissions" };
+    }
+
+    // Rule 4: Check if current user has manage permission
+    const hasManagePermission = await prisma.rolePermission.findFirst({
+      where: {
+        roleId: currentUser.role.id,
+        permission: {
+          resource: "users",
+          action: {
+            in: ["edit_team", "manage"],
+          },
+        },
+      },
+    });
+
+    if (!hasManagePermission) {
+      return { allowed: false, error: "You don't have permission to manage user permissions" };
+    }
+
+    // Rule 5: Target user must not be admin (only admins can manage admins)
+    const targetUserIsAdmin = await isAdmin(targetUserId);
+    if (targetUserIsAdmin) {
+      return { allowed: false, error: "Only admins can manage admin permissions" };
+    }
+
+    // Rule 6: Managers can only manage STAFF (not other managers)
+    const targetUserIsManager = currentUser.role.rolePermissions?.some(
+      (rp: any) => rp.permission.action === "manage"
+    ) || false;
+
+    // Check if target is a manager
+    const targetIsManager = await prisma.rolePermission.findFirst({
+      where: {
+        roleId: targetUser.role.id,
+        permission: {
+          action: "manage",
+        },
+      },
+    });
+
+    if (targetIsManager) {
+      return { allowed: false, error: "Managers cannot manage other managers' permissions" };
+    }
+
+    // Rule 7: Manager must have access to the venue
+    const currentUserVenues = await getUserVenueIds(currentUserId);
+    if (!currentUserVenues.includes(venueId)) {
+      return { allowed: false, error: "You don't have access to this venue" };
+    }
+
+    // Rule 8: Target user must be assigned to the venue
+    const targetUserVenues = await getUserVenueIds(targetUserId);
+    if (!targetUserVenues.includes(venueId)) {
+      return { allowed: false, error: "Target user is not assigned to this venue" };
+    }
+
+    return { allowed: true };
+  } catch (error) {
+    console.error("Error checking permission management access:", error);
+    return { allowed: false, error: "Failed to verify permissions" };
+  }
+}
 
 /**
  * Get all venue-specific permissions for a user at a venue
@@ -35,7 +172,26 @@ export async function getUserVenuePermissions(
   venueId: string
 ) {
   try {
-    await requireAdmin();
+    // Require at least manager permissions
+    const currentUser = await requireAnyPermission([
+      { resource: "users", action: "edit_team" },
+      { resource: "users", action: "view_team" },
+    ]);
+
+    // Check if current user can manage this user's permissions (read-only check)
+    const accessCheck = await canManageUserVenuePermissions(
+      currentUser.id,
+      userId,
+      venueId,
+      true // read-only
+    );
+
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        error: accessCheck.error || "Access denied",
+      };
+    }
 
     const permissions = await prisma.userVenuePermission.findMany({
       where: {
@@ -87,14 +243,42 @@ export async function getUserVenuePermissions(
  *
  * @param userId - The user's ID
  * @param venueId - The venue ID
- * @returns Combined permissions from role and venue-specific grants
+ * @returns Combined permissions from role and venue-specific grants, plus isReadOnly flag
  */
 export async function getUserEffectiveVenuePermissions(
   userId: string,
   venueId: string
 ) {
   try {
-    await requireAdmin();
+    // Require at least manager permissions
+    const currentUser = await requireAnyPermission([
+      { resource: "users", action: "edit_team" },
+      { resource: "users", action: "view_team" },
+    ]);
+
+    // Check if current user can view this user's permissions
+    const accessCheck = await canManageUserVenuePermissions(
+      currentUser.id,
+      userId,
+      venueId,
+      true // read-only check first
+    );
+
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        error: accessCheck.error || "Access denied",
+      };
+    }
+
+    // Determine if this is read-only mode (viewing own permissions or no edit permission)
+    const writeAccessCheck = await canManageUserVenuePermissions(
+      currentUser.id,
+      userId,
+      venueId,
+      false // write check
+    );
+    const isReadOnly = !writeAccessCheck.allowed;
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -153,6 +337,7 @@ export async function getUserEffectiveVenuePermissions(
       permissions: uniquePerms,
       rolePermissions: rolePerms,
       venuePermissions: venuePerms,
+      isReadOnly, // Indicate if user can only view (not edit)
     };
   } catch (error) {
     console.error("Error getting effective venue permissions:", error);
@@ -177,7 +362,25 @@ export async function grantUserVenuePermission(
   permissionId: string
 ) {
   try {
-    const admin = await requireAdmin();
+    // Require at least manager permissions
+    const currentUser = await requireAnyPermission([
+      { resource: "users", action: "edit_team" },
+    ]);
+
+    // Check if current user can manage this user's permissions (write access)
+    const accessCheck = await canManageUserVenuePermissions(
+      currentUser.id,
+      userId,
+      venueId,
+      false // write access required
+    );
+
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        error: accessCheck.error || "Access denied",
+      };
+    }
 
     // Check if user exists and is active
     const user = await prisma.user.findUnique({
@@ -256,14 +459,14 @@ export async function grantUserVenuePermission(
         userId,
         venueId,
         permissionId,
-        grantedBy: admin.id,
+        grantedBy: currentUser.id,
       },
     });
 
     // Create audit log
     try {
       await createAuditLog({
-        userId: admin.id,
+        userId: currentUser.id,
         actionType: "VENUE_PERMISSION_GRANTED",
         resourceType: "VenuePermission",
         resourceId: `${userId}-${venueId}-${permissionId}`,
@@ -311,7 +514,25 @@ export async function revokeUserVenuePermission(
   permissionId: string
 ) {
   try {
-    const admin = await requireAdmin();
+    // Require at least manager permissions
+    const currentUser = await requireAnyPermission([
+      { resource: "users", action: "edit_team" },
+    ]);
+
+    // Check if current user can manage this user's permissions (write access)
+    const accessCheck = await canManageUserVenuePermissions(
+      currentUser.id,
+      userId,
+      venueId,
+      false // write access required
+    );
+
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        error: accessCheck.error || "Access denied",
+      };
+    }
 
     // Get permission info before deleting for audit log
     const existingPermission = await prisma.userVenuePermission.findUnique({
@@ -348,7 +569,7 @@ export async function revokeUserVenuePermission(
     if (existingPermission) {
       try {
         await createAuditLog({
-          userId: admin.id,
+          userId: currentUser.id,
           actionType: "VENUE_PERMISSION_REVOKED",
           resourceType: "VenuePermission",
           resourceId: `${userId}-${venueId}-${permissionId}`,
@@ -398,7 +619,25 @@ export async function bulkUpdateUserVenuePermissions(
   permissionIds: string[]
 ) {
   try {
-    const admin = await requireAdmin();
+    // Require at least manager permissions
+    const currentUser = await requireAnyPermission([
+      { resource: "users", action: "edit_team" },
+    ]);
+
+    // Check if current user can manage this user's permissions (write access)
+    const accessCheck = await canManageUserVenuePermissions(
+      currentUser.id,
+      userId,
+      venueId,
+      false // write access required
+    );
+
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        error: accessCheck.error || "Access denied",
+      };
+    }
 
     // Validate user
     const user = await prisma.user.findUnique({
@@ -475,7 +714,7 @@ export async function bulkUpdateUserVenuePermissions(
             userId,
             venueId,
             permissionId,
-            grantedBy: admin.id,
+            grantedBy: currentUser.id,
           })),
         });
       }
@@ -484,7 +723,7 @@ export async function bulkUpdateUserVenuePermissions(
     // Create audit log
     try {
       await createAuditLog({
-        userId: admin.id,
+        userId: currentUser.id,
         actionType: "VENUE_PERMISSIONS_BULK_UPDATED",
         resourceType: "VenuePermission",
         resourceId: `${userId}-${venueId}`,
@@ -532,7 +771,11 @@ export async function bulkUpdateUserVenuePermissions(
  */
 export async function getAvailablePermissions() {
   try {
-    await requireAdmin();
+    // Require at least manager permissions
+    await requireAnyPermission([
+      { resource: "users", action: "edit_team" },
+      { resource: "users", action: "view_team" },
+    ]);
 
     const permissions = await prisma.permission.findMany({
       orderBy: [{ resource: "asc" }, { action: "asc" }],
@@ -587,7 +830,25 @@ export async function getAvailablePermissions() {
  */
 export async function getUsersWithVenuePermissions(venueId: string) {
   try {
-    await requireAdmin();
+    // Require at least manager permissions
+    const currentUser = await requireAnyPermission([
+      { resource: "users", action: "edit_team" },
+      { resource: "users", action: "view_team" },
+    ]);
+
+    // Check if user is admin
+    const currentUserIsAdmin = await isAdmin(currentUser.id);
+
+    // Managers can only view users at their assigned venues
+    if (!currentUserIsAdmin) {
+      const currentUserVenues = await getUserVenueIds(currentUser.id);
+      if (!currentUserVenues.includes(venueId)) {
+        return {
+          success: false,
+          error: "You don't have access to this venue",
+        };
+      }
+    }
 
     const usersWithPerms = await prisma.userVenuePermission.findMany({
       where: { venueId },
@@ -681,9 +942,37 @@ export async function getUsersWithVenuePermissions(venueId: string) {
  */
 export async function getTotalVenuePermissionAssignments() {
   try {
-    await requireAdmin();
+    // Require at least manager permissions
+    const currentUser = await requireAnyPermission([
+      { resource: "users", action: "edit_team" },
+      { resource: "users", action: "view_team" },
+    ]);
 
-    const count = await prisma.userVenuePermission.count();
+    // Check if user is admin
+    const currentUserIsAdmin = await isAdmin(currentUser.id);
+
+    let whereClause: any = {};
+
+    // Managers can only count permissions at their assigned venues
+    if (!currentUserIsAdmin) {
+      const currentUserVenues = await getUserVenueIds(currentUser.id);
+      if (currentUserVenues.length === 0) {
+        return {
+          success: true,
+          count: 0,
+        };
+      }
+
+      whereClause = {
+        venueId: {
+          in: currentUserVenues,
+        },
+      };
+    }
+
+    const count = await prisma.userVenuePermission.count({
+      where: whereClause,
+    });
 
     return {
       success: true,

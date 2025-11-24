@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Shield, Check, X, Loader2 } from "lucide-react";
+import { Shield, Check, X, Loader2, AlertCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -21,13 +21,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   getAvailablePermissions,
   getUserEffectiveVenuePermissions,
@@ -104,35 +99,44 @@ export function VenuePermissionsDialog({
   user,
   venues,
 }: VenuePermissionsDialogProps) {
-  const [selectedVenueId, setSelectedVenueId] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<string>("");
   const [allPermissions, setAllPermissions] = useState<
     Record<PermissionResource, Permission[]>
   >({} as any);
-  const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(
-    new Set()
-  );
-  const [rolePermissions, setRolePermissions] = useState<Set<string>>(
-    new Set()
-  );
-  const [venuePermissions, setVenuePermissions] = useState<Set<string>>(
-    new Set()
-  );
+
+  // Track permissions per venue
+  const [venuePermissionsMap, setVenuePermissionsMap] = useState<
+    Record<string, {
+      selectedPermissions: Set<string>;
+      rolePermissions: Set<string>;
+      venuePermissions: Set<string>;
+      isReadOnly: boolean;
+    }>
+  >({});
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Load available permissions on mount
+  // Initialize active tab and load permissions on mount
   useEffect(() => {
-    if (open) {
+    if (open && venues.length > 0) {
+      // Set first venue as active tab
+      if (!activeTab) {
+        setActiveTab(venues[0].id);
+      }
       loadPermissions();
     }
-  }, [open]);
+  }, [open, venues]);
 
-  // Load user's effective permissions when venue changes
+  // Load user's effective permissions when active tab changes
   useEffect(() => {
-    if (selectedVenueId && open) {
-      loadUserPermissions();
+    if (activeTab && open) {
+      // Only load if we haven't loaded this venue yet
+      if (!venuePermissionsMap[activeTab]) {
+        loadUserPermissions(activeTab);
+      }
     }
-  }, [selectedVenueId, open]);
+  }, [activeTab, open]);
 
   const loadPermissions = async () => {
     setLoading(true);
@@ -151,14 +155,14 @@ export function VenuePermissionsDialog({
     }
   };
 
-  const loadUserPermissions = async () => {
-    if (!selectedVenueId) return;
+  const loadUserPermissions = async (venueId: string) => {
+    if (!venueId) return;
 
     setLoading(true);
     try {
       const result = await getUserEffectiveVenuePermissions(
         user.id,
-        selectedVenueId
+        venueId
       );
 
       if (result.success && result.rolePermissions && result.venuePermissions) {
@@ -166,19 +170,24 @@ export function VenuePermissionsDialog({
         const rolePerms = new Set(
           result.rolePermissions.map((p) => `${p.resource}:${p.action}`)
         );
-        setRolePermissions(rolePerms);
 
         // Track venue-specific permissions (editable)
         const venuePerms = new Set(
           result.venuePermissions.map((p) => `${p.resource}:${p.action}`)
         );
-        setVenuePermissions(venuePerms);
 
-        // Selected permissions = venue permissions only
-        // (role permissions are shown but not selectable)
-        setSelectedPermissions(venuePerms);
+        // Store permissions for this venue
+        setVenuePermissionsMap((prev) => ({
+          ...prev,
+          [venueId]: {
+            selectedPermissions: venuePerms,
+            rolePermissions: rolePerms,
+            venuePermissions: venuePerms,
+            isReadOnly: result.isReadOnly || false,
+          },
+        }));
       } else {
-        toast.error("Failed to load user permissions");
+        toast.error(result.error || "Failed to load user permissions");
       }
     } catch (error) {
       console.error("Error loading user permissions:", error);
@@ -189,46 +198,80 @@ export function VenuePermissionsDialog({
   };
 
   const handlePermissionToggle = (permissionId: string, key: string) => {
-    // Don't allow toggling if it's a role permission
-    if (rolePermissions.has(key)) {
+    if (!activeTab || !venuePermissionsMap[activeTab]) return;
+
+    const venueData = venuePermissionsMap[activeTab];
+
+    // Don't allow toggling if it's a role permission or read-only mode
+    if (venueData.rolePermissions.has(key) || venueData.isReadOnly) {
       return;
     }
 
-    setSelectedPermissions((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(key)) {
-        newSet.delete(key);
+    setVenuePermissionsMap((prev) => {
+      const newMap = { ...prev };
+      const newSelected = new Set(venueData.selectedPermissions);
+
+      if (newSelected.has(key)) {
+        newSelected.delete(key);
       } else {
-        newSet.add(key);
+        newSelected.add(key);
       }
-      return newSet;
+
+      newMap[activeTab] = {
+        ...venueData,
+        selectedPermissions: newSelected,
+      };
+
+      return newMap;
     });
   };
 
   const handleSelectAllResource = (resource: PermissionResource) => {
+    if (!activeTab || !venuePermissionsMap[activeTab]) return;
+
+    const venueData = venuePermissionsMap[activeTab];
+    if (venueData.isReadOnly) return;
+
     const resourcePerms = allPermissions[resource] || [];
     const allKeys = resourcePerms.map((p) => `${p.resource}:${p.action}`);
-    const editableKeys = allKeys.filter((key) => !rolePermissions.has(key));
+    const editableKeys = allKeys.filter((key) => !venueData.rolePermissions.has(key));
 
-    setSelectedPermissions((prev) => {
-      const newSet = new Set(prev);
-      const allSelected = editableKeys.every((key) => newSet.has(key));
+    setVenuePermissionsMap((prev) => {
+      const newMap = { ...prev };
+      const newSelected = new Set(venueData.selectedPermissions);
+      const allSelected = editableKeys.every((key) => newSelected.has(key));
 
       if (allSelected) {
         // Deselect all
-        editableKeys.forEach((key) => newSet.delete(key));
+        editableKeys.forEach((key) => newSelected.delete(key));
       } else {
         // Select all
-        editableKeys.forEach((key) => newSet.add(key));
+        editableKeys.forEach((key) => newSelected.add(key));
       }
 
-      return newSet;
+      newMap[activeTab] = {
+        ...venueData,
+        selectedPermissions: newSelected,
+      };
+
+      return newMap;
     });
   };
 
   const handleSave = async () => {
-    if (!selectedVenueId) {
-      toast.error("Please select a venue");
+    if (!activeTab) {
+      toast.error("No venue selected");
+      return;
+    }
+
+    const venueData = venuePermissionsMap[activeTab];
+    if (!venueData) {
+      toast.error("Venue data not loaded");
+      return;
+    }
+
+    if (venueData.isReadOnly) {
+      toast.error("You don't have permission to edit these permissions");
       return;
     }
 
@@ -240,20 +283,22 @@ export function VenuePermissionsDialog({
         .flat()
         .forEach((perm) => {
           const key = `${perm.resource}:${perm.action}`;
-          if (selectedPermissions.has(key) && !rolePermissions.has(key)) {
+          if (venueData.selectedPermissions.has(key) && !venueData.rolePermissions.has(key)) {
             permissionIds.push(perm.id);
           }
         });
 
       const result = await bulkUpdateUserVenuePermissions(
         user.id,
-        selectedVenueId,
+        activeTab,
         permissionIds
       );
 
       if (result.success) {
-        toast.success(result.message || "Permissions updated successfully");
-        onOpenChange(false);
+        const venueName = venues.find((v) => v.id === activeTab)?.name || "venue";
+        toast.success(result.message || `Permissions updated for ${venueName}`);
+        // Optionally close dialog or stay open
+        // onOpenChange(false);
       } else {
         toast.error(result.error || "Failed to update permissions");
       }
@@ -269,13 +314,16 @@ export function VenuePermissionsDialog({
     ? `${user.firstName} ${user.lastName}`
     : user.email;
 
-  const selectedVenue = venues.find((v) => v.id === selectedVenueId);
+  // Get current venue's data
+  const currentVenueData = activeTab ? venuePermissionsMap[activeTab] : null;
 
-  // Calculate summary stats
-  const totalVenuePermissions = Array.from(selectedPermissions).filter(
-    (key) => !rolePermissions.has(key)
-  ).length;
-  const totalRolePermissions = rolePermissions.size;
+  // Calculate summary stats for active venue
+  const totalVenuePermissions = currentVenueData
+    ? Array.from(currentVenueData.selectedPermissions).filter(
+        (key) => !currentVenueData.rolePermissions.has(key)
+      ).length
+    : 0;
+  const totalRolePermissions = currentVenueData?.rolePermissions.size || 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -303,25 +351,44 @@ export function VenuePermissionsDialog({
             </div>
           </div>
 
-          {/* Venue Selector */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Select Venue</label>
-            <Select value={selectedVenueId} onValueChange={setSelectedVenueId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a venue" />
-              </SelectTrigger>
-              <SelectContent>
-                {venues.map((venue) => (
-                  <SelectItem key={venue.id} value={venue.id}>
-                    {venue.name} ({venue.code})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Read-Only Banner */}
+          {currentVenueData?.isReadOnly && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                You are viewing permissions in read-only mode. {currentVenueData.isReadOnly && "You cannot edit your own permissions."}
+              </AlertDescription>
+            </Alert>
+          )}
 
-          {selectedVenueId && (
-            <>
+          {/* Venue Tabs */}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden flex flex-col">
+            <TabsList className="grid w-full" style={{ gridTemplateColumns: `repeat(${venues.length}, 1fr)` }}>
+              {venues.map((venue) => {
+                const venueData = venuePermissionsMap[venue.id];
+                const venuePermCount = venueData
+                  ? Array.from(venueData.selectedPermissions).filter(
+                      (key) => !venueData.rolePermissions.has(key)
+                    ).length
+                  : 0;
+
+                return (
+                  <TabsTrigger key={venue.id} value={venue.id} className="flex flex-col gap-1">
+                    <span className="font-medium">{venue.name}</span>
+                    {venueData && venuePermCount > 0 && (
+                      <Badge variant="secondary" className="text-xs">
+                        +{venuePermCount}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+
+            {venues.map((venue) => (
+              <TabsContent key={venue.id} value={venue.id} className="flex-1 overflow-hidden flex flex-col space-y-4 mt-4">
+                {currentVenueData && activeTab === venue.id && (
+                  <>
               {/* Permission Summary */}
               <div className="flex gap-4 p-3 bg-muted rounded-lg">
                 <div className="flex-1 text-center">
@@ -365,15 +432,15 @@ export function VenuePermissionsDialog({
                           (p) => `${p.resource}:${p.action}`
                         );
                         const editablePerms = resourcePerms.filter(
-                          (key) => !rolePermissions.has(key)
+                          (key) => !currentVenueData.rolePermissions.has(key)
                         );
                         const selectedCount = resourcePerms.filter(
                           (key) =>
-                            selectedPermissions.has(key) ||
-                            rolePermissions.has(key)
+                            currentVenueData.selectedPermissions.has(key) ||
+                            currentVenueData.rolePermissions.has(key)
                         ).length;
                         const venueOnlyCount = editablePerms.filter((key) =>
-                          selectedPermissions.has(key)
+                          currentVenueData.selectedPermissions.has(key)
                         ).length;
 
                         return (
@@ -409,7 +476,7 @@ export function VenuePermissionsDialog({
                             </AccordionTrigger>
                             <AccordionContent className="pt-4 space-y-2">
                               {/* Select All Toggle */}
-                              {editablePerms.length > 0 && (
+                              {editablePerms.length > 0 && !currentVenueData.isReadOnly && (
                                 <div className="flex items-center gap-2 mb-3 pb-2 border-b">
                                   <Button
                                     type="button"
@@ -421,7 +488,7 @@ export function VenuePermissionsDialog({
                                     className="text-xs"
                                   >
                                     {editablePerms.every((key) =>
-                                      selectedPermissions.has(key)
+                                      currentVenueData.selectedPermissions.has(key)
                                     )
                                       ? "Deselect All"
                                       : "Select All"}
@@ -435,9 +502,9 @@ export function VenuePermissionsDialog({
                               {/* Permission Checkboxes */}
                               {permissions.map((permission) => {
                                 const key = `${permission.resource}:${permission.action}`;
-                                const isFromRole = rolePermissions.has(key);
+                                const isFromRole = currentVenueData.rolePermissions.has(key);
                                 const isSelected =
-                                  selectedPermissions.has(key) || isFromRole;
+                                  currentVenueData.selectedPermissions.has(key) || isFromRole;
 
                                 return (
                                   <div
@@ -457,7 +524,7 @@ export function VenuePermissionsDialog({
                                           key
                                         )
                                       }
-                                      disabled={isFromRole}
+                                      disabled={isFromRole || currentVenueData.isReadOnly}
                                       className="mt-1"
                                     />
                                     <label
@@ -495,20 +562,14 @@ export function VenuePermissionsDialog({
                         );
                       }
                     )}
-                    </Accordion>
+                  </Accordion>
                 </ScrollArea>
               )}
-            </>
-          )}
-
-          {!selectedVenueId && !loading && (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Shield className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-sm text-muted-foreground">
-                Select a venue to manage permissions
-              </p>
-            </div>
-          )}
+                  </>
+                )}
+              </TabsContent>
+            ))}
+          </Tabs>
         </div>
 
         <DialogFooter>
@@ -518,16 +579,18 @@ export function VenuePermissionsDialog({
             onClick={() => onOpenChange(false)}
             disabled={saving}
           >
-            Cancel
+            {currentVenueData?.isReadOnly ? "Close" : "Cancel"}
           </Button>
-          <Button
-            type="button"
-            onClick={handleSave}
-            disabled={!selectedVenueId || saving || loading}
-          >
-            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save Permissions
-          </Button>
+          {!currentVenueData?.isReadOnly && (
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={!activeTab || saving || loading}
+            >
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save for {venues.find((v) => v.id === activeTab)?.name || "Venue"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
