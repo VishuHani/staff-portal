@@ -2,8 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAdmin, requireAnyPermission } from "@/lib/rbac/access";
 import { createClient } from "@/lib/auth/supabase-server";
+import { getUserVenueIds } from "@/lib/utils/venue";
+import { isAdmin } from "@/lib/rbac/permissions";
 import {
   createUserSchema,
   updateUserSchema,
@@ -28,13 +30,43 @@ import { NotificationType } from "@prisma/client";
 
 /**
  * Get all users with their roles and stores
- * Admin only
+ * Admin/Manager with permissions
  */
 export async function getAllUsers() {
-  await requireAdmin();
+  // Allow managers and admins with appropriate permissions
+  const currentUser = await requireAnyPermission([
+    { resource: "users", action: "view_team" },
+    { resource: "users", action: "view_all" },
+  ]);
 
   try {
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(currentUser.id);
+
+    // Build query based on user's permissions
+    let whereClause: any = {};
+
+    if (!userIsAdmin) {
+      // Manager: Filter users by shared venues
+      const venueIds = await getUserVenueIds(currentUser.id);
+      if (venueIds.length === 0) {
+        // No venues assigned - return empty list
+        return { success: true, users: [] };
+      }
+
+      whereClause = {
+        venues: {
+          some: {
+            venueId: {
+              in: venueIds,
+            },
+          },
+        },
+      };
+    }
+
     const users = await prisma.user.findMany({
+      where: whereClause,
       include: {
         role: {
           include: {
@@ -119,17 +151,55 @@ export async function getUserById(userId: string) {
 
 /**
  * Get user statistics
- * Admin only
+ * Admin/Manager with permissions
  */
 export async function getUserStats() {
-  await requireAdmin();
+  // Allow managers and admins with appropriate permissions
+  const currentUser = await requireAnyPermission([
+    { resource: "users", action: "view_team" },
+    { resource: "users", action: "view_all" },
+  ]);
 
   try {
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(currentUser.id);
+
+    // Build query based on user's permissions
+    let whereClause: any = {};
+
+    if (!userIsAdmin) {
+      // Manager: Filter users by shared venues
+      const venueIds = await getUserVenueIds(currentUser.id);
+      if (venueIds.length === 0) {
+        // No venues assigned - return empty stats
+        return {
+          success: true,
+          stats: {
+            total: 0,
+            active: 0,
+            inactive: 0,
+            byRole: [],
+          },
+        };
+      }
+
+      whereClause = {
+        venues: {
+          some: {
+            venueId: {
+              in: venueIds,
+            },
+          },
+        },
+      };
+    }
+
     const [total, active, byRole] = await Promise.all([
-      prisma.user.count(),
-      prisma.user.count({ where: { active: true } }),
+      prisma.user.count({ where: whereClause }),
+      prisma.user.count({ where: { ...whereClause, active: true } }),
       prisma.user.groupBy({
         by: ["roleId"],
+        where: whereClause,
         _count: true,
       }),
     ]);
@@ -600,10 +670,14 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
 
 /**
  * Get all roles
- * Admin only
+ * Admin/Manager with permissions
  */
 export async function getAllRoles() {
-  await requireAdmin();
+  // Allow managers and admins with appropriate permissions
+  await requireAnyPermission([
+    { resource: "users", action: "view_team" },
+    { resource: "users", action: "view_all" },
+  ]);
 
   try {
     const roles = await prisma.role.findMany({
@@ -621,16 +695,42 @@ export async function getAllRoles() {
 
 /**
  * Get all stores
- * Admin only
+ * Admin/Manager with permissions
  */
 export async function getAllStores() {
-  await requireAdmin();
+  // Allow managers and admins with appropriate permissions
+  const currentUser = await requireAnyPermission([
+    { resource: "users", action: "view_team" },
+    { resource: "users", action: "view_all" },
+  ]);
 
   try {
-    const stores = await prisma.venue.findMany({
-      where: {
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(currentUser.id);
+
+    // Build query based on user's permissions
+    let whereClause: any = {
+      active: true,
+    };
+
+    if (!userIsAdmin) {
+      // Manager: Filter venues by their assigned venues
+      const venueIds = await getUserVenueIds(currentUser.id);
+      if (venueIds.length === 0) {
+        // No venues assigned - return empty list
+        return { success: true, stores: [] };
+      }
+
+      whereClause = {
         active: true,
-      },
+        id: {
+          in: venueIds,
+        },
+      };
+    }
+
+    const stores = await prisma.venue.findMany({
+      where: whereClause,
       orderBy: {
         name: "asc",
       },

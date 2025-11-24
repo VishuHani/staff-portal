@@ -7,6 +7,12 @@
  * Usage: npx tsx scripts/init-notification-preferences.ts
  */
 
+// Load environment variables - load .env first, then .env.local (like Next.js does)
+import { config } from "dotenv";
+import { resolve } from "path";
+config({ path: resolve(process.cwd(), ".env") }); // Load .env first
+config({ path: resolve(process.cwd(), ".env.local"), override: true }); // Then .env.local with override
+
 import { prisma } from "../src/lib/prisma";
 import { NotificationType } from "@prisma/client";
 

@@ -13,6 +13,7 @@ import {
   type ResetPasswordInput,
 } from "@/lib/auth/schemas";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
+import { NotificationType } from "@prisma/client";
 
 export async function login(formData: LoginInput) {
   // Validate input
@@ -143,6 +144,40 @@ export async function signup(formData: SignupInput) {
       profileCompletedAt: new Date(), // Profile complete since we collected names at signup
     },
   });
+
+  // Initialize notification preferences (EMAIL + IN_APP enabled by default)
+  const notificationTypes: NotificationType[] = [
+    "NEW_MESSAGE",
+    "MESSAGE_REPLY",
+    "MESSAGE_MENTION",
+    "MESSAGE_REACTION",
+    "POST_MENTION",
+    "POST_PINNED",
+    "POST_DELETED",
+    "TIME_OFF_REQUEST",
+    "TIME_OFF_APPROVED",
+    "TIME_OFF_REJECTED",
+    "TIME_OFF_CANCELLED",
+    "USER_CREATED",
+    "USER_UPDATED",
+    "ROLE_CHANGED",
+    "SYSTEM_ANNOUNCEMENT",
+    "GROUP_REMOVED",
+  ];
+
+  try {
+    await prisma.notificationPreference.createMany({
+      data: notificationTypes.map((type) => ({
+        userId: newUser.id,
+        type,
+        enabled: true,
+        channels: ["IN_APP", "EMAIL"],
+      })),
+    });
+  } catch (error) {
+    console.error("Error creating notification preferences:", error);
+    // Don't fail signup if preference initialization fails
+  }
 
   // Log user signup
   try {

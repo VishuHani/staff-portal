@@ -7,6 +7,12 @@
  * Usage: npx tsx scripts/test-email-notifications.ts
  */
 
+// Load environment variables - load .env first, then .env.local (like Next.js does)
+import { config } from "dotenv";
+import { resolve } from "path";
+config({ path: resolve(process.cwd(), ".env") }); // Load .env first
+config({ path: resolve(process.cwd(), ".env.local"), override: true }); // Then .env.local with override
+
 import { sendBrevoEmail } from "../src/lib/services/email/brevo";
 import { getEmailTemplate } from "../src/lib/services/email/templates";
 import { NotificationType } from "@prisma/client";

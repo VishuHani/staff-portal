@@ -151,10 +151,48 @@ export async function getAllTimeOffRequests(filters?: FilterTimeOffRequestsInput
           },
         },
       },
-      orderBy: [{ status: "asc" }, { startDate: "asc" }],
+      orderBy: [{ startDate: "desc" }],
     });
 
-    return { success: true, requests };
+    // Sort requests to prioritize current/upcoming ones
+    // Order: Pending (upcoming first), then Approved/Rejected (upcoming first), then past requests
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const sortedRequests = requests.sort((a, b) => {
+      const aEndDate = new Date(a.endDate);
+      const bEndDate = new Date(b.endDate);
+
+      aEndDate.setHours(0, 0, 0, 0);
+      bEndDate.setHours(0, 0, 0, 0);
+
+      const aIsUpcoming = aEndDate >= today;
+      const bIsUpcoming = bEndDate >= today;
+      const aIsPending = a.status === "PENDING";
+      const bIsPending = b.status === "PENDING";
+
+      // 1. Pending upcoming requests first
+      if (aIsPending && aIsUpcoming && (!bIsPending || !bIsUpcoming)) return -1;
+      if (bIsPending && bIsUpcoming && (!aIsPending || !aIsUpcoming)) return 1;
+
+      // 2. Other upcoming requests
+      if (aIsUpcoming && !bIsUpcoming) return -1;
+      if (bIsUpcoming && !aIsUpcoming) return 1;
+
+      // 3. Within same category (both upcoming or both past), sort by start date
+      const aStartDate = new Date(a.startDate).getTime();
+      const bStartDate = new Date(b.startDate).getTime();
+
+      if (aIsUpcoming && bIsUpcoming) {
+        // Upcoming: earliest first
+        return aStartDate - bStartDate;
+      } else {
+        // Past: most recent first
+        return bStartDate - aStartDate;
+      }
+    });
+
+    return { success: true, requests: sortedRequests };
   } catch (error) {
     console.error("Error fetching all time-off requests:", error);
     return { error: "Failed to fetch time-off requests" };
@@ -232,6 +270,7 @@ export async function createTimeOffRequest(data: CreateTimeOffRequestInput) {
       const approvers = await prisma.user.findMany({
         where: {
           active: true,
+          id: { not: user.id }, // SECURITY: Exclude requester from receiving own notifications
           // Only users in requester's venues
           venues: {
             some: {
@@ -418,6 +457,12 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
 
     if (!request) {
       return { error: "Time-off request not found" };
+    }
+
+    // SECURITY: Prevent self-approval vulnerability
+    // Managers cannot approve or reject their own time-off requests
+    if (request.userId === user.id) {
+      return { error: "You cannot approve or reject your own time-off request" };
     }
 
     // Store the current version for optimistic locking

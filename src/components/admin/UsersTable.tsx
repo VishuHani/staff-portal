@@ -84,9 +84,15 @@ interface UsersTableProps {
   roles: Role[];
   stores: Store[];
   venues: Venue[];
+  currentUser: {
+    id: string;
+    role: {
+      name: string;
+    };
+  };
 }
 
-export function UsersTable({ users, roles, stores, venues }: UsersTableProps) {
+export function UsersTable({ users, roles, stores, venues, currentUser }: UsersTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterRole, setFilterRole] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -98,6 +104,35 @@ export function UsersTable({ users, roles, stores, venues }: UsersTableProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [processing, setProcessing] = useState(false);
+
+  // Helper function to check if current user can manage permissions for target user
+  const canManagePermissions = (targetUser: User): boolean => {
+    const isAdmin = currentUser.role.name === "ADMIN";
+    const isSelfView = targetUser.id === currentUser.id;
+    const targetIsAdmin = targetUser.role.name === "ADMIN";
+    const targetIsManager = targetUser.role.rolePermissions.some(
+      (rp: any) => rp.permission?.action === "manage"
+    );
+
+    // Admins can manage everyone except themselves
+    if (isAdmin) {
+      return !isSelfView; // Admins can't edit their own permissions
+    }
+
+    // Non-admins can't manage anyone (managers will see view-only in the dialog)
+    // The dialog itself will enforce read-only mode
+    // So we allow managers to VIEW their own and staff permissions
+    return isSelfView || (!targetIsAdmin && !targetIsManager);
+  };
+
+  // Get label for permissions menu item
+  const getPermissionsMenuLabel = (targetUser: User): string => {
+    const isSelfView = targetUser.id === currentUser.id;
+    if (isSelfView) {
+      return "View My Permissions";
+    }
+    return "Manage Venue Permissions";
+  };
 
   // Filter users
   const filteredUsers = users.filter((user) => {
@@ -309,10 +344,12 @@ export function UsersTable({ users, roles, stores, venues }: UsersTableProps) {
                       <Edit className="mr-2 h-4 w-4" />
                       Edit User
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleManagePermissions(user)}>
-                      <Shield className="mr-2 h-4 w-4" />
-                      Manage Venue Permissions
-                    </DropdownMenuItem>
+                    {canManagePermissions(user) && (
+                      <DropdownMenuItem onClick={() => handleManagePermissions(user)}>
+                        <Shield className="mr-2 h-4 w-4" />
+                        {getPermissionsMenuLabel(user)}
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onClick={() => handleToggleActive(user)}>
                       <Power className="mr-2 h-4 w-4" />
                       {user.active ? "Deactivate" : "Activate"}

@@ -1,10 +1,14 @@
 import { Suspense } from "react";
-import { requireAuth } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { SuggestionsPageClient } from "./suggestions-client";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default async function SuggestionsPage() {
-  await requireAuth();
+  // Allow managers and admins with appropriate permissions
+  await requireAnyPermission([
+    { resource: "reports", action: "view_team" },
+    { resource: "reports", action: "view_all" },
+  ]);
 
   return (
     <div className="space-y-6">

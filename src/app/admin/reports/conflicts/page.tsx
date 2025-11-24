@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ConflictsReportClient } from "./conflicts-report-client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,7 +34,11 @@ function ConflictsSkeleton() {
 }
 
 export default async function ConflictsReportPage() {
-  const user = await requireAdmin();
+  // Allow managers and admins with appropriate permissions
+  const user = await requireAnyPermission([
+    { resource: "reports", action: "view_team" },
+    { resource: "reports", action: "view_all" },
+  ]);
 
   // Fetch venues and roles in parallel
   const [venues, roles] = await Promise.all([

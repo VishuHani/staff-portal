@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import {
   getAllUsers,
   getUserStats,
@@ -20,7 +20,11 @@ import { Users, UserCheck, UserX, Shield } from "lucide-react";
 import { UsersTable } from "@/components/admin/UsersTable";
 
 export default async function AdminUsersPage() {
-  const user = await requireAdmin();
+  // Allow managers and admins with appropriate permissions
+  const user = await requireAnyPermission([
+    { resource: "users", action: "view_team" },
+    { resource: "users", action: "view_all" },
+  ]);
 
   const [usersResult, statsResult, rolesResult, storesResult, venuesResult] =
     await Promise.all([
@@ -119,6 +123,10 @@ export default async function AdminUsersPage() {
               roles={roles as any}
               stores={stores as any}
               venues={venues as any}
+              currentUser={{
+                id: user.id,
+                role: { name: user.role.name },
+              }}
             />
           </CardContent>
         </Card>

@@ -93,14 +93,48 @@ export const reviewTimeOffRequestSchema = z.object({
 
 /**
  * Schema for filtering time-off requests
+ * Note: userId is from Supabase Auth (UUID format)
+ *
+ * @security ENHANCED - Validates date inputs to prevent application crashes
+ * and database query errors from invalid dates
  */
-export const filterTimeOffRequestsSchema = z.object({
-  status: z.enum(["PENDING", "APPROVED", "REJECTED", "CANCELLED"]).optional(),
-  type: z.enum(["UNAVAILABLE"]).optional(),
-  userId: z.string().cuid().optional(),
-  startDate: z.coerce.date().optional(),
-  endDate: z.coerce.date().optional(),
-});
+export const filterTimeOffRequestsSchema = z
+  .object({
+    status: z.enum(["PENDING", "APPROVED", "REJECTED", "CANCELLED"]).optional(),
+    type: z.enum(["UNAVAILABLE"]).optional(),
+    userId: z.string().min(1).optional(),
+    startDate: z.coerce.date().optional(),
+    endDate: z.coerce.date().optional(),
+  })
+  .refine(
+    (data) => {
+      // Validate that dates are not Invalid Date (NaN)
+      if (data.startDate && isNaN(data.startDate.getTime())) {
+        return false;
+      }
+      if (data.endDate && isNaN(data.endDate.getTime())) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: "Invalid date provided",
+      path: ["startDate"],
+    }
+  )
+  .refine(
+    (data) => {
+      // If both dates are provided, validate that startDate <= endDate
+      if (data.startDate && data.endDate) {
+        return validateDateRange(data.startDate, data.endDate);
+      }
+      return true;
+    },
+    {
+      message: "End date must be on or after start date",
+      path: ["endDate"],
+    }
+  );
 
 export type CreateTimeOffRequestInput = z.infer<typeof createTimeOffRequestSchema>;
 export type UpdateTimeOffRequestInput = z.infer<typeof updateTimeOffRequestSchema>;

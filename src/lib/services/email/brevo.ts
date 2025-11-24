@@ -1,11 +1,18 @@
 import { TransactionalEmailsApi, SendSmtpEmail } from "@getbrevo/brevo";
 
-// Initialize Brevo API
-const emailAPI = new TransactionalEmailsApi();
-emailAPI.setApiKey(0, process.env.BREVO_API_KEY || "");
+// Initialize Brevo API lazily to ensure env vars are loaded
+let emailAPI: TransactionalEmailsApi | null = null;
 
-const SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || "noreply@example.com";
-const SENDER_NAME = process.env.BREVO_SENDER_NAME || "Staff Portal";
+function getEmailAPI(): TransactionalEmailsApi {
+  if (!emailAPI) {
+    emailAPI = new TransactionalEmailsApi();
+    emailAPI.setApiKey(0, process.env.BREVO_API_KEY || "");
+  }
+  return emailAPI;
+}
+
+const getSenderEmail = () => process.env.BREVO_SENDER_EMAIL || "noreply@example.com";
+const getSenderName = () => process.env.BREVO_SENDER_NAME || "Staff Portal";
 
 export interface SendEmailParams {
   to: string;
@@ -60,11 +67,12 @@ export async function sendBrevoEmail(
     message.htmlContent = params.htmlContent;
     message.textContent =
       params.textContent || stripHtmlTags(params.htmlContent);
-    message.sender = { name: SENDER_NAME, email: SENDER_EMAIL };
+    message.sender = { name: getSenderName(), email: getSenderEmail() };
     message.to = [{ email: params.to, name: params.toName || params.to }];
 
     // Send email via Brevo API
-    const response = await emailAPI.sendTransacEmail(message);
+    const api = getEmailAPI();
+    const response = await api.sendTransacEmail(message);
 
     console.log("[BREVO] Email sent successfully:", {
       to: params.to,
@@ -76,11 +84,12 @@ export async function sendBrevoEmail(
       success: true,
       messageId: response.body?.messageId,
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("[BREVO] Error sending email:", {
       to: params.to,
       subject: params.subject,
       error,
+      errorResponse: error?.response?.data, // Log the actual error message from Brevo
     });
 
     return {

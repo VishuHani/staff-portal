@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAdmin, requireAnyPermission } from "@/lib/rbac/access";
+import { getUserVenueIds } from "@/lib/utils/venue";
+import { isAdmin } from "@/lib/rbac/permissions";
 import {
   createVenueSchema,
   updateVenueSchema,
@@ -355,16 +357,42 @@ export async function toggleVenueActive(data: ToggleVenueActiveInput) {
 
 /**
  * Get all active venues (for dropdowns, etc.)
- * Admin only
+ * Admin/Manager with permissions
  */
 export async function getActiveVenues() {
-  await requireAdmin();
+  // Allow managers and admins with appropriate permissions
+  const currentUser = await requireAnyPermission([
+    { resource: "users", action: "view_team" },
+    { resource: "users", action: "view_all" },
+  ]);
 
   try {
-    const venues = await prisma.venue.findMany({
-      where: {
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(currentUser.id);
+
+    // Build query based on user's permissions
+    let whereClause: any = {
+      active: true,
+    };
+
+    if (!userIsAdmin) {
+      // Manager: Filter venues by their assigned venues
+      const venueIds = await getUserVenueIds(currentUser.id);
+      if (venueIds.length === 0) {
+        // No venues assigned - return empty list
+        return { success: true, venues: [] };
+      }
+
+      whereClause = {
         active: true,
-      },
+        id: {
+          in: venueIds,
+        },
+      };
+    }
+
+    const venues = await prisma.venue.findMany({
+      where: whereClause,
       select: {
         id: true,
         name: true,

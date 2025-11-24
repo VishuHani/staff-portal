@@ -6,6 +6,28 @@ export interface EmailTemplate {
 }
 
 /**
+ * Escape HTML special characters to prevent XSS attacks
+ * Converts dangerous characters to HTML entities
+ *
+ * @param text - User-generated text to escape
+ * @returns Escaped text safe for HTML insertion
+ *
+ * @security CRITICAL - This function prevents stored XSS in email templates
+ */
+function escapeHtml(text: string): string {
+  const htmlEscapeMap: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#x27;',
+    '/': '&#x2F;',
+  };
+
+  return text.replace(/[&<>"'\/]/g, (char) => htmlEscapeMap[char] || char);
+}
+
+/**
  * Get email template for a specific notification type
  *
  * @param type - Notification type
@@ -26,6 +48,11 @@ export function getEmailTemplate(
   link?: string | null,
   appUrl: string = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
 ): EmailTemplate {
+  // SECURITY: Escape all user-generated content to prevent XSS
+  const safeTitle = escapeHtml(title);
+  const safeMessage = escapeHtml(message);
+
+  // Validate and sanitize URLs - only allow relative paths or same domain
   const actionLink = link ? `${appUrl}${link}` : `${appUrl}/notifications`;
 
   // Base HTML template with professional styling
@@ -39,7 +66,7 @@ export function getEmailTemplate(
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${title}</title>
+        <title>${safeTitle}</title>
         <style>
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -145,11 +172,11 @@ export function getEmailTemplate(
   switch (type) {
     case "NEW_MESSAGE":
       return {
-        subject: `💬 New message: ${title}`,
+        subject: `💬 New message: ${safeTitle}`,
         htmlContent: createTemplate(
           `
             <h2>You have a new message</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
           `,
           "View Message",
           "#3b82f6"
@@ -158,11 +185,11 @@ export function getEmailTemplate(
 
     case "MESSAGE_REPLY":
       return {
-        subject: `↩️ Reply to your message: ${title}`,
+        subject: `↩️ Reply to your message: ${safeTitle}`,
         htmlContent: createTemplate(
           `
             <h2>Someone replied to your message</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
           `,
           "View Reply",
           "#8b5cf6"
@@ -175,7 +202,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>You were mentioned</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
             <div class="highlight">
               <p style="margin: 0;"><strong>💡 Tip:</strong> You've been mentioned in a conversation. Click below to see what they said!</p>
             </div>
@@ -191,7 +218,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>Someone reacted to your message</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
           `,
           "View Message",
           "#10b981"
@@ -204,7 +231,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>You were mentioned in a post</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
             <div class="highlight">
               <p style="margin: 0;"><strong>💡 Tip:</strong> Someone wants your attention on a post. Check it out!</p>
             </div>
@@ -216,11 +243,11 @@ export function getEmailTemplate(
 
     case "POST_PINNED":
       return {
-        subject: `📌 Important post pinned: ${title}`,
+        subject: `📌 Important post pinned: ${safeTitle}`,
         htmlContent: createTemplate(
           `
             <h2>A post has been pinned</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
             <div class="highlight">
               <p style="margin: 0;"><strong>📌 Pinned:</strong> This post contains important information for the team.</p>
             </div>
@@ -232,11 +259,11 @@ export function getEmailTemplate(
 
     case "POST_DELETED":
       return {
-        subject: `🗑️ Post deleted: ${title}`,
+        subject: `🗑️ Post deleted: ${safeTitle}`,
         htmlContent: createTemplate(
           `
             <h2>A post has been deleted</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
           `,
           "View Channel",
           "#ef4444"
@@ -249,7 +276,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>New Time-Off Request</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
             <div class="highlight">
               <p style="margin: 0;"><strong>⏰ Action Required:</strong> A team member has submitted a time-off request that needs your review.</p>
             </div>
@@ -265,7 +292,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>Good News! Your Time-Off Request Was Approved</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
             <div class="highlight">
               <p style="margin: 0;"><strong>🎉 Approved:</strong> Your request has been reviewed and approved. Enjoy your time off!</p>
             </div>
@@ -281,7 +308,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>Time-Off Request Update</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
             <div class="highlight">
               <p style="margin: 0;"><strong>ℹ️ Note:</strong> Your request was reviewed. Please check the details and notes from your manager.</p>
             </div>
@@ -297,7 +324,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>Time-Off Request Cancelled</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
           `,
           "View Details",
           "#6b7280"
@@ -311,7 +338,7 @@ export function getEmailTemplate(
           `
             <h2>Welcome to Staff Portal!</h2>
             <p>Your account has been successfully created.</p>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
             <div class="highlight">
               <p style="margin: 0;"><strong>👋 Get Started:</strong> Click below to complete your profile and explore the portal!</p>
             </div>
@@ -327,7 +354,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>Profile Update</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
           `,
           "View Profile",
           "#3b82f6"
@@ -340,7 +367,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>Role Update</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
             <div class="highlight">
               <p style="margin: 0;"><strong>ℹ️ Important:</strong> Your permissions and access level may have changed. Please review your new role.</p>
             </div>
@@ -352,11 +379,11 @@ export function getEmailTemplate(
 
     case "SYSTEM_ANNOUNCEMENT":
       return {
-        subject: `📢 Announcement: ${title}`,
+        subject: `📢 Announcement: ${safeTitle}`,
         htmlContent: createTemplate(
           `
-            <h2>${title}</h2>
-            <p>${message}</p>
+            <h2>${safeTitle}</h2>
+            <p>${safeMessage}</p>
             <div class="highlight">
               <p style="margin: 0;"><strong>📢 Important Announcement:</strong> Please read this message carefully as it may affect your work.</p>
             </div>
@@ -372,7 +399,7 @@ export function getEmailTemplate(
         htmlContent: createTemplate(
           `
             <h2>Conversation Update</h2>
-            <p>${message}</p>
+            <p>${safeMessage}</p>
           `,
           "View Messages",
           "#6b7280"
@@ -385,8 +412,8 @@ export function getEmailTemplate(
         subject: title,
         htmlContent: createTemplate(
           `
-            <h2>${title}</h2>
-            <p>${message}</p>
+            <h2>${safeTitle}</h2>
+            <p>${safeMessage}</p>
           `,
           "View Details",
           "#3b82f6"

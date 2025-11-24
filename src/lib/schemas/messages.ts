@@ -34,9 +34,10 @@ export const deleteMessageSchema = z.object({
 });
 
 // Conversation schemas
+// Note: participantIds are Supabase user IDs (UUID format), not Prisma CUIDs
 export const createConversationSchema = z.object({
   participantIds: z
-    .array(z.string().cuid("Invalid user ID"))
+    .array(z.string().min(1, "Invalid user ID"))
     .min(1, "At least one participant required")
     .max(MAX_PARTICIPANTS, `Maximum ${MAX_PARTICIPANTS} participants allowed`),
   type: z.enum(["ONE_ON_ONE", "GROUP"]),
@@ -56,13 +57,13 @@ export const markAsReadSchema = z.object({
 export const addParticipantsSchema = z.object({
   conversationId: z.string().cuid("Invalid conversation ID"),
   userIds: z
-    .array(z.string().cuid("Invalid user ID"))
+    .array(z.string().min(1, "Invalid user ID"))
     .min(1, "At least one user required"),
 });
 
 export const removeParticipantSchema = z.object({
   conversationId: z.string().cuid("Invalid conversation ID"),
-  userId: z.string().cuid("Invalid user ID"),
+  userId: z.string().min(1, "Invalid user ID"),
 });
 
 export const muteConversationSchema = z.object({

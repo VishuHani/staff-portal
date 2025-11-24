@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { getReportsDashboardData } from "@/lib/actions/reports/availability-reports";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,11 @@ export const metadata = {
 };
 
 export default async function ReportsPage() {
-  const user = await requireAdmin();
+  // Allow managers and admins with appropriate permissions
+  const user = await requireAnyPermission([
+    { resource: "reports", action: "view_team" },
+    { resource: "reports", action: "view_all" },
+  ]);
   const result = await getReportsDashboardData();
 
   const stats = result.success ? result.stats : {

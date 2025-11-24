@@ -78,6 +78,12 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       roles: ["ADMIN", "MANAGER"],
     },
     {
+      title: "Time-Off Approval",
+      href: "/admin/time-off",
+      icon: Clock,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
       title: "Reports & Analytics",
       href: "/admin/reports",
       icon: BarChart3,

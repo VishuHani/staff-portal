@@ -132,6 +132,10 @@ export async function filterByUserVenues(userId: string) {
  * @param userId - User ID to find shared venue users for
  * @param options - Optional filters
  * @returns Array of user IDs who share venues (or all users if admin)
+ *
+ * @performance OPTIMIZED - Reduced from 3 database queries to 2:
+ * - Before: isAdmin() + getUserVenueIds() + findMany() = 3 queries
+ * - After: Single user fetch with role+venues + findMany() = 2 queries
  */
 export async function getSharedVenueUsers(
   userId: string,
@@ -139,8 +143,38 @@ export async function getSharedVenueUsers(
     includeInactive?: boolean;
   }
 ): Promise<string[]> {
-  // Check if user is admin - admins get global access
-  const userIsAdmin = await isAdmin(userId);
+  // OPTIMIZATION: Fetch user with role AND venues in a single query
+  // This replaces 2 separate queries (isAdmin + getUserVenueIds)
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      active: true,
+      role: {
+        select: {
+          name: true,
+        },
+      },
+      venues: {
+        where: {
+          venue: {
+            active: true, // Only active venues
+          },
+        },
+        select: {
+          venueId: true,
+        },
+      },
+    },
+  });
+
+  // User not found or inactive - return empty array
+  if (!currentUser || !currentUser.active) {
+    return [];
+  }
+
+  // Check if user is admin from the fetched data
+  const userIsAdmin = currentUser.role.name === "ADMIN";
 
   if (userIsAdmin) {
     // Admin bypass: return ALL active users
@@ -160,7 +194,8 @@ export async function getSharedVenueUsers(
   }
 
   // Non-admin: filter by shared venues
-  const venueIds = await getUserVenueIds(userId);
+  // Extract venue IDs from the fetched data
+  const venueIds = currentUser.venues.map((v) => v.venueId);
 
   if (venueIds.length === 0) {
     return [];
@@ -376,10 +411,44 @@ export function getVenueBadgeColor(
  *
  * @param userId - User ID to get accessible channels for
  * @returns Array of channel IDs accessible to the user
+ *
+ * @performance OPTIMIZED - Reduced from 3 database queries to 2:
+ * - Before: isAdmin() + getUserVenueIds() + findMany() = 3 queries
+ * - After: Single user fetch with role+venues + findMany() = 2 queries
  */
 export async function getAccessibleChannelIds(userId: string): Promise<string[]> {
-  // Check if user is admin - admins get global access
-  const userIsAdmin = await isAdmin(userId);
+  // OPTIMIZATION: Fetch user with role AND venues in a single query
+  // This replaces 2 separate queries (isAdmin + getUserVenueIds)
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      active: true,
+      role: {
+        select: {
+          name: true,
+        },
+      },
+      venues: {
+        where: {
+          venue: {
+            active: true, // Only active venues
+          },
+        },
+        select: {
+          venueId: true,
+        },
+      },
+    },
+  });
+
+  // User not found or inactive - return empty array
+  if (!currentUser || !currentUser.active) {
+    return [];
+  }
+
+  // Check if user is admin from the fetched data
+  const userIsAdmin = currentUser.role.name === "ADMIN";
 
   if (userIsAdmin) {
     // Admin bypass: return ALL channels
@@ -396,7 +465,8 @@ export async function getAccessibleChannelIds(userId: string): Promise<string[]>
   }
 
   // Non-admin: filter by user's venues
-  const venueIds = await getUserVenueIds(userId);
+  // Extract venue IDs from the fetched data
+  const venueIds = currentUser.venues.map((v) => v.venueId);
 
   if (venueIds.length === 0) {
     return [];

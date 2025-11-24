@@ -103,6 +103,74 @@ async function validateAgainstBusinessHours(
 }
 
 /**
+ * Validate a single day's availability against venue business hours (pure function)
+ *
+ * @performance OPTIMIZED - Pure function that doesn't query database
+ * Used in bulk operations to avoid N database queries
+ *
+ * @param dayOfWeek - Day of week (0-6)
+ * @param startTime - Start time (HH:MM format)
+ * @param endTime - End time (HH:MM format)
+ * @param isAvailable - Whether available on this day
+ * @param isAllDay - Whether available all day
+ * @param venue - Venue data (optional, fetched once for all days)
+ * @returns Validation result with error message if invalid
+ */
+function validateDayAgainstBusinessHours(
+  dayOfWeek: number,
+  startTime: string | null,
+  endTime: string | null,
+  isAvailable: boolean,
+  isAllDay: boolean,
+  venue?: {
+    businessHoursStart: string;
+    businessHoursEnd: string;
+    operatingDays: unknown;
+    name: string;
+  } | null
+): { valid: boolean; error?: string } {
+  // If not available, no need to validate
+  if (!isAvailable) {
+    return { valid: true };
+  }
+
+  // No venue assigned, allow any hours for now
+  if (!venue) {
+    return { valid: true };
+  }
+
+  // Check if day is in operating days
+  const operatingDays = venue.operatingDays as number[];
+  if (!operatingDays.includes(dayOfWeek)) {
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    return {
+      valid: false,
+      error: `${venue.name} is not open on ${dayNames[dayOfWeek]}. Operating days: ${operatingDays.map(d => dayNames[d]).join(", ")}`,
+    };
+  }
+
+  // If all-day, check if it fits within business hours
+  if (isAllDay || !startTime || !endTime) {
+    return { valid: true };
+  }
+
+  // Validate time range is within business hours
+  const businessStart = timeToMinutes(venue.businessHoursStart);
+  const businessEnd = timeToMinutes(venue.businessHoursEnd);
+  const availStart = timeToMinutes(startTime);
+  const availEnd = timeToMinutes(endTime);
+
+  if (availStart < businessStart || availEnd > businessEnd) {
+    return {
+      valid: false,
+      error: `Availability times (${startTime}-${endTime}) must be within ${venue.name}'s business hours (${venue.businessHoursStart}-${venue.businessHoursEnd})`,
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Get current user's availability for all days of the week
  * Wrapped in transaction to prevent race conditions when creating defaults
  */
@@ -277,50 +345,77 @@ export async function bulkUpdateAvailability(data: BulkUpdateAvailabilityInput) 
     };
   });
 
-  // Validate each day against venue business hours
-  for (const day of processedData) {
-    const validation = await validateAgainstBusinessHours(
-      user.id,
-      day.dayOfWeek,
-      day.startTime,
-      day.endTime,
-      day.isAvailable,
-      day.isAllDay
-    );
-
-    if (!validation.valid) {
-      return { error: validation.error || "Invalid business hours" };
-    }
-  }
-
   try {
-    // Update all days in a transaction
-    const results = await prisma.$transaction(
-      processedData.map((day) =>
-        prisma.availability.upsert({
-          where: {
-            userId_dayOfWeek: {
-              userId: user.id,
-              dayOfWeek: day.dayOfWeek,
+    // OPTIMIZATION: Fetch venue business hours once (not N times in loop)
+    // Wrap validation and update in single transaction for atomicity
+    const results = await prisma.$transaction(async (tx) => {
+      // Fetch venue data once for all validations
+      const userVenue = await tx.user.findUnique({
+        where: { id: user.id },
+        select: {
+          venues: {
+            where: { isPrimary: true },
+            take: 1,
+            select: {
+              venue: {
+                select: {
+                  businessHoursStart: true,
+                  businessHoursEnd: true,
+                  operatingDays: true,
+                  name: true,
+                },
+              },
             },
           },
-          update: {
-            isAvailable: day.isAvailable,
-            isAllDay: day.isAllDay,
-            startTime: day.startTime,
-            endTime: day.endTime,
-          },
-          create: {
-            userId: user.id,
-            dayOfWeek: day.dayOfWeek,
-            isAvailable: day.isAvailable,
-            isAllDay: day.isAllDay,
-            startTime: day.startTime,
-            endTime: day.endTime,
-          },
-        })
-      )
-    );
+        },
+      });
+
+      const venue = userVenue?.venues[0]?.venue;
+
+      // Validate all days against business hours (using fetched venue data)
+      for (const day of processedData) {
+        const validation = validateDayAgainstBusinessHours(
+          day.dayOfWeek,
+          day.startTime,
+          day.endTime,
+          day.isAvailable,
+          day.isAllDay,
+          venue
+        );
+
+        if (!validation.valid) {
+          throw new Error(validation.error || "Invalid business hours");
+        }
+      }
+
+      // Update all days (within same transaction)
+      return await Promise.all(
+        processedData.map((day) =>
+          tx.availability.upsert({
+            where: {
+              userId_dayOfWeek: {
+                userId: user.id,
+                dayOfWeek: day.dayOfWeek,
+              },
+            },
+            update: {
+              isAvailable: day.isAvailable,
+              isAllDay: day.isAllDay,
+              startTime: day.startTime,
+              endTime: day.endTime,
+            },
+            create: {
+              userId: user.id,
+              dayOfWeek: day.dayOfWeek,
+              isAvailable: day.isAvailable,
+              isAllDay: day.isAllDay,
+              startTime: day.startTime,
+              endTime: day.endTime,
+            },
+          })
+        )
+      );
+    });
 
     revalidatePath("/availability");
     revalidatePath("/admin/availability");

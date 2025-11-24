@@ -11,19 +11,20 @@ import type { NotificationType, NotificationChannel } from "@prisma/client";
  */
 
 // Zod schemas
+// Note: User IDs come from Supabase Auth (UUID format), not Prisma-generated CUIDs
 const getPreferencesSchema = z.object({
-  userId: z.string().cuid(),
+  userId: z.string().min(1, "User ID is required"),
 });
 
 const updatePreferenceSchema = z.object({
-  userId: z.string().cuid(),
+  userId: z.string().min(1, "User ID is required"),
   type: z.string(),
   enabled: z.boolean(),
   channels: z.array(z.enum(["IN_APP", "EMAIL", "PUSH", "SMS"])),
 });
 
 const resetPreferencesSchema = z.object({
-  userId: z.string().cuid(),
+  userId: z.string().min(1, "User ID is required"),
 });
 
 /**

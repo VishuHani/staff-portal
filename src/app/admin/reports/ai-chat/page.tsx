@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { AIChatClient } from "./ai-chat-client";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,7 +26,10 @@ function ChatSkeleton() {
 }
 
 export default async function AIChatPage() {
-  const user = await requireAdmin();
+  // Allow managers and admins with AI report permissions
+  const user = await requireAnyPermission([
+    { resource: "reports", action: "view_ai" },
+  ]);
 
   return (
     <DashboardLayout user={user}>

@@ -283,22 +283,22 @@ export function TimeOffReviewList({ requests }: TimeOffReviewListProps) {
             <DialogTitle>
               {reviewAction === "APPROVED" ? "Approve" : "Reject"} Time-Off Request
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription asChild>
               {selectedRequest && (
                 <div className="mt-2 space-y-1">
-                  <p>
+                  <div>
                     <strong>Staff:</strong> {getFullName(selectedRequest.user)}
-                  </p>
-                  <p>
+                  </div>
+                  <div>
                     <strong>Dates:</strong>{" "}
                     {format(new Date(selectedRequest.startDate), "MMM d, yyyy")} -{" "}
                     {format(new Date(selectedRequest.endDate), "MMM d, yyyy")}
-                  </p>
-                  <p>
+                  </div>
+                  <div>
                     <strong>Type:</strong>{" "}
                     {TIME_OFF_TYPES.find((t) => t.value === selectedRequest.type)?.label ||
                       selectedRequest.type}
-                  </p>
+                  </div>
                 </div>
               )}
             </DialogDescription>
