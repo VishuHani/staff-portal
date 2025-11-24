@@ -1,7 +1,7 @@
 # Working Features - Staff Portal
 
-**Last Updated:** November 14, 2025
-**Status:** All Core Features Operational
+**Last Updated:** November 24, 2025
+**Status:** All Core Features Operational + Major Permission System Overhaul
 
 ---
 
@@ -208,7 +208,7 @@
 ---
 
 ### 10. Permission System (RBAC)
-**Status:** ✅ Working
+**Status:** ✅ Working (Major overhaul Nov 24, 2025)
 
 **Report Permissions:**
 - `reports:view_team` - View team reports (Manager+)
@@ -220,6 +220,68 @@
 - **Admin:** All permissions (automatic)
 - **Manager:** view_team, export_team, view_ai
 - **Staff:** No report permissions by default
+
+---
+
+### 11. Venue Permission Management System ✨ NEW
+**Status:** ✅ Working (Added Nov 24, 2025)
+**Location:** `/admin/users` → Venue Permissions dialog
+
+**Features:**
+- **Permission Hierarchy System** (8 rules):
+  - Admins can manage everyone's permissions (except their own)
+  - Managers can view their own permissions (read-only mode)
+  - Users cannot edit their own permissions (prevents privilege escalation)
+  - Managers can manage STAFF permissions at their assigned venues
+  - Managers cannot manage other managers or admins (separation of duties)
+  - Permission grants validated for venue access
+  - Proper venue-scoped access checks
+  - Self-edit prevention for audit integrity
+
+- **Tabbed UI Interface**:
+  - One tab per venue for multi-venue users
+  - Per-venue permission tracking
+  - Visual distinction: Role permissions (gray, inherited) vs Venue permissions (blue, editable)
+  - Read-only mode for viewing own permissions
+  - Access denied alerts with clear error messages
+  - Loading states per venue tab
+
+- **Permission Types**:
+  - **Role Permissions** (inherited from role):
+    - Granted via Role → RolePermission → Permission
+    - Cannot be modified at venue level
+    - Shown with "From Role" badge
+  - **Venue Permissions** (venue-specific overrides):
+    - Granted via UserVenuePermission → Permission → Venue
+    - Can be added/removed by managers (for STAFF only)
+    - Scoped to specific venues
+
+**Use Cases:**
+1. Manager assigns report viewing permissions to STAFF at their venue
+2. Manager views their own permissions (read-only)
+3. Admin manages any user's permissions at any venue
+4. System prevents manager from editing another manager's permissions
+5. System prevents privilege escalation attempts
+
+**Security Benefits:**
+- Proper separation of duties (managers manage staff, not peers)
+- Prevents privilege escalation attacks
+- Venue-scoped access control (managers only manage their venues)
+- Self-edit prevention (maintains audit trail integrity)
+- Read-only mode for transparency
+
+**Technical Details:**
+- `canManageUserVenuePermissions()` function with 8-rule hierarchy
+- Changed from `requireAdmin()` to `requireAnyPermission()` (allows managers)
+- Per-venue state management with `venuePermissionsMap`
+- Comprehensive permission validation before grants
+
+**Related Actions:**
+- `getUserVenuePermissions()` - Get user's venue-specific permissions
+- `getUserEffectiveVenuePermissions()` - Get combined role + venue permissions
+- `grantUserVenuePermission()` - Add permission at venue
+- `revokeUserVenuePermission()` - Remove permission at venue
+- `getAvailablePermissions()` - List all grantable permissions
 
 ---
 
