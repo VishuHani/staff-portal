@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/auth/supabase-server";
@@ -14,8 +15,24 @@ import {
 } from "@/lib/auth/schemas";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import { NotificationType } from "@prisma/client";
+import { rateLimit, getClientIp } from "@/lib/utils/rate-limit";
 
 export async function login(formData: LoginInput) {
+  // RATE LIMITING: Prevent brute force attacks
+  // Use IP + email as identifier for more granular control
+  const headersList = await headers();
+  const ip = getClientIp(headersList);
+  const email = formData.email || "unknown";
+  const identifier = `${ip}:${email}`;
+
+  const { success, reset, remaining } = await rateLimit.login(identifier);
+  if (!success) {
+    const waitSeconds = Math.ceil(reset / 1000);
+    return {
+      error: `Too many login attempts. Please try again in ${waitSeconds} seconds.`,
+    };
+  }
+
   // Validate input
   const validatedFields = loginSchema.safeParse(formData);
 
@@ -26,12 +43,12 @@ export async function login(formData: LoginInput) {
     };
   }
 
-  const { email, password } = validatedFields.data;
+  const { email: validatedEmail, password } = validatedFields.data;
   const supabase = await createClient();
 
   // Sign in with Supabase
   const { data, error } = await supabase.auth.signInWithPassword({
-    email,
+    email: validatedEmail,
     password,
   });
 
@@ -41,7 +58,7 @@ export async function login(formData: LoginInput) {
 
   // Verify user exists in our database
   const user = await prisma.user.findUnique({
-    where: { email },
+    where: { email: validatedEmail },
     include: { role: true },
   });
 
@@ -55,7 +72,7 @@ export async function login(formData: LoginInput) {
           actionType: "LOGIN_FAILED",
           resourceType: "Auth",
           resourceId: user.id,
-          newValue: JSON.stringify({ reason: "Account inactive", email }),
+          newValue: JSON.stringify({ reason: "Account inactive", email: validatedEmail }),
         });
       }
     } catch (error) {
@@ -71,7 +88,7 @@ export async function login(formData: LoginInput) {
       actionType: "LOGIN_SUCCESS",
       resourceType: "Auth",
       resourceId: user.id,
-      newValue: JSON.stringify({ email, roleId: user.roleId }),
+      newValue: JSON.stringify({ email: validatedEmail, roleId: user.roleId }),
     });
   } catch (error) {
     console.error("Error creating audit log:", error);
@@ -83,6 +100,18 @@ export async function login(formData: LoginInput) {
 }
 
 export async function signup(formData: SignupInput) {
+  // RATE LIMITING: Prevent spam signups and account enumeration
+  const headersList = await headers();
+  const ip = getClientIp(headersList);
+
+  const { success, reset } = await rateLimit.signup(ip);
+  if (!success) {
+    const waitMinutes = Math.ceil(reset / 1000 / 60);
+    return {
+      error: `Too many signup attempts. Please try again in ${waitMinutes} minute${waitMinutes > 1 ? 's' : ''}.`,
+    };
+  }
+
   // Validate input
   const validatedFields = signupSchema.safeParse(formData);
 
@@ -226,6 +255,20 @@ export async function logout() {
 }
 
 export async function resetPassword(formData: ResetPasswordInput) {
+  // RATE LIMITING: Prevent email spam and account enumeration
+  const headersList = await headers();
+  const ip = getClientIp(headersList);
+  const email = formData.email || "unknown";
+  const identifier = `${ip}:${email}`;
+
+  const { success, reset } = await rateLimit.resetPassword(identifier);
+  if (!success) {
+    const waitMinutes = Math.ceil(reset / 1000 / 60);
+    return {
+      error: `Too many password reset attempts. Please try again in ${waitMinutes} minute${waitMinutes > 1 ? 's' : ''}.`,
+    };
+  }
+
   const validatedFields = resetPasswordSchema.safeParse(formData);
 
   if (!validatedFields.success) {
@@ -235,10 +278,10 @@ export async function resetPassword(formData: ResetPasswordInput) {
     };
   }
 
-  const { email } = validatedFields.data;
+  const { email: validatedEmail } = validatedFields.data;
   const supabase = await createClient();
 
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+  const { error } = await supabase.auth.resetPasswordForEmail(validatedEmail, {
     redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/reset-password`,
   });
 
