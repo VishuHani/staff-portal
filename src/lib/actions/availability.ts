@@ -252,51 +252,79 @@ export async function updateAvailability(data: UpdateAvailabilityInput) {
     }
   }
 
-  // Validate against venue business hours
-  const businessHoursValidation = await validateAgainstBusinessHours(
-    user.id,
-    dayOfWeek,
-    finalStartTime,
-    finalEndTime,
-    isAvailable,
-    isAllDay
-  );
-
-  if (!businessHoursValidation.valid) {
-    return { error: businessHoursValidation.error || "Invalid business hours" };
-  }
-
   try {
-    const availability = await prisma.availability.upsert({
-      where: {
-        userId_dayOfWeek: {
+    // ATOMIC VALIDATION: Wrap validation and update in transaction
+    // This ensures venue data query isn't wasted if validation fails
+    const availability = await prisma.$transaction(async (tx) => {
+      // Fetch user's primary venue inside transaction
+      const userVenue = await tx.user.findUnique({
+        where: { id: user.id },
+        select: {
+          venues: {
+            where: { isPrimary: true },
+            take: 1,
+            select: {
+              venue: {
+                select: {
+                  businessHoursStart: true,
+                  businessHoursEnd: true,
+                  operatingDays: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const venue = userVenue?.venues[0]?.venue;
+
+      // Validate against venue business hours (using pure function)
+      const validation = validateDayAgainstBusinessHours(
+        dayOfWeek,
+        finalStartTime,
+        finalEndTime,
+        isAvailable,
+        isAllDay,
+        venue
+      );
+
+      if (!validation.valid) {
+        throw new Error(validation.error || "Invalid business hours");
+      }
+
+      // Update availability (within same transaction)
+      return await tx.availability.upsert({
+        where: {
+          userId_dayOfWeek: {
+            userId: user.id,
+            dayOfWeek,
+          },
+        },
+        update: {
+          isAvailable,
+          isAllDay,
+          startTime: finalStartTime,
+          endTime: finalEndTime,
+        },
+        create: {
           userId: user.id,
           dayOfWeek,
+          isAvailable,
+          isAllDay,
+          startTime: finalStartTime,
+          endTime: finalEndTime,
         },
-      },
-      update: {
-        isAvailable,
-        isAllDay,
-        startTime: finalStartTime,
-        endTime: finalEndTime,
-      },
-      create: {
-        userId: user.id,
-        dayOfWeek,
-        isAvailable,
-        isAllDay,
-        startTime: finalStartTime,
-        endTime: finalEndTime,
-      },
+      });
     });
 
     revalidatePath("/availability");
     revalidatePath("/admin/availability");
 
     return { success: true, availability };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error updating availability:", error);
-    return { error: "Failed to update availability" };
+    return { error: error.message || "Failed to update availability" };
   }
 }
 
