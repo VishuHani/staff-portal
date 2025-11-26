@@ -3,6 +3,11 @@
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/rbac/access";
 import { auditLogFilterSchema, type AuditLogFilterInput } from "@/lib/schemas/admin/audit-logs";
+import {
+  handleAuditLogFailure,
+  retryAuditLogCreation,
+  type AuditLogData,
+} from "@/lib/utils/audit-alert";
 
 /**
  * Get audit logs with filtering and pagination
@@ -259,6 +264,9 @@ export async function getAuditLogFilterOptions() {
 /**
  * Create an audit log entry (utility function for other actions to use)
  * Internal use only - not exported as server action
+ *
+ * ENHANCED: Now includes retry mechanism, backup storage, and admin alerting
+ * to ensure compliance with audit logging requirements (SOC 2, GDPR, HIPAA)
  */
 export async function createAuditLog({
   userId,
@@ -277,20 +285,31 @@ export async function createAuditLog({
   newValue?: string;
   ipAddress?: string;
 }) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        userId,
-        actionType,
-        resourceType,
-        resourceId,
-        oldValue,
-        newValue,
-        ipAddress,
-      },
-    });
-  } catch (error) {
-    console.error("Error creating audit log:", error);
+  const auditData: AuditLogData = {
+    userId,
+    actionType,
+    resourceType,
+    resourceId,
+    oldValue,
+    newValue,
+    ipAddress,
+  };
+
+  // RETRY MECHANISM: Attempt creation with exponential backoff (up to 3 tries)
+  const success = await retryAuditLogCreation(auditData);
+
+  if (!success) {
+    // CRITICAL: Audit log creation failed after all retries
+    // This triggers:
+    // 1. Backup to file system (logs/audit/YYYY-MM-DD.log)
+    // 2. Email alerts to all admins
+    // 3. Detailed error logging
+    await handleAuditLogFailure(
+      auditData,
+      new Error("Audit log creation failed after 3 retry attempts")
+    );
+
     // Don't throw - audit logging should not break the main action
+    // But the failure has been properly logged and admins have been alerted
   }
 }
