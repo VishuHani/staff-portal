@@ -15,7 +15,7 @@
  * ```
  */
 
-import { sendEmail } from "@/lib/services/email/brevo";
+import { sendBrevoEmail } from "@/lib/services/email/brevo";
 import { prisma } from "@/lib/prisma";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -158,7 +158,7 @@ Environment: ${process.env.NODE_ENV || "development"}
     // Send email to all admins
     for (const email of adminEmails) {
       try {
-        await sendEmail({
+        await sendBrevoEmail({
           to: email,
           subject,
           htmlContent: message.replace(/\n/g, "<br>"),

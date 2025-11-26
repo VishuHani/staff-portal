@@ -2,6 +2,7 @@
 
 import { requireAuth, canAccess } from "@/lib/rbac/access";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { computeEffectiveAvailability } from "@/lib/utils/availability";
 import {
   startOfDay,
@@ -17,6 +18,10 @@ import {
   getDay,
   isWithinInterval,
 } from "date-fns";
+import type {
+  StaffWithAvailability,
+  TimeOffRequestRecord,
+} from "@/lib/types/reports";
 
 /**
  * Smart Suggestions Service
@@ -44,7 +49,7 @@ export interface Suggestion {
   action?: {
     label: string;
     link?: string;
-    data?: any;
+    data?: Record<string, unknown>;
   };
   metadata?: {
     date?: string;
@@ -82,7 +87,7 @@ export async function generateSuggestions(
     const limit = filters?.limit || 10;
 
     // Fetch staff and availability data
-    const whereClause: any = {
+    const whereClause: Prisma.UserWhereInput = {
       active: true,
       role: { isNot: { name: "ADMIN" } },
     };
@@ -158,7 +163,7 @@ export async function generateSuggestions(
  * Analyze low coverage days
  */
 async function analyzeLowCoverage(
-  staff: any[],
+  staff: StaffWithAvailability[],
   startDate: Date,
   endDate: Date,
   suggestions: Suggestion[]
@@ -254,7 +259,7 @@ async function analyzeLowCoverage(
  * Analyze time-off request clusters
  */
 async function analyzeTimeOffClusters(
-  staff: any[],
+  staff: StaffWithAvailability[],
   startDate: Date,
   endDate: Date,
   suggestions: Suggestion[]
@@ -266,7 +271,7 @@ async function analyzeTimeOffClusters(
     let timeOffCount = 0;
 
     for (const staffMember of staff) {
-      const hasTimeOff = staffMember.timeOffRequests?.some((request: any) => {
+      const hasTimeOff = staffMember.timeOffRequests?.some((request: TimeOffRequestRecord) => {
         const start = startOfDay(request.startDate);
         const end = endOfDay(request.endDate);
         return date >= start && date <= end;
@@ -307,7 +312,7 @@ async function analyzeTimeOffClusters(
  * Analyze weekend coverage patterns
  */
 async function analyzeWeekendCoverage(
-  staff: any[],
+  staff: StaffWithAvailability[],
   startDate: Date,
   endDate: Date,
   suggestions: Suggestion[]
@@ -370,7 +375,7 @@ async function analyzeWeekendCoverage(
  * Analyze availability patterns for optimization opportunities
  */
 async function analyzeAvailabilityPatterns(
-  staff: any[],
+  staff: StaffWithAvailability[],
   startDate: Date,
   endDate: Date,
   suggestions: Suggestion[]
@@ -464,7 +469,7 @@ async function analyzeAvailabilityPatterns(
  * Analyze recurring issues (same day each week, patterns)
  */
 async function analyzeRecurringIssues(
-  staff: any[],
+  staff: StaffWithAvailability[],
   startDate: Date,
   endDate: Date,
   suggestions: Suggestion[]

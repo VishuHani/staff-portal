@@ -17,6 +17,7 @@ model User {
   active                  Boolean                   @default(true)
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
+  deletedAt               DateTime?                 // Soft delete - null means not deleted
   bio                     String?
   dateOfBirth             DateTime?
   firstName               String?
@@ -52,6 +53,7 @@ model User {
   @@index([lastName])
   @@index([roleId])
   @@index([venueId])
+  @@index([deletedAt])
   @@map("users")
 }
 
@@ -190,6 +192,8 @@ model TimeOffRequest {
   @@index([userId])
   @@index([startDate, endDate])
   @@index([status])
+  @@index([reviewedBy])
+  @@index([type])
   @@map("time_off_requests")
 }
 
@@ -263,6 +267,7 @@ model Post {
   pinned    Boolean    @default(false)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
+  deletedAt DateTime?  // Soft delete - null means not deleted
   edited    Boolean    @default(false)
   editedAt  DateTime?
   comments  Comment[]
@@ -274,6 +279,7 @@ model Post {
   @@index([channelId])
   @@index([authorId])
   @@index([createdAt])
+  @@index([deletedAt])
   @@map("posts")
 }
 
@@ -284,6 +290,7 @@ model Comment {
   content   String
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
+  deletedAt DateTime?  // Soft delete - null means not deleted
   edited    Boolean    @default(false)
   editedAt  DateTime?
   parentId  String?
@@ -296,6 +303,7 @@ model Comment {
   @@index([postId])
   @@index([userId])
   @@index([parentId])
+  @@index([deletedAt])
   @@map("comments")
 }
 
@@ -342,6 +350,8 @@ model Conversation {
   participants  ConversationParticipant[]
   messages      Message[]
 
+  @@index([lastMessageAt])
+  @@index([type])
   @@map("conversations")
 }
 
@@ -395,6 +405,8 @@ model Notification {
   @@index([userId])
   @@index([readAt])
   @@index([createdAt])
+  @@index([type])
+  @@index([userId, type])
   @@map("notifications")
 }
 
@@ -413,6 +425,8 @@ model AuditLog {
   @@index([userId])
   @@index([createdAt])
   @@index([actionType])
+  @@index([resourceType])
+  @@index([resourceType, resourceId])
   @@map("audit_logs")
 }
 

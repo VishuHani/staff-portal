@@ -17,6 +17,7 @@
 
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { env, constants } from "@/lib/config";
 
 // In-memory store for development (resets on server restart)
 class InMemoryRateLimiter {
@@ -69,8 +70,7 @@ class InMemoryRateLimiter {
 }
 
 // Create rate limiters based on environment
-const hasUpstashConfig =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN;
+const hasUpstashConfig = !!(env.rateLimit.redisUrl && env.rateLimit.redisToken);
 
 let redis: Redis | null = null;
 let upstashRateLimiter: Ratelimit | null = null;
@@ -86,8 +86,8 @@ if (!hasUpstashConfig) {
 if (hasUpstashConfig) {
   // Production: Use Upstash Redis
   redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL!,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    url: env.rateLimit.redisUrl,
+    token: env.rateLimit.redisToken,
   });
 
   // Sliding window rate limiter
@@ -134,10 +134,14 @@ async function rateLimitAction(
   }
 }
 
+// Rate limiting configuration from centralized config
+const { rateLimiting } = constants;
+
 /**
  * Rate Limiters for Auth Endpoints
  *
  * Conservative limits to prevent brute force while allowing legitimate retries
+ * Configuration sourced from @/lib/config
  */
 export const rateLimit = {
   /**
@@ -149,8 +153,8 @@ export const rateLimit = {
   login: async (identifier: string) => {
     return rateLimitAction(
       `login:${identifier}`,
-      5, // 5 attempts
-      15 * 60 * 1000 // 15 minutes
+      rateLimiting.login.maxAttempts,
+      rateLimiting.login.windowMinutes * 60 * 1000
     );
   },
 
@@ -163,8 +167,8 @@ export const rateLimit = {
   signup: async (identifier: string) => {
     return rateLimitAction(
       `signup:${identifier}`,
-      3, // 3 attempts
-      60 * 60 * 1000 // 1 hour
+      rateLimiting.signup.maxAttempts,
+      rateLimiting.signup.windowMinutes * 60 * 1000
     );
   },
 
@@ -177,8 +181,8 @@ export const rateLimit = {
   resetPassword: async (identifier: string) => {
     return rateLimitAction(
       `reset:${identifier}`,
-      3, // 3 attempts
-      60 * 60 * 1000 // 1 hour
+      rateLimiting.passwordReset.maxAttempts,
+      rateLimiting.passwordReset.windowMinutes * 60 * 1000
     );
   },
 };
