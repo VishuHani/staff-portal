@@ -70,7 +70,7 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-4">
             {error && (
-              <div className="rounded-md bg-red-50 p-3 text-sm text-red-800">
+              <div className="rounded-md bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400">
                 {error}
               </div>
             )}
@@ -85,7 +85,7 @@ export default function LoginPage() {
                 disabled={loading}
               />
               {errors.email && (
-                <p className="text-sm text-red-600">{errors.email.message}</p>
+                <p className="text-sm text-red-400">{errors.email.message}</p>
               )}
             </div>
 
@@ -94,7 +94,7 @@ export default function LoginPage() {
                 <Label htmlFor="password">Password</Label>
                 <Link
                   href="/forgot-password"
-                  className="text-sm text-blue-600 hover:text-blue-500"
+                  className="text-sm text-blue-400 hover:text-blue-300 hover:underline"
                 >
                   Forgot password?
                 </Link>
@@ -107,23 +107,23 @@ export default function LoginPage() {
                 disabled={loading}
               />
               {errors.password && (
-                <p className="text-sm text-red-600">
+                <p className="text-sm text-red-400">
                   {errors.password.message}
                 </p>
               )}
             </div>
           </CardContent>
 
-          <CardFooter className="flex flex-col space-y-4">
+          <CardFooter className="flex flex-col space-y-4 pt-6">
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign in"}
             </Button>
 
-            <p className="text-center text-sm text-gray-600">
-              Don't have an account?{" "}
+            <p className="text-center text-sm text-gray-400">
+              Don&apos;t have an account?{" "}
               <Link
                 href="/signup"
-                className="font-medium text-blue-600 hover:text-blue-500"
+                className="font-medium text-blue-400 hover:text-blue-300 hover:underline"
               >
                 Sign up
               </Link>

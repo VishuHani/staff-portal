@@ -72,13 +72,13 @@ export default function SignupPage() {
         <form onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-4">
             {error && (
-              <div className="rounded-md bg-red-50 p-3 text-sm text-red-800">
+              <div className="rounded-md bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400">
                 {error}
               </div>
             )}
 
             {success && (
-              <div className="rounded-md bg-green-50 p-3 text-sm text-green-800">
+              <div className="rounded-md bg-green-500/10 border border-green-500/20 p-3 text-sm text-green-400">
                 {success}
               </div>
             )}
@@ -94,7 +94,7 @@ export default function SignupPage() {
                   disabled={loading}
                 />
                 {errors.firstName && (
-                  <p className="text-sm text-red-600">{errors.firstName.message}</p>
+                  <p className="text-sm text-red-400">{errors.firstName.message}</p>
                 )}
               </div>
 
@@ -108,7 +108,7 @@ export default function SignupPage() {
                   disabled={loading}
                 />
                 {errors.lastName && (
-                  <p className="text-sm text-red-600">{errors.lastName.message}</p>
+                  <p className="text-sm text-red-400">{errors.lastName.message}</p>
                 )}
               </div>
             </div>
@@ -123,7 +123,7 @@ export default function SignupPage() {
                 disabled={loading}
               />
               {errors.email && (
-                <p className="text-sm text-red-600">{errors.email.message}</p>
+                <p className="text-sm text-red-400">{errors.email.message}</p>
               )}
             </div>
 
@@ -137,7 +137,7 @@ export default function SignupPage() {
                 disabled={loading}
               />
               {errors.phone && (
-                <p className="text-sm text-red-600">{errors.phone.message}</p>
+                <p className="text-sm text-red-400">{errors.phone.message}</p>
               )}
             </div>
 
@@ -151,11 +151,11 @@ export default function SignupPage() {
                 disabled={loading}
               />
               {errors.password && (
-                <p className="text-sm text-red-600">
+                <p className="text-sm text-red-400">
                   {errors.password.message}
                 </p>
               )}
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-400">
                 Must contain at least 6 characters, including uppercase,
                 lowercase, and a number
               </p>
@@ -171,23 +171,23 @@ export default function SignupPage() {
                 disabled={loading}
               />
               {errors.confirmPassword && (
-                <p className="text-sm text-red-600">
+                <p className="text-sm text-red-400">
                   {errors.confirmPassword.message}
                 </p>
               )}
             </div>
           </CardContent>
 
-          <CardFooter className="flex flex-col space-y-4">
+          <CardFooter className="flex flex-col space-y-4 pt-6">
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Creating account..." : "Create account"}
             </Button>
 
-            <p className="text-center text-sm text-gray-600">
+            <p className="text-center text-sm text-gray-400">
               Already have an account?{" "}
               <Link
                 href="/login"
-                className="font-medium text-blue-600 hover:text-blue-500"
+                className="font-medium text-blue-400 hover:text-blue-300 hover:underline"
               >
                 Sign in
               </Link>
