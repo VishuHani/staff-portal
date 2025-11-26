@@ -57,8 +57,12 @@ export async function proxy(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (error) {
-      console.error("Supabase auth error:", error.message);
-      authError = error;
+      // "Auth session missing!" is not an error - it just means user is not logged in
+      // Only treat actual service errors as authError
+      if (error.message !== "Auth session missing!") {
+        console.error("Supabase auth error:", error.message);
+        authError = error;
+      }
     } else {
       user = supabaseUser;
     }
