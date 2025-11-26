@@ -52,9 +52,16 @@ export default function LoginPage() {
       } else {
         // Redirect will happen automatically via server action
       }
-    } catch (err) {
-      setError("An unexpected error occurred. Please try again.");
-      setLoading(false);
+    } catch (err: unknown) {
+      // Next.js redirect() throws a special error - don't show error message for redirects
+      const isRedirectError = err instanceof Error &&
+        (err.message === "NEXT_REDIRECT" || (err as { digest?: string }).digest?.startsWith("NEXT_REDIRECT"));
+
+      if (!isRedirectError) {
+        setError("An unexpected error occurred. Please try again.");
+        setLoading(false);
+      }
+      // If it's a redirect error, the page will navigate away automatically
     }
   };
 
