@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, MoreVertical, Pencil, Trash2, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Building2, MoreVertical, Palette, Pencil, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import {
   Card,
@@ -39,7 +40,7 @@ interface Venue {
   active: boolean;
   businessHoursStart?: string;
   businessHoursEnd?: string;
-  operatingDays?: number[];
+  operatingDays?: number[] | unknown;
   _count?: {
     userVenues: number;
   };
@@ -76,6 +77,7 @@ interface VenueTableProps {
  * ```
  */
 export function VenueTable({ venues, onEdit, onRefresh }: VenueTableProps) {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [venueToDelete, setVenueToDelete] = useState<Venue | null>(null);
@@ -189,6 +191,12 @@ export function VenueTable({ venues, onEdit, onRefresh }: VenueTableProps) {
                         <DropdownMenuItem onClick={() => onEdit(venue)}>
                           <Pencil className="mr-2 h-4 w-4" />
                           Edit Venue
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => router.push(`/system/venues/${venue.id}/positions`)}
+                        >
+                          <Palette className="mr-2 h-4 w-4" />
+                          Manage Positions
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleToggleActive(venue)}>
                           {venue.active ? "Deactivate" : "Activate"}

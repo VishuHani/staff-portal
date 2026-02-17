@@ -10,6 +10,7 @@ export default async function NotificationsPage() {
   const [result, unreadResult] = await Promise.all([
     getAllNotifications({
       userId: user.id,
+      unreadOnly: false,
       limit: 20,
     }),
     getUnreadCount({ userId: user.id }),

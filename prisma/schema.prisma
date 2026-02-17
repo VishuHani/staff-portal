@@ -8,494 +8,15 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model User {
-  id                      String                    @id @default(cuid())
-  email                   String                    @unique
-  password                String?
-  roleId                  String
-  venueId                 String?
-  active                  Boolean                   @default(true)
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
-  deletedAt               DateTime?                 // Soft delete - null means not deleted
-  bio                     String?
-  dateOfBirth             DateTime?
-  firstName               String?
-  lastName                String?
-  phone                   String?
-  profileCompletedAt      DateTime?
-  profileImage            String?
-  aiQueries               AIQuery[]
-  auditLogs               AuditLog[]
-  availability            Availability[]
-  comments                Comment[]
-  conversations           ConversationParticipant[]
-  sentMessages            Message[]
-  notificationPreferences NotificationPreference[]
-  notifications           Notification[]
-  postReads               PostRead[]
-  posts                   Post[]
-  reactions               Reaction[]
-  reviewedTimeOff         TimeOffRequest[]          @relation("ReviewedBy")
-  timeOffRequests         TimeOffRequest[]
-  grantedPermissions      UserVenuePermission[]     @relation("GrantedPermissions")
-  venuePermissions        UserVenuePermission[]     @relation("UserPermissions")
-  venues                  UserVenue[]
-  // NEW: Channel relations
-  createdChannels         Channel[]                 @relation("CreatedChannels")
-  channelMemberships      ChannelMember[]           @relation("ChannelMemberships")
-  addedMembers            ChannelMember[]           @relation("AddedChannelMembers")
-  role                    Role                      @relation(fields: [roleId], references: [id])
-  venue                   Venue?                    @relation(fields: [venueId], references: [id])
+// ============================================================================
+// ENUMS
+// ============================================================================
 
-  @@index([email])
-  @@index([firstName])
-  @@index([lastName])
-  @@index([roleId])
-  @@index([venueId])
-  @@index([deletedAt])
-  @@map("users")
-}
-
-model Role {
-  id                     String                  @id @default(cuid())
-  name                   String                  @unique
-  description            String?
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
-  conditionalPermissions ConditionalPermission[] @relation("RoleConditionalPermissions")
-  fieldPermissions       FieldPermission[]       @relation("RoleFieldPermissions")
-  rolePermissions        RolePermission[]
-  timeBasedAccess        TimeBasedAccess[]       @relation("RoleTimeBasedAccess")
-  users                  User[]
-
-  @@map("roles")
-}
-
-model Permission {
-  id                   String                @id @default(cuid())
-  resource             String
-  action               String
-  description          String?
-  createdAt            DateTime              @default(now())
-  rolePermissions      RolePermission[]
-  userVenuePermissions UserVenuePermission[]
-
-  @@unique([resource, action])
-  @@map("permissions")
-}
-
-model RolePermission {
-  id           String     @id @default(cuid())
-  roleId       String
-  permissionId String
-  createdAt    DateTime   @default(now())
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-
-  @@unique([roleId, permissionId])
-  @@index([roleId])
-  @@index([permissionId])
-  @@map("role_permissions")
-}
-
-model UserVenuePermission {
-  id            String     @id @default(cuid())
-  userId        String
-  venueId       String
-  permissionId  String
-  grantedAt     DateTime   @default(now())
-  grantedBy     String
-  grantedByUser User       @relation("GrantedPermissions", fields: [grantedBy], references: [id])
-  permission    Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  user          User       @relation("UserPermissions", fields: [userId], references: [id], onDelete: Cascade)
-  venue         Venue      @relation(fields: [venueId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, venueId, permissionId])
-  @@index([userId])
-  @@index([venueId])
-  @@index([permissionId])
-  @@index([grantedBy])
-  @@map("user_venue_permissions")
-}
-
-model Venue {
-  id                   String                @id @default(cuid())
-  name                 String
-  code                 String                @unique
-  active               Boolean               @default(true)
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  // Business Hours - NEW
-  businessHoursStart   String                @default("08:00") // HH:mm format
-  businessHoursEnd     String                @default("22:00") // HH:mm format
-  operatingDays        Json                  @default("[1,2,3,4,5]") // Array of 0-6 (Sunday-Saturday), default Mon-Fri
-  channelVenues        ChannelVenue[]
-  userVenuePermissions UserVenuePermission[]
-  userVenues           UserVenue[]
-  users                User[]
-
-  @@map("venues")
-}
-
-model UserVenue {
-  id        String   @id @default(cuid())
-  userId    String
-  venueId   String
-  isPrimary Boolean  @default(false)
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, venueId])
-  @@index([userId])
-  @@index([venueId])
-  @@index([isPrimary])
-  @@map("user_venues")
-}
-
-model Availability {
-  id          String   @id @default(cuid())
-  userId      String
-  dayOfWeek   Int
-  startTime   String?
-  endTime     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  isAllDay    Boolean  @default(false)
-  isAvailable Boolean  @default(false)
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, dayOfWeek])
-  @@index([userId])
-  @@index([dayOfWeek])
-  @@map("availability")
-}
-
-model TimeOffRequest {
-  id         String    @id @default(cuid())
-  userId     String
-  startDate  DateTime
-  endDate    DateTime
-  type       String
-  reason     String?
-  status     String    @default("PENDING")
-  reviewedBy String?
-  reviewedAt DateTime?
-  notes      String?
-  version    Int       @default(0) // Optimistic locking - NEW
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  reviewer   User?     @relation("ReviewedBy", fields: [reviewedBy], references: [id])
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([startDate, endDate])
-  @@index([status])
-  @@index([reviewedBy])
-  @@index([type])
-  @@map("time_off_requests")
-}
-
-model Channel {
-  id          String           @id @default(cuid())
-  name        String           @unique
-  type        String
-  permissions Json?            // Changed from String? to Json?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  archived    Boolean          @default(false)
-  archivedAt  DateTime?
-  color       String?
-  description String?
-  icon        String?
-  // NEW FIELDS
-  createdBy   String?          // User ID of creator (nullable for migration, will be required later)
-  memberCount Int              @default(0) // Denormalized for performance
-  // Relations
-  creator     User?            @relation("CreatedChannels", fields: [createdBy], references: [id])
-  members     ChannelMember[]  // NEW: Direct member tracking
-  venues      ChannelVenue[]   // Keep for migration compatibility
-  posts       Post[]
-
-  @@index([createdBy])
-  @@index([memberCount])
-  @@map("channels")
-}
-
-model ChannelVenue {
-  id        String   @id @default(cuid())
-  channelId String
-  venueId   String
-  createdAt DateTime @default(now())
-  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
-
-  @@unique([channelId, venueId])
-  @@index([channelId])
-  @@index([venueId])
-  @@map("channel_venues")
-}
-
-model ChannelMember {
-  id        String   @id @default(cuid())
-  channelId String
-  userId    String
-  role      String   @default("MEMBER") // CREATOR, MODERATOR, MEMBER
-  // Audit fields
-  addedBy   String   // User ID who added this member
-  addedAt   DateTime @default(now())
-  addedVia  String?  // "manual", "role_based", "venue_based", "bulk_import"
-  // Relations
-  channel     Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  user        User    @relation("ChannelMemberships", fields: [userId], references: [id], onDelete: Cascade)
-  addedByUser User    @relation("AddedChannelMembers", fields: [addedBy], references: [id])
-
-  @@unique([channelId, userId])
-  @@index([channelId])
-  @@index([userId])
-  @@index([addedBy])
-  @@map("channel_members")
-}
-
-model Post {
-  id        String     @id @default(cuid())
-  channelId String
-  authorId  String
-  content   String
-  mediaUrls String?
-  pinned    Boolean    @default(false)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  deletedAt DateTime?  // Soft delete - null means not deleted
-  edited    Boolean    @default(false)
-  editedAt  DateTime?
-  comments  Comment[]
-  reads     PostRead[]
-  author    User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  channel   Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  reactions Reaction[]
-
-  @@index([channelId])
-  @@index([authorId])
-  @@index([createdAt])
-  @@index([deletedAt])
-  @@map("posts")
-}
-
-model Comment {
-  id        String     @id @default(cuid())
-  postId    String
-  userId    String
-  content   String
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  deletedAt DateTime?  // Soft delete - null means not deleted
-  edited    Boolean    @default(false)
-  editedAt  DateTime?
-  parentId  String?
-  parent    Comment?   @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies   Comment[]  @relation("CommentReplies")
-  post      Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reactions Reaction[]
-
-  @@index([postId])
-  @@index([userId])
-  @@index([parentId])
-  @@index([deletedAt])
-  @@map("comments")
-}
-
-model Reaction {
-  id        String   @id @default(cuid())
-  postId    String?
-  userId    String
-  emoji     String
-  createdAt DateTime @default(now())
-  commentId String?
-  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([postId, userId, emoji])
-  @@unique([commentId, userId, emoji])
-  @@index([postId])
-  @@index([commentId])
-  @@map("reactions")
-}
-
-model PostRead {
-  id     String   @id @default(cuid())
-  userId String
-  postId String
-  readAt DateTime @default(now())
-  post   Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, postId])
-  @@index([userId])
-  @@index([postId])
-  @@map("post_reads")
-}
-
-model Conversation {
-  id            String                    @id @default(cuid())
-  type          String
-  lastMessageAt DateTime?
-  createdAt     DateTime                  @default(now())
-  updatedAt     DateTime                  @updatedAt
-  lastMessage   String?
-  name          String?
-  participants  ConversationParticipant[]
-  messages      Message[]
-
-  @@index([lastMessageAt])
-  @@index([type])
-  @@map("conversations")
-}
-
-model ConversationParticipant {
-  id             String       @id @default(cuid())
-  conversationId String
-  userId         String
-  joinedAt       DateTime     @default(now())
-  lastReadAt     DateTime?
-  mutedUntil     DateTime?
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([conversationId, userId])
-  @@index([conversationId])
-  @@index([userId])
-  @@map("conversation_participants")
-}
-
-model Message {
-  id             String       @id @default(cuid())
-  conversationId String
-  senderId       String
-  content        String
-  readAt         DateTime?
-  createdAt      DateTime     @default(now())
-  mediaUrls      String?
-  reactions      String?
-  readBy         String[]     @default([])
-  updatedAt      DateTime     @updatedAt
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId])
-  @@index([senderId])
-  @@index([createdAt])
-  @@map("messages")
-}
-
-model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  title     String
-  message   String
-  link      String?
-  readAt    DateTime?
-  createdAt DateTime         @default(now())
-  type      NotificationType
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([readAt])
-  @@index([createdAt])
-  @@index([type])
-  @@index([userId, type])
-  @@map("notifications")
-}
-
-model AuditLog {
-  id           String   @id @default(cuid())
-  userId       String
-  actionType   String
-  resourceType String
-  resourceId   String?
-  oldValue     String?
-  newValue     String?
-  ipAddress    String?
-  createdAt    DateTime @default(now())
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([createdAt])
-  @@index([actionType])
-  @@index([resourceType])
-  @@index([resourceType, resourceId])
-  @@map("audit_logs")
-}
-
-model FieldPermission {
-  id        String   @id @default(cuid())
-  roleId    String
-  resource  String
-  field     String
-  access    String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  role      Role     @relation("RoleFieldPermissions", fields: [roleId], references: [id], onDelete: Cascade)
-
-  @@unique([roleId, resource, field])
-  @@index([roleId])
-  @@index([resource])
-  @@index([field])
-  @@map("field_permissions")
-}
-
-model ConditionalPermission {
-  id         String   @id @default(cuid())
-  roleId     String
-  resource   String
-  action     String
-  conditions Json
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  role       Role     @relation("RoleConditionalPermissions", fields: [roleId], references: [id], onDelete: Cascade)
-
-  @@index([roleId])
-  @@index([resource])
-  @@index([action])
-  @@map("conditional_permissions")
-}
-
-model TimeBasedAccess {
-  id         String   @id @default(cuid())
-  roleId     String
-  resource   String
-  action     String
-  daysOfWeek Int[]
-  startTime  String
-  endTime    String
-  timezone   String   @default("UTC")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  role       Role     @relation("RoleTimeBasedAccess", fields: [roleId], references: [id], onDelete: Cascade)
-
-  @@index([roleId])
-  @@index([resource])
-  @@index([action])
-  @@map("time_based_access")
-}
-
-model NotificationPreference {
-  id        String                @id @default(cuid())
-  userId    String
-  type      NotificationType
-  channels  NotificationChannel[]
-  enabled   Boolean               @default(true)
-  createdAt DateTime              @default(now())
-  updatedAt DateTime              @updatedAt
-  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, type])
-  @@index([userId])
-  @@index([type])
-  @@map("notification_preferences")
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+  SMS
 }
 
 enum NotificationType {
@@ -515,13 +36,281 @@ enum NotificationType {
   ROLE_CHANGED
   SYSTEM_ANNOUNCEMENT
   GROUP_REMOVED
+  ROSTER_PUBLISHED
+  ROSTER_UPDATED
+  ROSTER_SHIFT_REMINDER
+  ROSTER_CONFLICT
+  ROSTER_PENDING_REVIEW
+  PERMISSION_GRANTED
+  PERMISSION_REVOKED
 }
 
-enum NotificationChannel {
-  IN_APP
-  EMAIL
-  PUSH
-  SMS
+enum RosterStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+// ============================================================================
+// CORE MODELS
+// ============================================================================
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  password           String?
+  firstName          String?
+  lastName           String?
+  phone              String?
+  dateOfBirth        DateTime?
+  bio                String?
+  profileImage       String?
+  profileCompletedAt DateTime?
+  roleId             String
+  role               Role      @relation(fields: [roleId], references: [id])
+  venueId            String?
+  venue              Venue?    @relation(fields: [venueId], references: [id])
+  active             Boolean   @default(true)
+  deletedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  // Pay rates (hourly)
+  weekdayRate        Decimal?  @db.Decimal(10, 2)
+  saturdayRate       Decimal?  @db.Decimal(10, 2)
+  sundayRate         Decimal?  @db.Decimal(10, 2)
+
+  // Relations
+  venues                  UserVenue[]
+  availability            Availability[]
+  timeOffRequests         TimeOffRequest[]           @relation("TimeOffRequester")
+  reviewedTimeOffRequests TimeOffRequest[]           @relation("TimeOffReviewer")
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  posts                   Post[]
+  comments                Comment[]
+  reactions               Reaction[]
+  postReads               PostRead[]
+  channelMemberships      ChannelMember[]            @relation("ChannelMemberUser")
+  addedChannelMembers     ChannelMember[]            @relation("ChannelMemberAddedBy")
+  conversations           ConversationParticipant[]
+  messages                Message[]
+  auditLogs               AuditLog[]
+  aiQueries               AIQuery[]
+  createdChannels         Channel[]
+  rosterShifts            RosterShift[]
+  createdRosters          Roster[]                   @relation("RosterCreator")
+  publishedRosters        Roster[]                   @relation("RosterPublisher")
+  rosterHistory           RosterHistory[]
+  suggestedMatches        UnmatchedRosterEntry[]     @relation("SuggestedMatch")
+  resolvedMatches         UnmatchedRosterEntry[]     @relation("ResolvedMatch")
+  venuePermissions        UserVenuePermission[]      @relation("UserVenuePermissionUser")
+  grantedPermissions      UserVenuePermission[]      @relation("UserVenuePermissionGranter")
+
+  @@index([email])
+  @@index([roleId])
+  @@index([venueId])
+  @@index([firstName])
+  @@index([lastName])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users                  User[]
+  rolePermissions        RolePermission[]
+  fieldPermissions       FieldPermission[]
+  conditionalPermissions ConditionalPermission[]
+  timeBasedAccess        TimeBasedAccess[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(cuid())
+  resource    String
+  action      String
+  description String?
+  createdAt   DateTime @default(now())
+
+  rolePermissions      RolePermission[]
+  userVenuePermissions UserVenuePermission[]
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model FieldPermission {
+  id        String   @id @default(cuid())
+  roleId    String
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  resource  String
+  field     String
+  access    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([roleId, resource, field])
+  @@index([roleId])
+  @@index([resource])
+  @@index([field])
+  @@map("field_permissions")
+}
+
+model ConditionalPermission {
+  id         String   @id @default(cuid())
+  roleId     String
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  resource   String
+  action     String
+  conditions Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([roleId])
+  @@index([resource])
+  @@index([action])
+  @@map("conditional_permissions")
+}
+
+model TimeBasedAccess {
+  id         String   @id @default(cuid())
+  roleId     String
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  resource   String
+  action     String
+  daysOfWeek Int[]
+  startTime  String
+  endTime    String
+  timezone   String   @default("UTC")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([roleId])
+  @@index([resource])
+  @@index([action])
+  @@map("time_based_access")
+}
+
+model UserVenuePermission {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation("UserVenuePermissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  venueId      String
+  venue        Venue      @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  grantedBy    String
+  grantedByUser User      @relation("UserVenuePermissionGranter", fields: [grantedBy], references: [id])
+  grantedAt    DateTime   @default(now())
+
+  @@unique([userId, venueId, permissionId])
+  @@index([userId])
+  @@index([venueId])
+  @@index([permissionId])
+  @@index([grantedBy])
+  @@map("user_venue_permissions")
+}
+
+// ============================================================================
+// VENUE MODELS
+// ============================================================================
+
+model Venue {
+  id                 String   @id @default(cuid())
+  name               String
+  code               String   @unique
+  active             Boolean  @default(true)
+  businessHoursStart String   @default("08:00")
+  businessHoursEnd   String   @default("22:00")
+  operatingDays      Json     @default("[1, 2, 3, 4, 5]")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  users            User[]
+  userVenues       UserVenue[]
+  channels         ChannelVenue[]
+  rosters          Roster[]
+  venuePermissions UserVenuePermission[]
+  positions        Position[]
+
+  @@map("venues")
+}
+
+model Position {
+  id           String   @id @default(cuid())
+  name         String
+  color        String   @default("#3B82F6")
+  venueId      String
+  venue        Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  displayOrder Int      @default(0)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([venueId, name])
+  @@index([venueId])
+  @@map("positions")
+}
+
+model UserVenue {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venueId   String
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, venueId])
+  @@index([userId])
+  @@index([venueId])
+  @@index([isPrimary])
+  @@map("user_venues")
+}
+
+// ============================================================================
+// AVAILABILITY & TIME OFF
+// ============================================================================
+
+model Availability {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dayOfWeek   Int
+  isAvailable Boolean  @default(false)
+  isAllDay    Boolean  @default(false)
+  startTime   String?
+  endTime     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, dayOfWeek])
+  @@index([userId])
+  @@index([dayOfWeek])
+  @@map("availability")
 }
 
 model AvailabilitySnapshot {
@@ -537,6 +326,426 @@ model AvailabilitySnapshot {
   @@map("availability_snapshots")
 }
 
+model TimeOffRequest {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation("TimeOffRequester", fields: [userId], references: [id], onDelete: Cascade)
+  startDate   DateTime
+  endDate     DateTime
+  type        String
+  reason      String?
+  status      String    @default("PENDING")
+  reviewedBy  String?
+  reviewer    User?     @relation("TimeOffReviewer", fields: [reviewedBy], references: [id])
+  reviewedAt  DateTime?
+  notes       String?
+  version     Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([startDate, endDate])
+  @@index([reviewedBy])
+  @@map("time_off_requests")
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([readAt])
+  @@index([createdAt])
+  @@index([userId, type])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id        String                @id @default(cuid())
+  userId    String
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  channels  NotificationChannel[]
+  enabled   Boolean               @default(true)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@unique([userId, type])
+  @@index([userId])
+  @@index([type])
+  @@map("notification_preferences")
+}
+
+// ============================================================================
+// COMMUNICATION
+// ============================================================================
+
+model Channel {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  type        String
+  icon        String?
+  color       String?
+  permissions Json?
+  archived    Boolean  @default(false)
+  archivedAt  DateTime?
+  memberCount Int      @default(0)
+  createdBy   String?
+  createdByUser User?  @relation(fields: [createdBy], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members ChannelMember[]
+  venues  ChannelVenue[]
+  posts   Post[]
+
+  @@index([createdBy])
+  @@index([memberCount])
+  @@map("channels")
+}
+
+model ChannelMember {
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("ChannelMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  role      String   @default("MEMBER")
+  addedBy   String
+  addedByUser User   @relation("ChannelMemberAddedBy", fields: [addedBy], references: [id])
+  addedAt   DateTime @default(now())
+  addedVia  String?
+
+  @@unique([channelId, userId])
+  @@index([channelId])
+  @@index([userId])
+  @@index([addedBy])
+  @@map("channel_members")
+}
+
+model ChannelVenue {
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  venueId   String
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([channelId, venueId])
+  @@index([channelId])
+  @@index([venueId])
+  @@map("channel_venues")
+}
+
+model Post {
+  id        String    @id @default(cuid())
+  channelId String
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content   String
+  mediaUrls String?
+  pinned    Boolean   @default(false)
+  edited    Boolean   @default(false)
+  editedAt  DateTime?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  comments  Comment[]
+  reactions Reaction[]
+  reads     PostRead[]
+
+  @@index([channelId])
+  @@index([authorId])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@map("posts")
+}
+
+model Comment {
+  id        String    @id @default(cuid())
+  postId    String
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  parentId  String?
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("CommentReplies")
+  edited    Boolean   @default(false)
+  editedAt  DateTime?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  reactions Reaction[]
+
+  @@index([postId])
+  @@index([userId])
+  @@index([parentId])
+  @@index([deletedAt])
+  @@map("comments")
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  postId    String?
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  commentId String?
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId, emoji])
+  @@unique([commentId, userId, emoji])
+  @@index([postId])
+  @@index([commentId])
+  @@map("reactions")
+}
+
+model PostRead {
+  id     String   @id @default(cuid())
+  postId String
+  post   Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@index([postId])
+  @@index([userId])
+  @@map("post_reads")
+}
+
+// ============================================================================
+// DIRECT MESSAGING
+// ============================================================================
+
+model Conversation {
+  id            String    @id @default(cuid())
+  type          String
+  name          String?
+  lastMessage   String?
+  lastMessageAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@index([type])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+  mutedUntil     DateTime?
+
+  @@unique([conversationId, userId])
+  @@index([conversationId])
+  @@index([userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content        String
+  mediaUrls      String?
+  reactions      String?
+  readAt         DateTime?
+  readBy         String[]     @default([])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// ============================================================================
+// ROSTER MANAGEMENT
+// ============================================================================
+
+model Roster {
+  id               String        @id @default(cuid())
+  name             String
+  description      String?
+  venueId          String
+  venue            Venue         @relation(fields: [venueId], references: [id])
+  startDate        DateTime
+  endDate          DateTime
+  status           RosterStatus  @default(DRAFT)
+  sourceFileUrl    String?
+  sourceFileName   String?
+  sourceFileType   String?
+  publishedAt      DateTime?
+  publishedBy      String?
+  publishedByUser  User?         @relation("RosterPublisher", fields: [publishedBy], references: [id])
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  createdBy        String
+  createdByUser    User          @relation("RosterCreator", fields: [createdBy], references: [id])
+
+  // UNIFIED VERSION CHAIN SYSTEM
+  // chainId groups all versions of a roster for the same venue/week together
+  // versionNumber is the position in the chain (1, 2, 3...)
+  // revision is the internal edit counter for audit trail
+  chainId          String?                // Groups versions together (null = standalone)
+  versionNumber    Int           @default(1)  // Position in chain: 1, 2, 3...
+  revision         Int           @default(1)  // Internal edit counter for audit
+  isActive         Boolean       @default(true)  // Current live version in chain
+
+  // Legacy parent/child relation (kept for backwards compatibility during migration)
+  parentId         String?
+  parentRoster     Roster?       @relation("RosterVersions", fields: [parentId], references: [id])
+  childVersions    Roster[]      @relation("RosterVersions")
+
+  // Related data
+  shifts           RosterShift[]
+  history          RosterHistory[]
+  unmatchedEntries UnmatchedRosterEntry[]
+
+  @@index([venueId])
+  @@index([status])
+  @@index([startDate, endDate])
+  @@index([parentId])
+  @@index([chainId])
+  @@index([chainId, versionNumber])
+  @@index([chainId, isActive])
+  @@map("rosters")
+}
+
+model RosterShift {
+  id            String   @id @default(cuid())
+  rosterId      String
+  roster        Roster   @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id])
+  date          DateTime
+  startTime     String
+  endTime       String
+  breakMinutes  Int      @default(0)
+  position      String?
+  notes         String?
+  originalName  String?
+  hasConflict   Boolean  @default(false)
+  conflictType  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([rosterId])
+  @@index([userId])
+  @@index([date])
+  @@map("roster_shifts")
+}
+
+model UnmatchedRosterEntry {
+  id              String    @id @default(cuid())
+  rosterId        String
+  roster          Roster    @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  originalName    String
+  suggestedUserId String?
+  suggestedUser   User?     @relation("SuggestedMatch", fields: [suggestedUserId], references: [id])
+  confidence      Float?
+  resolved        Boolean   @default(false)
+  resolvedUserId  String?
+  resolvedUser    User?     @relation("ResolvedMatch", fields: [resolvedUserId], references: [id])
+  resolvedAt      DateTime?
+  resolvedBy      String?
+  createdAt       DateTime  @default(now())
+
+  @@index([rosterId])
+  @@index([resolved])
+  @@map("unmatched_roster_entries")
+}
+
+model RosterHistory {
+  id              String   @id @default(cuid())
+  rosterId        String
+  roster          Roster   @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  chainId         String?  // Link to version chain for cross-version queries
+  version         Int      // Kept as 'version' for backwards compat, represents revision
+  action          String   // Action type (see AuditAction enum in roster-audit.ts)
+  changes         Json?    // What changed
+  snapshot        Json?    // Shift state for restoration (if applicable)
+  metadata        Json?    // Additional context (source version, diff summary, etc.)
+  performedBy     String
+  performedByUser User     @relation(fields: [performedBy], references: [id])
+  performedAt     DateTime @default(now())
+
+  @@index([rosterId])
+  @@index([chainId])
+  @@index([action])
+  @@map("roster_history")
+}
+
+// ============================================================================
+// AUDIT & ANALYTICS
+// ============================================================================
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actionType   String
+  resourceType String
+  resourceId   String?
+  oldValue     String?
+  newValue     String?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([actionType])
+  @@index([resourceType])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model AIQuery {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  query     String
+  response  Json
+  filters   Json
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("ai_queries")
+}
+
 model ReportCache {
   id         String   @id @default(cuid())
   reportType String
@@ -547,17 +756,4 @@ model ReportCache {
 
   @@index([reportType, expiresAt])
   @@map("report_cache")
-}
-
-model AIQuery {
-  id        String   @id @default(cuid())
-  userId    String
-  query     String
-  response  Json
-  filters   Json
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@map("ai_queries")
 }

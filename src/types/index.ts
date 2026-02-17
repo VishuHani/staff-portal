@@ -61,9 +61,9 @@ export function actionSuccess(): ActionSuccess<void>;
 export function actionSuccess<T>(data: T): ActionSuccess<T>;
 export function actionSuccess<T>(data?: T): ActionSuccess<T> | ActionSuccess<void> {
   if (data === undefined) {
-    return { success: true };
+    return { success: true } as ActionSuccess<void>;
   }
-  return { success: true, data };
+  return { success: true, data } as ActionSuccess<T>;
 }
 
 /**
@@ -118,7 +118,8 @@ export type PermissionResource =
   | "messages"
   | "admin"
   | "users"
-  | "roles";
+  | "roles"
+  | "rosters";
 
 export type PermissionAction =
   | "view_own"

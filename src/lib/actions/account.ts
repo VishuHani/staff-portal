@@ -11,6 +11,8 @@ import {
   type UpdateEmailInput,
 } from "@/lib/schemas/account";
 import { createClient } from "@/lib/auth/supabase-server";
+import { createAuditLog } from "@/lib/actions/admin/audit-logs";
+import { getAuditContext } from "@/lib/utils/audit-helpers";
 
 /**
  * Change user password
@@ -70,6 +72,17 @@ export async function changePassword(input: ChangePasswordInput) {
       console.error("Error updating Supabase password:", error);
       // Continue - Prisma password is already updated
     }
+
+    // Audit log
+    const auditContext = await getAuditContext();
+    await createAuditLog({
+      userId: user.id,
+      actionType: "PASSWORD_CHANGED",
+      resourceType: "User",
+      resourceId: user.id,
+      newValue: JSON.stringify({ email: dbUser.email, changedAt: new Date() }),
+      ipAddress: auditContext.ipAddress,
+    });
 
     revalidatePath("/settings/account");
     return { success: true };

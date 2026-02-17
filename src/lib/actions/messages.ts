@@ -106,7 +106,8 @@ export async function getMessages(
 export async function sendMessage(data: CreateMessageInput) {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("messages", "create");
+  // Use "send" permission for sending messages
+  const hasAccess = await canAccess("messages", "send");
   if (!hasAccess) {
     return { error: "You don't have permission to send messages" };
   }

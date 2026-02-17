@@ -165,11 +165,13 @@ export const PERMISSION_HIERARCHY: Record<ChannelPermissionLevel, number> = {
   CREATORS: 3,
 };
 
+export type ChannelMemberRole = "CREATOR" | "MODERATOR" | "MEMBER";
+
 /**
  * Check if a user's role meets the required permission level
  */
 export function hasPermissionLevel(
-  userRole: "CREATOR" | "MODERATOR" | "MEMBER" | null,
+  userRole: ChannelMemberRole | string | null,
   requiredLevel: ChannelPermissionLevel,
   isMember: boolean = true
 ): boolean {
@@ -184,7 +186,8 @@ export function hasPermissionLevel(
   }
 
   // If user is not a member, deny (for MEMBERS, MODERATORS, CREATORS)
-  if (!isMember && requiredLevel !== "EVERYONE") {
+  // Note: at this point requiredLevel is not "EVERYONE" (handled above)
+  if (!isMember) {
     return false;
   }
 

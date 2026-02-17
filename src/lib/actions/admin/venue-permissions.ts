@@ -12,6 +12,11 @@ import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import { getCurrentUser } from "@/lib/actions/auth";
 import { getUserVenueIds } from "@/lib/utils/venue";
+import { getAuditContext } from "@/lib/utils/audit-helpers";
+import {
+  notifyPermissionGranted,
+  notifyPermissionRevoked,
+} from "@/lib/services/notifications";
 
 /**
  * VENUE-SCOPED PERMISSION MANAGEMENT ACTIONS
@@ -123,10 +128,6 @@ async function canManageUserVenuePermissions(
     }
 
     // Rule 6: Managers can only manage STAFF (not other managers)
-    const targetUserIsManager = currentUser.role.rolePermissions?.some(
-      (rp: any) => rp.permission.action === "manage"
-    ) || false;
-
     // Check if target is a manager
     const targetIsManager = await prisma.rolePermission.findFirst({
       where: {
@@ -463,7 +464,13 @@ export async function grantUserVenuePermission(
       },
     });
 
-    // Create audit log
+    // Get granter name for notification
+    const granterName = currentUser.firstName && currentUser.lastName
+      ? `${currentUser.firstName} ${currentUser.lastName}`
+      : currentUser.email;
+
+    // Create audit log with IP address
+    const auditContext = await getAuditContext();
     try {
       await createAuditLog({
         userId: currentUser.id,
@@ -478,10 +485,25 @@ export async function grantUserVenuePermission(
           permissionId,
           permission: `${permission.resource}:${permission.action}`,
         }),
+        ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
       console.error("Error creating audit log:", error);
       // Don't fail permission grant if audit log fails
+    }
+
+    // Send notification to user
+    try {
+      await notifyPermissionGranted(
+        userId,
+        currentUser.id,
+        granterName,
+        `${permission.resource}:${permission.action}`,
+        venue.name
+      );
+    } catch (error) {
+      console.error("Error sending permission notification:", error);
+      // Don't fail permission grant if notification fails
     }
 
     revalidatePath("/admin/users");
@@ -565,7 +587,13 @@ export async function revokeUserVenuePermission(
       };
     }
 
-    // Create audit log
+    // Get revoker name for notification
+    const revokerName = currentUser.firstName && currentUser.lastName
+      ? `${currentUser.firstName} ${currentUser.lastName}`
+      : currentUser.email;
+
+    // Create audit log with IP address
+    const auditContext = await getAuditContext();
     if (existingPermission) {
       try {
         await createAuditLog({
@@ -581,10 +609,27 @@ export async function revokeUserVenuePermission(
             permissionId,
             permission: `${existingPermission.permission.resource}:${existingPermission.permission.action}`,
           }),
+          ipAddress: auditContext.ipAddress,
         });
       } catch (error) {
         console.error("Error creating audit log:", error);
         // Don't fail permission revocation if audit log fails
+      }
+    }
+
+    // Send notification to user
+    if (existingPermission) {
+      try {
+        await notifyPermissionRevoked(
+          userId,
+          currentUser.id,
+          revokerName,
+          `${existingPermission.permission.resource}:${existingPermission.permission.action}`,
+          existingPermission.venue.name
+        );
+      } catch (error) {
+        console.error("Error sending permission notification:", error);
+        // Don't fail permission revocation if notification fails
       }
     }
 
@@ -720,7 +765,17 @@ export async function bulkUpdateUserVenuePermissions(
       }
     });
 
-    // Create audit log
+    // Calculate granted and revoked counts for notification
+    const grantedCount = permissionIds.filter(id => !oldPermissionIds.includes(id)).length;
+    const revokedCount = oldPermissionIds.filter(id => !permissionIds.includes(id)).length;
+
+    // Get changer name for notification
+    const changerName = currentUser.firstName && currentUser.lastName
+      ? `${currentUser.firstName} ${currentUser.lastName}`
+      : currentUser.email;
+
+    // Create audit log with IP address
+    const auditContext = await getAuditContext();
     try {
       await createAuditLog({
         userId: currentUser.id,
@@ -741,10 +796,29 @@ export async function bulkUpdateUserVenuePermissions(
           permissionIds,
           permissionCount: permissionIds.length,
         }),
+        ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
       console.error("Error creating audit log:", error);
       // Don't fail bulk update if audit log fails
+    }
+
+    // Send notification to user about permission changes
+    if (grantedCount > 0 || revokedCount > 0) {
+      try {
+        const { notifyPermissionsBulkChanged } = await import("@/lib/services/notifications");
+        await notifyPermissionsBulkChanged(
+          userId,
+          currentUser.id,
+          changerName,
+          grantedCount,
+          revokedCount,
+          venue.name
+        );
+      } catch (error) {
+        console.error("Error sending permission notification:", error);
+        // Don't fail bulk update if notification fails
+      }
     }
 
     revalidatePath("/admin/users");
@@ -984,6 +1058,338 @@ export async function getTotalVenuePermissionAssignments() {
       success: false,
       error: "Failed to get count",
       count: 0,
+    };
+  }
+}
+
+/**
+ * Bulk grant permissions to all users with a specific role at a venue
+ * Admin only
+ *
+ * @param roleId - The role ID to target
+ * @param venueId - The venue ID
+ * @param permissionIds - Array of permission IDs to grant
+ * @returns Success status with count of affected users
+ */
+export async function bulkGrantPermissionsByRole(
+  roleId: string,
+  venueId: string,
+  permissionIds: string[]
+) {
+  try {
+    // Admin only
+    const currentUser = await requireAdmin();
+
+    // Validate role
+    const role = await prisma.role.findUnique({
+      where: { id: roleId },
+      select: { id: true, name: true },
+    });
+
+    if (!role) {
+      return {
+        success: false,
+        error: "Role not found",
+      };
+    }
+
+    // Prevent modifying admin permissions
+    if (role.name === "ADMIN") {
+      return {
+        success: false,
+        error: "Cannot bulk modify admin permissions",
+      };
+    }
+
+    // Validate venue
+    const venue = await prisma.venue.findUnique({
+      where: { id: venueId },
+      select: { id: true, active: true, name: true },
+    });
+
+    if (!venue) {
+      return {
+        success: false,
+        error: "Venue not found",
+      };
+    }
+
+    if (!venue.active) {
+      return {
+        success: false,
+        error: "Cannot grant permissions for inactive venue",
+      };
+    }
+
+    // Validate all permissions exist
+    const permissions = await prisma.permission.findMany({
+      where: {
+        id: { in: permissionIds },
+      },
+      select: { id: true, resource: true, action: true },
+    });
+
+    if (permissions.length !== permissionIds.length) {
+      return {
+        success: false,
+        error: "One or more permissions not found",
+      };
+    }
+
+    // Get all users with this role at this venue
+    const usersWithRoleAtVenue = await prisma.user.findMany({
+      where: {
+        roleId,
+        active: true,
+        venues: {
+          some: { venueId },
+        },
+      },
+      select: { id: true },
+    });
+
+    const activeUserIds = usersWithRoleAtVenue.map((u) => u.id);
+
+    if (activeUserIds.length === 0) {
+      return {
+        success: false,
+        error: "No active users with this role at the specified venue",
+      };
+    }
+
+    // Get granter name for notification
+    const granterName = currentUser.firstName && currentUser.lastName
+      ? `${currentUser.firstName} ${currentUser.lastName}`
+      : currentUser.email;
+
+    // Create permission grants (skip duplicates)
+    let grantedCount = 0;
+    for (const userId of activeUserIds) {
+      for (const permissionId of permissionIds) {
+        try {
+          await prisma.userVenuePermission.create({
+            data: {
+              userId,
+              venueId,
+              permissionId,
+              grantedBy: currentUser.id,
+            },
+          });
+          grantedCount++;
+        } catch (error) {
+          // Skip duplicates (unique constraint violation)
+        }
+      }
+    }
+
+    // Create audit log with IP address
+    const auditContext = await getAuditContext();
+    try {
+      await createAuditLog({
+        userId: currentUser.id,
+        actionType: "VENUE_PERMISSIONS_BULK_GRANTED_BY_ROLE",
+        resourceType: "VenuePermission",
+        resourceId: `${roleId}-${venueId}`,
+        newValue: JSON.stringify({
+          roleId,
+          roleName: role.name,
+          venueId,
+          venueName: venue.name,
+          permissionIds,
+          userCount: activeUserIds.length,
+          grantedCount,
+        }),
+        ipAddress: auditContext.ipAddress,
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+    }
+
+    // Send notifications to affected users
+    const { notifyPermissionGranted } = await import("@/lib/services/notifications");
+    for (const userId of activeUserIds) {
+      try {
+        await notifyPermissionGranted(
+          userId,
+          currentUser.id,
+          granterName,
+          `${permissions.length} permissions`,
+          venue.name
+        );
+      } catch (error) {
+        console.error("Error sending notification:", error);
+      }
+    }
+
+    revalidatePath("/admin/users");
+
+    return {
+      success: true,
+      message: `Granted ${grantedCount} permissions to ${activeUserIds.length} users with role ${role.name} at ${venue.name}`,
+      userCount: activeUserIds.length,
+      grantedCount,
+    };
+  } catch (error) {
+    console.error("Error bulk granting permissions by role:", error);
+    return {
+      success: false,
+      error: "Failed to grant permissions",
+    };
+  }
+}
+
+/**
+ * Bulk grant permissions to multiple users at a venue
+ * Admin only
+ *
+ * @param userIds - Array of user IDs
+ * @param venueId - The venue ID
+ * @param permissionIds - Array of permission IDs to grant
+ * @returns Success status with count of affected users
+ */
+export async function bulkGrantPermissionsToUsers(
+  userIds: string[],
+  venueId: string,
+  permissionIds: string[]
+) {
+  try {
+    // Admin only
+    const currentUser = await requireAdmin();
+
+    if (userIds.length === 0) {
+      return {
+        success: false,
+        error: "No users specified",
+      };
+    }
+
+    // Validate venue
+    const venue = await prisma.venue.findUnique({
+      where: { id: venueId },
+      select: { id: true, active: true, name: true },
+    });
+
+    if (!venue) {
+      return {
+        success: false,
+        error: "Venue not found",
+      };
+    }
+
+    if (!venue.active) {
+      return {
+        success: false,
+        error: "Cannot grant permissions for inactive venue",
+      };
+    }
+
+    // Validate all permissions exist
+    const permissions = await prisma.permission.findMany({
+      where: {
+        id: { in: permissionIds },
+      },
+      select: { id: true, resource: true, action: true },
+    });
+
+    if (permissions.length !== permissionIds.length) {
+      return {
+        success: false,
+        error: "One or more permissions not found",
+      };
+    }
+
+    // Validate all users exist and are active
+    const users = await prisma.user.findMany({
+      where: {
+        id: { in: userIds },
+        active: true,
+      },
+      select: { id: true },
+    });
+
+    if (users.length !== userIds.length) {
+      return {
+        success: false,
+        error: "One or more users not found or inactive",
+      };
+    }
+
+    // Get granter name for notification
+    const granterName = currentUser.firstName && currentUser.lastName
+      ? `${currentUser.firstName} ${currentUser.lastName}`
+      : currentUser.email;
+
+    // Create permission grants (skip duplicates)
+    let grantedCount = 0;
+    for (const userId of userIds) {
+      for (const permissionId of permissionIds) {
+        try {
+          await prisma.userVenuePermission.create({
+            data: {
+              userId,
+              venueId,
+              permissionId,
+              grantedBy: currentUser.id,
+            },
+          });
+          grantedCount++;
+        } catch (error) {
+          // Skip duplicates (unique constraint violation)
+        }
+      }
+    }
+
+    // Create audit log with IP address
+    const auditContext = await getAuditContext();
+    try {
+      await createAuditLog({
+        userId: currentUser.id,
+        actionType: "VENUE_PERMISSIONS_BULK_GRANTED_TO_USERS",
+        resourceType: "VenuePermission",
+        resourceId: venueId,
+        newValue: JSON.stringify({
+          userIds,
+          userCount: userIds.length,
+          venueId,
+          venueName: venue.name,
+          permissionIds,
+          grantedCount,
+        }),
+        ipAddress: auditContext.ipAddress,
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+    }
+
+    // Send notifications to affected users
+    const { notifyPermissionGranted } = await import("@/lib/services/notifications");
+    for (const userId of userIds) {
+      try {
+        await notifyPermissionGranted(
+          userId,
+          currentUser.id,
+          granterName,
+          `${permissions.length} permissions`,
+          venue.name
+        );
+      } catch (error) {
+        console.error("Error sending notification:", error);
+      }
+    }
+
+    revalidatePath("/admin/users");
+
+    return {
+      success: true,
+      message: `Granted ${grantedCount} permissions to ${userIds.length} users at ${venue.name}`,
+      userCount: userIds.length,
+      grantedCount,
+    };
+  } catch (error) {
+    console.error("Error bulk granting permissions to users:", error);
+    return {
+      success: false,
+      error: "Failed to grant permissions",
     };
   }
 }

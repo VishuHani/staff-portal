@@ -23,8 +23,8 @@ import {
 export async function getConversations(limit = 50) {
   const user = await requireAuth();
 
-  // Check permissions
-  const hasAccess = await canAccess("messages", "read");
+  // Use "send" permission - if you can send messages, you can view your conversations
+  const hasAccess = await canAccess("messages", "send");
   if (!hasAccess) {
     return { error: "You don't have permission to view messages" };
   }
@@ -134,7 +134,8 @@ export async function getConversations(limit = 50) {
 export async function getConversationById(id: string) {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("messages", "read");
+  // Use "send" permission - if you can send messages, you can view your conversations
+  const hasAccess = await canAccess("messages", "send");
   if (!hasAccess) {
     return { error: "You don't have permission to view messages" };
   }
@@ -206,7 +207,8 @@ export async function getConversationById(id: string) {
 export async function findOrCreateConversation(otherUserId: string) {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("messages", "create");
+  // Use "send" permission - if you can send messages, you can start conversations
+  const hasAccess = await canAccess("messages", "send");
   if (!hasAccess) {
     return { error: "You don't have permission to create conversations" };
   }
@@ -301,7 +303,8 @@ export async function findOrCreateConversation(otherUserId: string) {
 export async function createGroupConversation(data: CreateConversationInput) {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("messages", "create");
+  // Use "send" permission - if you can send messages, you can start conversations
+  const hasAccess = await canAccess("messages", "send");
   if (!hasAccess) {
     return { error: "You don't have permission to create conversations" };
   }
@@ -586,7 +589,7 @@ export async function addParticipants(data: AddParticipantsInput) {
       await prisma.notification.create({
         data: {
           userId,
-          type: "MESSAGE",
+          type: "NEW_MESSAGE",
           title: "Added to group conversation",
           message: `${user.email} added you to "${conversation.name || "a group conversation"}"`,
           link: `/messages?conversationId=${conversationId}`,

@@ -73,6 +73,7 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   schedules: "Schedules",
   settings: "Settings",
   admin: "Admin Functions",
+  rosters: "Rosters",
 };
 
 // Icons for each resource category
@@ -91,6 +92,7 @@ const RESOURCE_ICONS: Record<PermissionResource, string> = {
   schedules: "⏰",
   settings: "⚙️",
   admin: "👑",
+  rosters: "📆",
 };
 
 export function VenuePermissionsDialog({

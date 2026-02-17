@@ -11,7 +11,8 @@ import { getSharedVenueUsers } from "@/lib/utils/venue";
 export async function getUsers() {
   const user = await requireAuth();
 
-  const hasAccess = await canAccess("messages", "create");
+  // Use "send" permission for messages (not "create")
+  const hasAccess = await canAccess("messages", "send");
   if (!hasAccess) {
     return { error: "You don't have permission to view users" };
   }

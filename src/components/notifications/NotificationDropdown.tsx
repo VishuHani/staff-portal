@@ -21,17 +21,11 @@ interface Notification {
   id: string;
   type: NotificationType;
   title: string;
-  message?: string | null;
-  actionUrl?: string | null;
-  actionLabel?: string | null;
-  read: boolean;
+  message: string;
+  link: string | null;
+  readAt: Date | null;
   createdAt: Date;
-  sender?: {
-    id: string;
-    firstName: string | null;
-    lastName: string | null;
-    email: string;
-  } | null;
+  userId: string;
 }
 
 interface NotificationDropdownProps {
@@ -43,6 +37,7 @@ export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDr
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   // Load recent notifications when dropdown opens
   useEffect(() => {
@@ -56,6 +51,7 @@ export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDr
     try {
       const result = await getAllNotifications({
         userId,
+        unreadOnly: false,
         limit: 10,
       });
 
@@ -73,13 +69,13 @@ export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDr
 
   const handleNotificationClick = async (notification: Notification) => {
     // Mark as read if unread
-    if (!notification.read) {
+    if (!notification.readAt) {
       await markAsRead({ notificationId: notification.id, userId });
     }
 
-    // Navigate to action URL if available
-    if (notification.actionUrl) {
-      window.location.href = notification.actionUrl;
+    // Navigate to link if available
+    if (notification.link) {
+      window.location.href = notification.link;
     }
 
     setIsOpen(false);
@@ -88,14 +84,31 @@ export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDr
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative h-9 w-9 rounded-full hover:bg-muted/80 transition-colors"
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+        >
+          {/* Bell icon with ring animation on hover */}
+          <Bell
+            className={`
+              h-5 w-5 transition-transform duration-300
+              ${isHovered && unreadCount > 0 ? "animate-[wiggle_0.5s_ease-in-out]" : ""}
+            `}
+          />
+
+          {/* Notification badge - positioned top-right with proper offset */}
           {unreadCount > 0 && (
-            <span className="absolute top-1 right-1">
+            <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center">
               <NotificationBadge userId={userId} initialCount={unreadCount} />
+              {/* Pulse ring effect */}
+              <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
             </span>
           )}
-          <span className="sr-only">Notifications</span>
+
+          <span className="sr-only">Notifications ({unreadCount} unread)</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-80 p-0" align="end">
@@ -127,11 +140,11 @@ export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDr
                   key={notification.id}
                   onClick={() => handleNotificationClick(notification)}
                   className={`w-full text-left p-3 hover:bg-muted/50 transition-colors ${
-                    !notification.read ? "bg-muted/30" : ""
+                    !notification.readAt ? "bg-muted/30" : ""
                   }`}
                 >
                   <div className="flex items-start gap-2">
-                    {!notification.read && (
+                    {!notification.readAt && (
                       <div className="h-2 w-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
@@ -149,7 +162,7 @@ export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDr
                         })}
                       </p>
                     </div>
-                    {notification.actionUrl && (
+                    {notification.link && (
                       <ExternalLink className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0 mt-1" />
                     )}
                   </div>

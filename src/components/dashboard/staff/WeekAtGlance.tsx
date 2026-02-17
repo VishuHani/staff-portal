@@ -58,7 +58,7 @@ export function WeekAtGlance({ summary }: WeekAtGlanceProps) {
             </CardTitle>
             <CardDescription>Your availability for the next 7 days</CardDescription>
           </div>
-          <Link href="/availability">
+          <Link href="/my/availability">
             <Button size="sm">
               Set Availability
             </Button>

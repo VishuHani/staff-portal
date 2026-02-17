@@ -11,6 +11,7 @@ import { StaffKPICards } from "@/components/dashboard/staff/StaffKPICards";
 import { QuickActions } from "@/components/dashboard/staff/QuickActions";
 import { RecentActivityFeed } from "@/components/dashboard/staff/RecentActivityFeed";
 import { PersonalStatsChart } from "@/components/dashboard/staff/PersonalStatsChart";
+import { UpcomingShiftsWidget } from "@/components/dashboard/staff/UpcomingShiftsWidget";
 import { HeroStatsBar } from "@/components/dashboard/manager/HeroStatsBar";
 import { CoverageHeatmap } from "@/components/dashboard/manager/CoverageHeatmap";
 import { TeamAvailabilityPie } from "@/components/dashboard/manager/TeamAvailabilityPie";
@@ -61,11 +62,6 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          {/* Week at a Glance */}
-          {dashboardData.success && (
-            <WeekAtGlance summary={dashboardData.data.weeklySummary} />
-          )}
-
           {/* KPI Cards */}
           {dashboardData.success && (
             <StaffKPICards kpis={dashboardData.data.kpis} />
@@ -76,6 +72,16 @@ export default async function DashboardPage() {
 
           {/* Two Column Layout */}
           <div className="grid gap-6 lg:grid-cols-2">
+            {/* Upcoming Shifts */}
+            {dashboardData.success && (
+              <UpcomingShiftsWidget shifts={dashboardData.data.upcomingShifts} />
+            )}
+
+            {/* Week at a Glance */}
+            {dashboardData.success && (
+              <WeekAtGlance summary={dashboardData.data.weeklySummary} />
+            )}
+
             {/* Recent Activity */}
             {dashboardData.success && (
               <RecentActivityFeed notifications={dashboardData.data.recentActivity} />

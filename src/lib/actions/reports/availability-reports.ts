@@ -23,7 +23,9 @@ export interface MatrixFilters {
   startDate: Date | string;
   endDate: Date | string;
   venueId?: string;
+  venueIds?: string[];
   roleId?: string;
+  roleIds?: string[];
   timeSlotStart?: string; // "HH:mm" format
   timeSlotEnd?: string; // "HH:mm" format
   searchQuery?: string;
@@ -33,6 +35,7 @@ export interface CoverageFilters {
   startDate: Date | string;
   endDate: Date | string;
   venueId?: string;
+  venueIds?: string[];
   requiredStaffing?: number;
 }
 
@@ -40,6 +43,7 @@ export interface ConflictFilters {
   startDate: Date | string;
   endDate: Date | string;
   venueId?: string;
+  venueIds?: string[];
   severityLevel?: "all" | "critical" | "warning" | "info";
 }
 
@@ -47,6 +51,7 @@ export interface GapFilters {
   startDate: Date | string;
   endDate: Date | string;
   venueId?: string;
+  venueIds?: string[];
   minimumStaff?: number;
 }
 
@@ -930,6 +935,13 @@ export async function getConflictsReport(filters: any & { includeAIResolutions?:
             },
           },
           availability: true,
+          timeOffRequests: {
+            where: {
+              status: "APPROVED",
+              startDate: { lte: endDate },
+              endDate: { gte: startDate },
+            },
+          },
         },
       }),
       prisma.timeOffRequest.findMany({

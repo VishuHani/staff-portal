@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ShieldCheck } from "lucide-react";
 import {
@@ -54,6 +55,7 @@ export function PermissionsManager({
   role,
   allPermissions,
 }: PermissionsManagerProps) {
+  const router = useRouter();
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -131,7 +133,7 @@ export function PermissionsManager({
     } else {
       toast.success("Permissions updated successfully");
       onOpenChange(false);
-      window.location.reload();
+      router.refresh();
     }
 
     setIsSubmitting(false);

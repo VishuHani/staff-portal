@@ -24,6 +24,11 @@ export const notificationTypeSchema = z.enum([
   "ROLE_CHANGED",
   "SYSTEM_ANNOUNCEMENT",
   "GROUP_REMOVED",
+  "ROSTER_PUBLISHED",
+  "ROSTER_UPDATED",
+  "ROSTER_SHIFT_REMINDER",
+  "ROSTER_CONFLICT",
+  "ROSTER_PENDING_REVIEW",
 ]);
 
 // Schema for creating a notification

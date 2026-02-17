@@ -41,6 +41,7 @@ interface CacheStats {
   misses: number;
   sets: number;
   deletes: number;
+  [key: string]: unknown;
 }
 
 // In-memory cache store

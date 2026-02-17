@@ -36,6 +36,9 @@ interface User {
   lastName?: string | null;
   phone?: string | null;
   active: boolean;
+  weekdayRate?: number | null;
+  saturdayRate?: number | null;
+  sundayRate?: number | null;
   role: {
     id: string;
     name: string;
@@ -92,6 +95,9 @@ type FormData = {
   venueIds: string[];
   primaryVenueId?: string;
   active: boolean;
+  weekdayRate?: number | null;
+  saturdayRate?: number | null;
+  sundayRate?: number | null;
 };
 
 export function UserDialog({
@@ -126,6 +132,9 @@ export function UserDialog({
           venueIds: user.venues?.map((v) => v.venue.id) || [],
           primaryVenueId: user.venues?.find((v) => v.isPrimary)?.venue.id,
           active: user.active,
+          weekdayRate: user.weekdayRate ?? null,
+          saturdayRate: user.saturdayRate ?? null,
+          sundayRate: user.sundayRate ?? null,
         }
       : {
           firstName: "",
@@ -138,6 +147,9 @@ export function UserDialog({
           venueIds: [],
           primaryVenueId: undefined,
           active: true,
+          weekdayRate: null,
+          saturdayRate: null,
+          sundayRate: null,
         },
   });
 
@@ -163,6 +175,9 @@ export function UserDialog({
           venueIds: userVenueIds,
           primaryVenueId: userPrimaryVenueId,
           active: user.active,
+          weekdayRate: user.weekdayRate ?? null,
+          saturdayRate: user.saturdayRate ?? null,
+          sundayRate: user.sundayRate ?? null,
         });
 
         setSelectedVenueIds(userVenueIds);
@@ -179,6 +194,9 @@ export function UserDialog({
           venueIds: [],
           primaryVenueId: undefined,
           active: true,
+          weekdayRate: null,
+          saturdayRate: null,
+          sundayRate: null,
         });
 
         setSelectedVenueIds([]);
@@ -212,10 +230,12 @@ export function UserDialog({
         email: data.email,
         phone: data.phone || undefined,
         roleId: data.roleId,
-        storeId: data.storeId || null,
         venueIds: selectedVenueIds,
         primaryVenueId: primaryVenueId,
         active: data.active,
+        weekdayRate: data.weekdayRate,
+        saturdayRate: data.saturdayRate,
+        sundayRate: data.sundayRate,
       });
     } else {
       if (!data.password) {
@@ -230,7 +250,6 @@ export function UserDialog({
         phone: data.phone || undefined,
         password: data.password,
         roleId: data.roleId,
-        storeId: data.storeId,
         venueIds: selectedVenueIds,
         primaryVenueId: primaryVenueId,
         active: data.active,
@@ -429,6 +448,71 @@ export function UserDialog({
                 Kept for backward compatibility. Use venues instead.
               </p>
             </div>
+
+            {/* Pay Rates (only for editing) */}
+            {isEditing && (
+              <div className="space-y-3 pt-2 border-t">
+                <Label className="text-sm font-medium">
+                  Hourly Pay Rates ($/hour)
+                </Label>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="weekdayRate" className="text-xs text-muted-foreground">
+                      Weekday
+                    </Label>
+                    <Input
+                      id="weekdayRate"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="1000"
+                      placeholder="0.00"
+                      {...register("weekdayRate", {
+                        setValueAs: (v) => (v === "" || v === null ? null : parseFloat(v)),
+                      })}
+                      disabled={submitting}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="saturdayRate" className="text-xs text-muted-foreground">
+                      Saturday
+                    </Label>
+                    <Input
+                      id="saturdayRate"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="1000"
+                      placeholder="0.00"
+                      {...register("saturdayRate", {
+                        setValueAs: (v) => (v === "" || v === null ? null : parseFloat(v)),
+                      })}
+                      disabled={submitting}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="sundayRate" className="text-xs text-muted-foreground">
+                      Sunday
+                    </Label>
+                    <Input
+                      id="sundayRate"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="1000"
+                      placeholder="0.00"
+                      {...register("sundayRate", {
+                        setValueAs: (v) => (v === "" || v === null ? null : parseFloat(v)),
+                      })}
+                      disabled={submitting}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave empty if not applicable. Used for roster pay calculations.
+                </p>
+              </div>
+            )}
 
             {/* Active Status */}
             <div className="flex items-center justify-between">

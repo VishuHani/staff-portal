@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
-import { startOfWeek, endOfWeek, addWeeks, eachDayOfInterval, format, startOfDay, endOfDay } from "date-fns";
+import { startOfWeek, endOfWeek, addWeeks, eachDayOfInterval, format, startOfDay, endOfDay, subWeeks } from "date-fns";
 
 /**
  * Get weekly availability summary for the next 7 days
@@ -94,25 +94,31 @@ export async function getStaffKPIs() {
     const next30Days = new Date(today);
     next30Days.setDate(next30Days.getDate() + 30);
 
-    // Calculate hours available this week
-    const thisWeekAvailability = await prisma.availability.findMany({
+    // Calculate hours SCHEDULED this week (from RosterShift, not availability)
+    const scheduledShifts = await prisma.rosterShift.findMany({
       where: {
         userId: user.id,
-        isAvailable: true,
-        dayOfWeek: {
-          gte: weekStart.getDay(),
-          lte: weekEnd.getDay(),
+        date: {
+          gte: weekStart,
+          lte: weekEnd,
         },
+        roster: {
+          status: "PUBLISHED",
+        },
+      },
+      select: {
+        startTime: true,
+        endTime: true,
+        breakMinutes: true,
       },
     });
 
     let hoursThisWeek = 0;
-    thisWeekAvailability.forEach((avail) => {
-      if (avail.startTime && avail.endTime) {
-        const [startHour, startMin] = avail.startTime.split(":").map(Number);
-        const [endHour, endMin] = avail.endTime.split(":").map(Number);
-        hoursThisWeek += endHour - startHour + (endMin - startMin) / 60;
-      }
+    scheduledShifts.forEach((shift) => {
+      const [startHour, startMin] = shift.startTime.split(":").map(Number);
+      const [endHour, endMin] = shift.endTime.split(":").map(Number);
+      const totalMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin) - (shift.breakMinutes || 0);
+      hoursThisWeek += totalMinutes / 60;
     });
 
     // Get upcoming approved time-off
@@ -158,10 +164,11 @@ export async function getStaffKPIs() {
     return {
       success: true,
       kpis: {
-        hoursThisWeek: Math.round(hoursThisWeek),
+        hoursThisWeek: Math.round(hoursThisWeek * 10) / 10,
         upcomingTimeOff,
         pendingRequests,
         unreadMessages,
+        shiftsThisWeek: scheduledShifts.length,
       },
     };
   } catch (error) {
@@ -198,9 +205,10 @@ export async function getRecentActivity() {
 }
 
 /**
- * Get personal availability trends (last 4 weeks)
+ * Get personal scheduled hours trends (last 4 weeks)
+ * Uses RosterShift for actual scheduled hours, not availability patterns
  */
-export async function getAvailabilityTrends() {
+export async function getScheduledHoursTrends() {
   const user = await requireAuth();
 
   try {
@@ -209,37 +217,112 @@ export async function getAvailabilityTrends() {
 
     // Go back 4 weeks
     for (let i = 3; i >= 0; i--) {
-      const weekStart = startOfWeek(addWeeks(today, -i), { weekStartsOn: 0 });
-      const weekEnd = endOfWeek(addWeeks(today, -i), { weekStartsOn: 0 });
+      const weekStart = startOfWeek(subWeeks(today, i), { weekStartsOn: 0 });
+      const weekEnd = endOfWeek(subWeeks(today, i), { weekStartsOn: 0 });
 
-      // Get availability for this week
-      const weekAvailability = await prisma.availability.findMany({
+      // Get scheduled shifts for this week
+      const weekShifts = await prisma.rosterShift.findMany({
         where: {
           userId: user.id,
-          isAvailable: true,
+          date: {
+            gte: weekStart,
+            lte: weekEnd,
+          },
+          roster: {
+            status: "PUBLISHED",
+          },
+        },
+        select: {
+          startTime: true,
+          endTime: true,
+          breakMinutes: true,
         },
       });
 
-      // Calculate total hours for the week
+      // Calculate total scheduled hours for the week
       let totalHours = 0;
-      weekAvailability.forEach((avail) => {
-        if (avail.startTime && avail.endTime) {
-          const [startHour, startMin] = avail.startTime.split(":").map(Number);
-          const [endHour, endMin] = avail.endTime.split(":").map(Number);
-          totalHours += endHour - startHour + (endMin - startMin) / 60;
-        }
+      weekShifts.forEach((shift) => {
+        const [startHour, startMin] = shift.startTime.split(":").map(Number);
+        const [endHour, endMin] = shift.endTime.split(":").map(Number);
+        const totalMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin) - (shift.breakMinutes || 0);
+        totalHours += totalMinutes / 60;
       });
 
       trends.push({
         week: format(weekStart, "MMM d"),
-        hours: Math.round(totalHours),
+        hours: Math.round(totalHours * 10) / 10,
+        shifts: weekShifts.length,
       });
     }
 
     return { success: true, trends };
   } catch (error) {
-    console.error("Error fetching availability trends:", error);
-    return { error: "Failed to fetch availability trends" };
+    console.error("Error fetching scheduled hours trends:", error);
+    return { error: "Failed to fetch scheduled hours trends" };
+  }
+}
+
+/**
+ * Get upcoming shifts for the next 7 days
+ */
+export async function getUpcomingShifts() {
+  const user = await requireAuth();
+
+  try {
+    const today = new Date();
+    const next7Days = new Date(today);
+    next7Days.setDate(next7Days.getDate() + 7);
+
+    const shifts = await prisma.rosterShift.findMany({
+      where: {
+        userId: user.id,
+        date: {
+          gte: startOfDay(today),
+          lte: next7Days,
+        },
+        roster: {
+          status: "PUBLISHED",
+        },
+      },
+      include: {
+        roster: {
+          select: {
+            id: true,
+            name: true,
+            venue: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        date: "asc",
+      },
+      take: 10,
+    });
+
+    const formattedShifts = shifts.map((shift) => ({
+      id: shift.id,
+      date: shift.date,
+      startTime: shift.startTime,
+      endTime: shift.endTime,
+      breakMinutes: shift.breakMinutes,
+      position: shift.position,
+      notes: shift.notes,
+      roster: {
+        id: shift.roster.id,
+        name: shift.roster.name,
+        venue: shift.roster.venue,
+      },
+    }));
+
+    return { success: true, shifts: formattedShifts };
+  } catch (error) {
+    console.error("Error fetching upcoming shifts:", error);
+    return { error: "Failed to fetch upcoming shifts" };
   }
 }
 
@@ -247,11 +330,12 @@ export async function getAvailabilityTrends() {
  * Get all staff dashboard data at once
  */
 export async function getStaffDashboardData() {
-  const [weeklySummary, kpis, activity, trends] = await Promise.all([
+  const [weeklySummary, kpis, activity, trends, upcomingShifts] = await Promise.all([
     getWeeklyAvailabilitySummary(),
     getStaffKPIs(),
     getRecentActivity(),
-    getAvailabilityTrends(),
+    getScheduledHoursTrends(),
+    getUpcomingShifts(),
   ]);
 
   return {
@@ -261,6 +345,7 @@ export async function getStaffDashboardData() {
       kpis: kpis.success ? kpis.kpis : null,
       recentActivity: activity.success ? activity.notifications : [],
       trends: trends.success ? trends.trends : [],
+      upcomingShifts: upcomingShifts.success ? upcomingShifts.shifts : [],
     },
   };
 }

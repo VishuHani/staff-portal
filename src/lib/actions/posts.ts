@@ -29,7 +29,7 @@ async function checkChannelPermission(
   userId: string,
   channelId: string,
   permissionKey: keyof Omit<ChannelPermissions, "isReadOnly" | "requiresApproval">
-): Promise<{ allowed: boolean; error?: string; role?: "CREATOR" | "MODERATOR" | "MEMBER" | null }> {
+): Promise<{ allowed: boolean; error?: string; role?: string | null }> {
   // Get channel with permissions
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },

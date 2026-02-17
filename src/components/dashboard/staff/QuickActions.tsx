@@ -15,7 +15,7 @@ export function QuickActions({ unreadMessageCount = 0 }: QuickActionsProps) {
       title: "Update Availability",
       description: "Set your weekly schedule",
       icon: Calendar,
-      href: "/availability",
+      href: "/my/availability",
       color: "text-blue-600",
       bgColor: "bg-blue-50",
     },
@@ -23,7 +23,7 @@ export function QuickActions({ unreadMessageCount = 0 }: QuickActionsProps) {
       title: "Request Time Off",
       description: "Submit a new request",
       icon: Plane,
-      href: "/time-off",
+      href: "/my/time-off",
       color: "text-green-600",
       bgColor: "bg-green-50",
     },
@@ -38,12 +38,11 @@ export function QuickActions({ unreadMessageCount = 0 }: QuickActionsProps) {
     },
     {
       title: "View Schedule",
-      description: "Coming soon",
+      description: "See your upcoming shifts",
       icon: CalendarCheck,
-      href: "#",
+      href: "/my/rosters",
       color: "text-orange-600",
       bgColor: "bg-orange-50",
-      disabled: true,
     },
   ];
 
@@ -52,11 +51,7 @@ export function QuickActions({ unreadMessageCount = 0 }: QuickActionsProps) {
       {actions.map((action) => {
         const Icon = action.icon;
         const content = (
-          <Card
-            className={`group relative overflow-hidden transition-all ${
-              !action.disabled && "cursor-pointer hover:shadow-md hover:border-primary/50"
-            } ${action.disabled && "opacity-60"}`}
-          >
+          <Card className="group relative overflow-hidden transition-all cursor-pointer hover:shadow-md hover:border-primary/50">
             <CardContent className="p-6">
               <div className="flex items-start gap-4">
                 <div className={`rounded-lg p-3 ${action.bgColor} transition-transform group-hover:scale-110`}>
@@ -79,10 +74,6 @@ export function QuickActions({ unreadMessageCount = 0 }: QuickActionsProps) {
             </CardContent>
           </Card>
         );
-
-        if (action.disabled) {
-          return <div key={action.title}>{content}</div>;
-        }
 
         return (
           <Link key={action.title} href={action.href}>

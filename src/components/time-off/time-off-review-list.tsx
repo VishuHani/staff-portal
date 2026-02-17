@@ -19,7 +19,7 @@ import { getFullName } from "@/lib/utils/profile";
 import { TIME_OFF_TYPES, TIME_OFF_STATUSES } from "@/lib/schemas/time-off";
 import { reviewTimeOffRequest } from "@/lib/actions/time-off";
 import { format } from "date-fns";
-import { CheckCircle, XCircle, Loader2, FileText, User, Store } from "lucide-react";
+import { CheckCircle, XCircle, Loader2, FileText } from "lucide-react";
 
 interface TimeOffRequest {
   id: string;
@@ -41,15 +41,16 @@ interface TimeOffRequest {
     role: {
       name: string;
     };
-    store: {
-      name: string;
-    } | null;
   };
   reviewer?: {
     id: string;
     email: string;
     firstName?: string | null;
     lastName?: string | null;
+    profileImage?: string | null;
+    role: {
+      name: string;
+    };
   } | null;
 }
 
@@ -176,14 +177,6 @@ export function TimeOffReviewList({ requests }: TimeOffReviewListProps) {
                     <Badge variant="secondary" className="text-xs">
                       {request.user.role.name}
                     </Badge>
-                    {request.user.store && (
-                      <div className="flex items-center gap-1">
-                        <Store className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">
-                          {request.user.store.name}
-                        </span>
-                      </div>
-                    )}
                   </div>
                   <div className="flex items-center gap-2 flex-wrap text-sm">
                     <span className="font-medium">

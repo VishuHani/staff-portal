@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin, requireAnyPermission } from "@/lib/rbac/access";
 import { getUserVenueIds } from "@/lib/utils/venue";
 import { isAdmin } from "@/lib/rbac/permissions";
+import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import {
   createVenueSchema,
   updateVenueSchema,
@@ -126,7 +127,7 @@ export async function getVenueStats() {
  * Admin only
  */
 export async function createVenue(data: CreateVenueInput) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = createVenueSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -168,6 +169,26 @@ export async function createVenue(data: CreateVenueInput) {
       },
     });
 
+    // Audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "VENUE_CREATED",
+        resourceType: "Venue",
+        resourceId: venue.id,
+        newValue: JSON.stringify({
+          name,
+          code,
+          active,
+          businessHoursStart,
+          businessHoursEnd,
+          operatingDays,
+        }),
+      });
+    } catch (auditError) {
+      console.error("Error creating audit log:", auditError);
+    }
+
     revalidatePath("/admin/stores");
 
     return { success: true, venue };
@@ -182,7 +203,7 @@ export async function createVenue(data: CreateVenueInput) {
  * Admin only
  */
 export async function updateVenue(data: UpdateVenueInput) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = updateVenueSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -205,6 +226,15 @@ export async function updateVenue(data: UpdateVenueInput) {
   } = validatedFields.data;
 
   try {
+    // Get old venue data for audit log
+    const oldVenue = await prisma.venue.findUnique({
+      where: { id: venueId },
+    });
+
+    if (!oldVenue) {
+      return { error: "Venue not found" };
+    }
+
     // Check if code is already taken by another venue
     if (code) {
       const existingVenue = await prisma.venue.findFirst({
@@ -240,6 +270,34 @@ export async function updateVenue(data: UpdateVenueInput) {
       },
     });
 
+    // Audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "VENUE_UPDATED",
+        resourceType: "Venue",
+        resourceId: venueId,
+        oldValue: JSON.stringify({
+          name: oldVenue.name,
+          code: oldVenue.code,
+          active: oldVenue.active,
+          businessHoursStart: oldVenue.businessHoursStart,
+          businessHoursEnd: oldVenue.businessHoursEnd,
+          operatingDays: oldVenue.operatingDays,
+        }),
+        newValue: JSON.stringify({
+          name: name ?? oldVenue.name,
+          code: code ?? oldVenue.code,
+          active: active ?? oldVenue.active,
+          businessHoursStart: businessHoursStart ?? oldVenue.businessHoursStart,
+          businessHoursEnd: businessHoursEnd ?? oldVenue.businessHoursEnd,
+          operatingDays: operatingDays ?? oldVenue.operatingDays,
+        }),
+      });
+    } catch (auditError) {
+      console.error("Error creating audit log:", auditError);
+    }
+
     revalidatePath("/admin/stores");
     revalidatePath(`/admin/stores/${venueId}`);
 
@@ -257,7 +315,7 @@ export async function updateVenue(data: UpdateVenueInput) {
  * Note: This will also delete all UserVenue assignments due to cascade
  */
 export async function deleteVenue(data: DeleteVenueInput) {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const validatedFields = deleteVenueSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -269,6 +327,15 @@ export async function deleteVenue(data: DeleteVenueInput) {
   const { venueId } = validatedFields.data;
 
   try {
+    // Get venue data for audit log before deletion
+    const venue = await prisma.venue.findUnique({
+      where: { id: venueId },
+    });
+
+    if (!venue) {
+      return { error: "Venue not found" };
+    }
+
     // Check if venue has users assigned
     const userCount = await prisma.userVenue.count({
       where: { venueId },
@@ -294,6 +361,23 @@ export async function deleteVenue(data: DeleteVenueInput) {
     await prisma.venue.delete({
       where: { id: venueId },
     });
+
+    // Audit log
+    try {
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "VENUE_DELETED",
+        resourceType: "Venue",
+        resourceId: venueId,
+        oldValue: JSON.stringify({
+          name: venue.name,
+          code: venue.code,
+          active: venue.active,
+        }),
+      });
+    } catch (auditError) {
+      console.error("Error creating audit log:", auditError);
+    }
 
     revalidatePath("/admin/stores");
 

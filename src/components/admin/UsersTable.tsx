@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Edit,
   Trash2,
@@ -93,6 +94,7 @@ interface UsersTableProps {
 }
 
 export function UsersTable({ users, roles, stores, venues, currentUser }: UsersTableProps) {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [filterRole, setFilterRole] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -175,7 +177,7 @@ export function UsersTable({ users, roles, stores, venues, currentUser }: UsersT
         `User ${user.active ? "deactivated" : "activated"} successfully`
       );
       // Refresh the page
-      window.location.reload();
+      router.refresh();
     }
 
     setProcessing(false);
@@ -194,7 +196,7 @@ export function UsersTable({ users, roles, stores, venues, currentUser }: UsersT
       setDeleteDialogOpen(false);
       setDeletingUser(null);
       // Refresh the page
-      window.location.reload();
+      router.refresh();
     }
 
     setProcessing(false);

@@ -189,7 +189,7 @@ export function SmartSuggestions({
             {visibleSuggestions.length > 3 && (
               <div className="text-center pt-2">
                 <Link
-                  href="/admin/reports"
+                  href="/manage/reports"
                   className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
                 >
                   View all {visibleSuggestions.length} suggestions →

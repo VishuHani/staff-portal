@@ -457,43 +457,120 @@ function findNextDateForDayOfWeek(startDate: Date, dayOfWeek: number): Date | nu
  */
 export async function applySchedulingSuggestion(
   suggestion: SchedulingSuggestion
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; message?: string; error?: string }> {
   const user = await requireAuth();
 
   try {
-    // Note: This would integrate with your actual scheduling system
-    // For now, we'll just log the application
-    // In a real system, you would create a Schedule record in the database
-
-    console.log("Applying suggestion:", {
-      staffId: suggestion.staffMember.id,
-      date: suggestion.suggestion.date,
-      shift: suggestion.suggestion.shift,
-      hours: suggestion.suggestion.hours,
+    // Since there's no Schedule model, we'll create a RosterShift entry
+    // This assumes we're working with an existing roster for the date
+    const suggestionDate = new Date(suggestion.suggestion.date);
+    
+    // Find or create a roster for the venue that covers this date
+    // This is a simplified approach - in a real system, you'd have more sophisticated logic
+    const venue = await prisma.venue.findFirst({
+      where: {
+        userVenues: {
+          some: {
+            userId: user.id
+          }
+        }
+      }
     });
 
-    // TODO: Create actual schedule entry
-    // Example:
-    // await prisma.schedule.create({
-    //   data: {
-    //     userId: suggestion.staffMember.id,
-    //     date: new Date(suggestion.suggestion.date),
-    //     startTime: suggestion.suggestion.shift?.startTime,
-    //     endTime: suggestion.suggestion.shift?.endTime,
-    //     hours: suggestion.suggestion.hours,
-    //     appliedById: user.id,
-    //     source: "AI_SUGGESTION",
-    //   },
-    // });
+    if (!venue) {
+      return {
+        success: false,
+        error: "No venue found for current user"
+      };
+    }
+
+    // Find existing roster or create a new one
+    let roster = await prisma.roster.findFirst({
+      where: {
+        venueId: venue.id,
+        startDate: {
+          lte: suggestionDate
+        },
+        endDate: {
+          gte: suggestionDate
+        }
+      }
+    });
+
+    // If no roster exists for this date, create one
+    if (!roster) {
+      const startDate = new Date(suggestionDate);
+      startDate.setDate(startDate.getDate() - startDate.getDay()); // Start of week
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 6); // End of week
+      
+      roster = await prisma.roster.create({
+        data: {
+          name: `Weekly Roster ${format(startDate, "yyyy-MM-dd")}`,
+          venueId: venue.id,
+          startDate,
+          endDate,
+          status: "DRAFT",
+          createdBy: user.id,
+          shifts: {
+            create: []
+          }
+        }
+      });
+    }
+
+    // Create the shift entry
+    await prisma.rosterShift.create({
+      data: {
+        rosterId: roster.id,
+        userId: suggestion.staffMember.id,
+        date: suggestionDate,
+        startTime: suggestion.suggestion.shift?.startTime || "09:00",
+        endTime: suggestion.suggestion.shift?.endTime || "17:00",
+        breakMinutes: 0,
+        notes: `AI-suggested shift from conflict resolution`
+      }
+    });
+
+    // Create audit log entry
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        actionType: "AI_SUGGESTION_APPLIED",
+        resourceType: "roster_shift",
+        resourceId: roster.id,
+        newValue: JSON.stringify({
+          staffId: suggestion.staffMember.id,
+          date: suggestion.suggestion.date,
+          shift: suggestion.suggestion.shift,
+          suggestionId: suggestion.id
+        }),
+      },
+    });
 
     return {
       success: true,
+      message: `Successfully scheduled ${suggestion.staffMember.name} for ${format(suggestionDate, "MMM dd, yyyy")}`
     };
   } catch (error) {
     console.error("Error applying scheduling suggestion:", error);
+    
+    // Create error audit log entry
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        actionType: "AI_SUGGESTION_FAILED",
+        resourceType: "scheduling_suggestion",
+        newValue: JSON.stringify({ 
+          suggestionId: suggestion.id, 
+          error: (error as Error).message 
+        }),
+      },
+    });
+    
     return {
       success: false,
-      error: "Failed to apply suggestion",
+      error: "Failed to apply suggestion: " + (error as Error).message
     };
   }
 }

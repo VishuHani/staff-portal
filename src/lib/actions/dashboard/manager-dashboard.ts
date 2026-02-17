@@ -3,7 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
 import { getSharedVenueUsers } from "@/lib/utils/venue";
-import { startOfWeek, endOfWeek, addWeeks, eachDayOfInterval, format, startOfDay, endOfDay, addDays } from "date-fns";
+import { startOfWeek, endOfWeek, addWeeks, eachDayOfInterval, format, startOfDay, endOfDay, addDays, subWeeks } from "date-fns";
 import { generateSchedulingSuggestions } from "@/lib/actions/ai/suggestions";
 
 /**
@@ -214,6 +214,8 @@ export async function getTeamAvailabilityDistribution() {
 
 /**
  * Get coverage trend data (last 8 weeks)
+ * Uses AvailabilitySnapshot for historical data when available,
+ * falls back to calculating from RosterShift for recent weeks
  */
 export async function getCoverageTrend() {
   const user = await requireAuth();
@@ -227,39 +229,96 @@ export async function getCoverageTrend() {
     const sharedVenueUserIds = await getSharedVenueUsers(user.id);
     const totalStaff = sharedVenueUserIds.length;
 
+    if (totalStaff === 0) {
+      return { success: true, trends: [] };
+    }
+
     const trends = [];
 
-    for (let i = 7; i >= 0; i--) {
-      const weekStart = startOfWeek(addWeeks(today, -i), { weekStartsOn: 0 });
-      const weekLabel = format(weekStart, "MMM d");
+    // Try to get historical snapshots first
+    const snapshots = await prisma.availabilitySnapshot.findMany({
+      where: {
+        snapshotDate: {
+          gte: subWeeks(today, 8),
+          lte: today,
+        },
+      },
+      orderBy: {
+        snapshotDate: "asc",
+      },
+    });
 
-      // Calculate average coverage for the week
-      let weeklyAvailability = 0;
-      const daysInWeek = 7;
+    // If we have snapshots, use them for historical data
+    if (snapshots.length > 0) {
+      // Group snapshots by week
+      const weekMap = new Map<string, { total: number; available: number }>();
 
-      for (let day = 0; day < daysInWeek; day++) {
-        const available = await prisma.availability.count({
-          where: {
-            userId: { in: sharedVenueUserIds },
-            dayOfWeek: day,
-            isAvailable: true,
-          },
-        });
-        weeklyAvailability += available;
+      for (const snapshot of snapshots) {
+        const weekStart = format(startOfWeek(snapshot.snapshotDate, { weekStartsOn: 0 }), "yyyy-MM-dd");
+        const existing = weekMap.get(weekStart) || { total: 0, available: 0 };
+        existing.total += snapshot.totalStaff;
+        existing.available += snapshot.availableStaff;
+        weekMap.set(weekStart, existing);
       }
 
-      const avgCoverage = totalStaff > 0
-        ? Math.round((weeklyAvailability / (daysInWeek * totalStaff)) * 100)
-        : 0;
+      for (const [weekStart, data] of weekMap.entries()) {
+        const coverage = data.total > 0 ? Math.round((data.available / data.total) * 100) : 0;
+        trends.push({
+          week: format(new Date(weekStart), "MMM d"),
+          coverage,
+          target: 80,
+          source: "snapshot",
+        });
+      }
+    }
+
+    // Fill in missing weeks with calculated data from RosterShift
+    for (let i = 7; i >= 0; i--) {
+      const weekStart = startOfWeek(subWeeks(today, i), { weekStartsOn: 0 });
+      const weekEnd = endOfWeek(subWeeks(today, i), { weekStartsOn: 0 });
+      const weekLabel = format(weekStart, "MMM d");
+
+      // Check if we already have this week from snapshots
+      if (trends.some((t) => t.week === weekLabel)) {
+        continue;
+      }
+
+      // Calculate from published roster shifts
+      const shiftsInWeek = await prisma.rosterShift.count({
+        where: {
+          userId: { in: sharedVenueUserIds },
+          date: {
+            gte: weekStart,
+            lte: weekEnd,
+          },
+          roster: {
+            status: "PUBLISHED",
+          },
+        },
+      });
+
+      // Estimate coverage based on shifts
+      // Assuming each staff member should have ~5 shifts per week for full coverage
+      const expectedShifts = totalStaff * 5;
+      const coverage = expectedShifts > 0 ? Math.min(100, Math.round((shiftsInWeek / expectedShifts) * 100)) : 0;
 
       trends.push({
         week: weekLabel,
-        coverage: avgCoverage,
-        target: 80, // Target coverage line
+        coverage,
+        target: 80,
+        source: "calculated",
+        shiftsCount: shiftsInWeek,
       });
     }
 
-    return { success: true, trends };
+    // Sort by date
+    trends.sort((a, b) => {
+      const dateA = new Date(a.week);
+      const dateB = new Date(b.week);
+      return dateA.getTime() - dateB.getTime();
+    });
+
+    return { success: true, trends: trends.slice(-8) };
   } catch (error) {
     console.error("Error fetching coverage trend:", error);
     return { error: "Failed to fetch coverage trend" };
@@ -284,13 +343,19 @@ export async function getManagerAIInsights() {
       return { success: true, insights: [] };
     }
 
-    // Transform suggestions to insights format
+    // Transform suggestions to insights format with proper field mapping
     const insights = suggestionsResult.suggestions.slice(0, 5).map((suggestion) => ({
       id: suggestion.id,
       type: suggestion.type,
-      message: suggestion.message,
+      // Use reasoning field for the message (the correct field name)
+      message: suggestion.reasoning,
       priority: suggestion.priority,
-      actionUrl: suggestion.actionUrl || "/admin/reports/coverage",
+      actionUrl: `/staff/schedule?date=${suggestion.suggestion.date}`,
+      // Additional metadata for richer display
+      staffName: suggestion.staffMember.name,
+      date: suggestion.suggestion.date,
+      impact: suggestion.impact,
+      confidence: suggestion.confidence,
     }));
 
     return { success: true, insights };

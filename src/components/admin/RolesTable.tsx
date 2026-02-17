@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Trash2, Edit, Users, ShieldCheck } from "lucide-react";
+import { Trash2, Edit, Users, ShieldCheck, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,7 +30,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { deleteRole } from "@/lib/actions/admin/roles";
+import { deleteRole, cloneRole } from "@/lib/actions/admin/roles";
 
 type Permission = {
   id: string;
@@ -61,9 +62,13 @@ interface RolesTableProps {
 }
 
 export function RolesTable({ roles, onEdit, onManagePermissions }: RolesTableProps) {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
+  const [roleToClone, setRoleToClone] = useState<Role | null>(null);
+  const [cloneName, setCloneName] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isCloning, setIsCloning] = useState(false);
 
   const systemRoles = ["ADMIN", "MANAGER", "STAFF"];
 
@@ -85,10 +90,29 @@ export function RolesTable({ roles, onEdit, onManagePermissions }: RolesTablePro
     } else {
       toast.success("Role deleted successfully");
       setRoleToDelete(null);
-      window.location.reload();
+      router.refresh();
     }
 
     setIsDeleting(false);
+  };
+
+  const handleClone = async () => {
+    if (!roleToClone || !cloneName.trim()) return;
+
+    setIsCloning(true);
+
+    const result = await cloneRole(roleToClone.id, cloneName.trim().toUpperCase());
+
+    if (result.error) {
+      toast.error(result.error);
+    } else {
+      toast.success(`Role cloned successfully as "${cloneName.trim().toUpperCase()}"`);
+      setRoleToClone(null);
+      setCloneName("");
+      router.refresh();
+    }
+
+    setIsCloning(false);
   };
 
   return (
@@ -156,6 +180,13 @@ export function RolesTable({ roles, onEdit, onManagePermissions }: RolesTablePro
                       <DropdownMenuItem onClick={() => onManagePermissions(role)}>
                         <ShieldCheck className="mr-2 h-4 w-4" />
                         Manage Permissions
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => {
+                        setRoleToClone(role);
+                        setCloneName("");
+                      }}>
+                        <Copy className="mr-2 h-4 w-4" />
+                        Clone Role
                       </DropdownMenuItem>
                       {!isSystemRole && (
                         <DropdownMenuItem
@@ -232,6 +263,42 @@ export function RolesTable({ roles, onEdit, onManagePermissions }: RolesTablePro
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {isDeleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Clone Role Dialog */}
+      <AlertDialog open={!!roleToClone} onOpenChange={() => {
+        setRoleToClone(null);
+        setCloneName("");
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clone Role</AlertDialogTitle>
+            <AlertDialogDescription>
+              Create a copy of "{roleToClone?.name}" with all its permissions.
+              Enter a name for the new role (uppercase letters and underscores only).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <Input
+              placeholder="NEW_ROLE_NAME"
+              value={cloneName}
+              onChange={(e) => setCloneName(e.target.value.toUpperCase())}
+              className="font-mono"
+            />
+            <p className="mt-2 text-xs text-muted-foreground">
+              The new role will have {roleToClone?.rolePermissions.length || 0} permissions copied from the source role.
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCloning}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleClone}
+              disabled={isCloning || !cloneName.trim()}
+            >
+              {isCloning ? "Cloning..." : "Clone Role"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -39,7 +39,7 @@ export function TeamSnapshotTable({ snapshot }: TeamSnapshotTableProps) {
             </CardTitle>
             <CardDescription>Top 10 team members overview</CardDescription>
           </div>
-          <Link href="/admin/availability">
+          <Link href="/manage/availability">
             <Button variant="outline" size="sm">
               View All
             </Button>

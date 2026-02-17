@@ -168,7 +168,7 @@ async function main() {
   console.log("Test 7: Permission model check");
   const channelsWithJsonPermissions = await prisma.channel.findMany({
     where: {
-      permissions: { not: null },
+      permissions: { not: undefined },
     },
     select: {
       name: true,
@@ -191,7 +191,7 @@ async function main() {
       createdBy: { not: null },
     },
     include: {
-      creator: {
+      createdByUser: {
         select: {
           firstName: true,
           lastName: true,
@@ -203,8 +203,8 @@ async function main() {
   if (channelsWithCreators.length > 0) {
     console.log("  Sample:");
     channelsWithCreators.slice(0, 3).forEach((ch) => {
-      const creatorName = ch.creator
-        ? `${ch.creator.firstName} ${ch.creator.lastName}`
+      const creatorName = ch.createdByUser
+        ? `${ch.createdByUser.firstName} ${ch.createdByUser.lastName}`
         : "Unknown";
       console.log(`    - ${ch.name}: created by ${creatorName}`);
     });

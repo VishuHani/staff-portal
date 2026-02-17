@@ -1062,7 +1062,7 @@ export async function getManageableChannels(data: GetManageableChannelsInput) {
             posts: true,
           },
         },
-        creator: {
+        createdByUser: {
           select: {
             firstName: true,
             lastName: true,

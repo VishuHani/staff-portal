@@ -1,86 +1,173 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * Permission types based on database schema
+ * ============================================================================
+ * ULTRA-GRANULAR PERMISSION SYSTEM
+ * ============================================================================
  *
- * ENHANCED PERMISSION SYSTEM:
- * - Resources represent different areas of the application
- * - Actions represent specific operations within those resources
- * - Admin role bypasses all permission checks (see isAdmin() function)
- * - Manager and Staff roles use granular permissions with venue scoping
+ * This permission system provides comprehensive access control with:
+ *
+ * 1. RESOURCE-LEVEL PERMISSIONS
+ *    - Fine-grained resources for every app feature
+ *    - Hierarchical resource organization
+ *
+ * 2. ACTION-LEVEL PERMISSIONS
+ *    - Scope-based: view_own, view_team, view_all
+ *    - CRUD: create, read, update, delete
+ *    - Workflow: approve, reject, cancel, publish
+ *    - Data: export, import, bulk operations
+ *    - Admin: manage_*, impersonate, deactivate
+ *
+ * 3. FIELD-LEVEL PERMISSIONS (via FieldPermission model)
+ *    - Control access to specific data fields
+ *    - Sensitive data protection (pay rates, SSN, etc.)
+ *
+ * 4. CONDITIONAL PERMISSIONS (via ConditionalPermission model)
+ *    - Context-based rules (venue match, status check)
+ *    - Dynamic permission evaluation
+ *
+ * 5. TIME-BASED ACCESS (via TimeBasedAccess model)
+ *    - Day-of-week restrictions
+ *    - Time-of-day restrictions
+ *    - Timezone support
+ *
+ * 6. VENUE-SCOPED PERMISSIONS
+ *    - Permissions granted per venue
+ *    - Cross-venue access control
+ */
+
+/**
+ * Permission Resources - All application areas that can be controlled
+ *
+ * Organized by category:
+ * - Core: users, roles, stores, venues, positions
+ * - Scheduling: availability, timeoff, rosters, schedules
+ * - Communication: posts, comments, reactions, messages, conversations, channels
+ * - Intelligence: ai, reports
+ * - System: audit, notifications, announcements, settings, media, dashboard, profile
  */
 export type PermissionResource =
+  // Core Resources
   | "users"
   | "roles"
   | "stores"
+  | "venues"
+  | "positions"
+  // Scheduling Resources
   | "availability"
   | "timeoff"
-  | "posts"
-  | "messages"
-  | "notifications"
-  | "audit"
-  | "channels"
-  | "reports"
+  | "rosters"
   | "schedules"
+  // Communication Resources
+  | "posts"
+  | "comments"
+  | "reactions"
+  | "messages"
+  | "conversations"
+  | "channels"
+  // Intelligence Resources
+  | "ai"
+  | "reports"
+  // System Resources
+  | "audit"
+  | "notifications"
+  | "announcements"
   | "settings"
+  | "media"
+  | "dashboard"
+  | "profile"
   | "admin";
 
 /**
- * Permission actions with different scopes:
- * - view_own: View own records only
- * - view_team: View team records in shared venues
- * - view_all: View all records (admin level)
- * - edit_own: Edit own records only
- * - edit_team: Edit team records in shared venues
- * - edit_all: Edit all records (admin level)
- * - create: Create new records
- * - delete_own: Delete own records only
- * - delete_all: Delete any records
- * - approve: Approve requests/actions
- * - reject: Reject requests/actions
- * - cancel: Cancel approved requests
- * - export: Export data
- * - import: Import data
- * - moderate: Moderate content (posts, comments)
- * - publish: Publish content (schedules, announcements)
- * - manage_*: Manage specific admin features
+ * Permission Actions - Operations that can be performed on resources
+ *
+ * Categories:
+ * 1. Basic CRUD: create, read, update, delete
+ * 2. Scope-based: view_own, view_team, view_all, edit_own, edit_team, edit_all
+ * 3. Ownership: delete_own, delete_all
+ * 4. Workflow: approve, reject, cancel, publish
+ * 5. Data Operations: export, import, export_team, export_all
+ * 6. Content: moderate, pin, archive, restore
+ * 7. Assignment: assign, unassign
+ * 8. Communication: send
+ * 9. Bulk Operations: bulk_create, bulk_update, bulk_delete
+ * 10. Admin: manage_*, impersonate, deactivate, reactivate
+ * 11. Sensitive: view_sensitive
+ * 12. AI: view_ai, use_ai, manage_ai
  */
 export type PermissionAction =
+  // Basic CRUD
   | "create"
   | "read"
   | "update"
   | "delete"
+  | "edit"
   | "manage"
+  // View Scopes
+  | "view"
   | "view_own"
   | "view_team"
   | "view_all"
+  | "view_sensitive"  // Access to sensitive fields (pay rates, SSN, etc.)
+  // Edit Scopes
   | "edit_own"
   | "edit_team"
   | "edit_all"
+  // Delete Scopes
   | "delete_own"
   | "delete_all"
+  // Workflow Actions
   | "approve"
   | "reject"
   | "cancel"
+  | "publish"
+  | "submit"
+  | "recall"
+  | "finalize"
+  // Data Operations
   | "export"
   | "export_team"
   | "export_all"
+  | "export_anonymized"
   | "import"
+  | "import_own"
+  | "import_team"
+  | "import_all"
+  // Content Moderation
   | "moderate"
-  | "publish"
-  | "assign"
-  | "unassign"
+  | "pin"
+  | "unpin"
   | "archive"
   | "restore"
+  // Assignment
+  | "assign"
+  | "unassign"
+  // Communication
   | "send"
-  | "view"
-  | "view_ai"
+  // Bulk Operations
+  | "bulk_create"
+  | "bulk_update"
+  | "bulk_delete"
+  | "bulk_assign"
+  // Admin Actions
   | "manage_users"
   | "manage_roles"
   | "manage_stores"
   | "manage_permissions"
+  | "manage_settings"
+  | "manage_positions"
+  | "manage_hours"
   | "view_audit_logs"
-  | "manage_settings";
+  | "impersonate"
+  | "deactivate"
+  | "reactivate"
+  // AI Actions
+  | "view_ai"
+  | "use_ai"
+  | "manage_ai"
+  // Copy/Duplicate
+  | "copy"
+  | "duplicate";
 
 export interface Permission {
   resource: PermissionResource;
@@ -391,70 +478,288 @@ export async function isAdmin(userId: string): Promise<boolean> {
 }
 
 /**
- * PERMISSION MATRIX
+ * UNIFIED PERMISSION CHECK
+ * 
+ * Comprehensive permission check that evaluates:
+ * 1. Base RBAC permission (role-based)
+ * 2. Venue-specific permissions (if venueId provided)
+ * 
+ * This is the recommended entry point for all permission checks.
+ * 
+ * @param userId - The user's ID
+ * @param resource - The resource to check
+ * @param action - The action to check
+ * @param options - Optional venue context
+ * @returns true if user has permission
+ */
+export async function checkPermission(
+  userId: string,
+  resource: PermissionResource,
+  action: PermissionAction,
+  options?: {
+    venueId?: string;
+  }
+): Promise<boolean> {
+  return hasPermission(userId, resource, action, options?.venueId);
+}
+
+/**
+ * Check multiple permissions at once with detailed results
+ * 
+ * @param userId - The user's ID
+ * @param permissions - Array of permissions to check
+ * @param venueId - Optional venue context for all checks
+ * @returns Object with overall result and individual check results
+ */
+export async function checkPermissions(
+  userId: string,
+  permissions: Array<{ resource: PermissionResource; action: PermissionAction }>,
+  venueId?: string
+): Promise<{
+  allowed: boolean;
+  results: Array<{ resource: PermissionResource; action: PermissionAction; allowed: boolean }>;
+}> {
+  const results = await Promise.all(
+    permissions.map(async (p) => ({
+      resource: p.resource,
+      action: p.action,
+      allowed: await hasPermission(userId, p.resource, p.action, venueId),
+    }))
+  );
+
+  return {
+    allowed: results.every((r) => r.allowed),
+    results,
+  };
+}
+
+/**
+ * ============================================================================
+ * COMPREHENSIVE PERMISSION MATRIX
+ * ============================================================================
  *
- * This matrix documents the comprehensive permission system.
+ * This matrix documents the ultra-granular permission system.
  * Use this as a reference when assigning permissions to roles.
  *
+ * ============================================================================
+ * CORE RESOURCES
+ * ============================================================================
+ *
+ * Resource: users
+ * - view_own: View own user profile
+ * - view_team: View users in assigned venues
+ * - view_all: View all users (admin)
+ * - view_sensitive: View sensitive fields (pay rates, SSN, DOB)
+ * - edit_own: Edit own profile
+ * - edit_team: Edit users in assigned venues
+ * - edit_all: Edit all users (admin)
+ * - create: Create new users
+ * - delete_own: Delete own account (soft delete)
+ * - delete_all: Deactivate any user
+ * - deactivate: Deactivate users
+ * - reactivate: Reactivate deactivated users
+ * - impersonate: Login as another user (admin only)
+ * - bulk_create: Create multiple users at once
+ * - bulk_update: Update multiple users at once
+ * - bulk_assign: Assign multiple users to venues/roles
+ *
+ * Resource: roles
+ * - view: View available roles
+ * - view_all: View all roles including permissions
+ * - create: Create new roles
+ * - edit: Edit role details
+ * - delete: Delete unused roles
+ * - manage: Full role management
+ * - assign: Assign roles to users
+ *
+ * Resource: stores / venues
+ * - view: View venue details
+ * - view_all: View all venues
+ * - create: Create new venues
+ * - edit: Edit venue settings
+ * - delete: Delete/archives venues
+ * - manage: Full venue management
+ * - manage_positions: Manage venue positions
+ * - manage_hours: Manage business hours
+ *
+ * Resource: positions
+ * - view: View positions
+ * - create: Create new positions
+ * - edit: Edit position details
+ * - delete: Delete positions
+ * - assign: Assign positions to staff
+ *
+ * ============================================================================
+ * SCHEDULING RESOURCES
+ * ============================================================================
+ *
  * Resource: availability
- * - view_own: View own availability/schedule
- * - edit_own: Edit own availability/schedule
+ * - view_own: View own availability
+ * - edit_own: Edit own availability
  * - view_team: View team availability in assigned venues
  * - edit_team: Edit team availability in assigned venues
  * - view_all: View all availability (admin)
  * - edit_all: Edit all availability (admin)
+ * - export: Export availability data
  *
  * Resource: timeoff
  * - create: Create own time-off requests
  * - view_own: View own time-off requests
- * - view_team: View team time-off requests in assigned venues
- * - approve: Approve/reject time-off requests
+ * - view_team: View team time-off requests
+ * - view_all: View all time-off requests (admin)
+ * - edit_own: Edit own pending requests
+ * - edit_all: Edit any time-off request (admin)
+ * - approve: Approve time-off requests
  * - reject: Reject time-off requests
  * - cancel: Cancel approved time-off requests
- * - view_all: View all time-off requests (admin)
- * - edit_all: Edit all time-off requests (admin)
+ * - export: Export time-off data
  *
- * Resource: posts
- * - create: Create posts in accessible channels
- * - view: View posts in accessible channels
- * - edit_own: Edit own posts
- * - delete_own: Delete own posts
- * - moderate: Pin/delete any posts, manage content
- * - edit_all: Edit any posts (admin)
- * - delete_all: Delete any posts (admin)
- *
- * Resource: messages
- * - send: Send direct messages
- * - view: View own conversations
- * - delete_own: Delete own messages
- * - view_all: View all conversations (admin)
- *
- * Resource: channels
- * - create: Create new channels
- * - edit: Edit channel settings
- * - archive: Archive channels
- * - delete: Delete channels (no posts)
- * - moderate: Moderate channel content
- *
- * Resource: users
- * - view_team: View users in assigned venues
- * - edit_team: Edit users in assigned venues
- * - create: Create new users
- * - view_all: View all users (admin)
- * - edit_all: Edit all users (admin)
- * - delete: Deactivate users
- *
- * Resource: reports
- * - view_team: View reports for assigned venues
- * - export_team: Export data for assigned venues
- * - view_all: View all reports (admin)
- * - export_all: Export all data (admin)
+ * Resource: rosters
+ * - view_own: View own roster/shifts
+ * - view_team: View team rosters
+ * - view_all: View all rosters (admin)
+ * - create: Create new rosters
+ * - edit: Edit draft rosters
+ * - edit_team: Edit team rosters
+ * - edit_all: Edit all rosters (admin)
+ * - delete: Delete rosters
+ * - submit: Submit roster for approval
+ * - approve: Approve roster
+ * - reject: Reject roster
+ * - publish: Publish roster
+ * - archive: Archive rosters
+ * - restore: Restore archived rosters
+ * - copy: Copy/duplicate rosters
+ * - import: Import rosters from files
+ * - export: Export rosters
+ * - bulk_create: Create multiple rosters
+ * - bulk_update: Update multiple rosters
  *
  * Resource: schedules
  * - view_own: View own schedule
  * - view_team: View team schedules
+ * - view_all: View all schedules (admin)
  * - edit_team: Edit team schedules
  * - publish: Publish schedules
+ *
+ * ============================================================================
+ * COMMUNICATION RESOURCES
+ * ============================================================================
+ *
+ * Resource: posts
+ * - view: View posts in accessible channels
+ * - create: Create posts
+ * - edit_own: Edit own posts
+ * - edit_all: Edit any post (admin)
+ * - delete_own: Delete own posts
+ * - delete_all: Delete any post (admin)
+ * - pin: Pin posts
+ * - unpin: Unpin posts
+ * - moderate: Moderate posts (pin, lock, delete)
+ *
+ * Resource: comments
+ * - view: View comments
+ * - create: Create comments
+ * - edit_own: Edit own comments
+ * - delete_own: Delete own comments
+ * - delete_all: Delete any comment (moderator)
+ * - moderate: Moderate comments
+ *
+ * Resource: reactions
+ * - view: View reactions
+ * - create: Add reactions
+ * - delete_own: Remove own reactions
+ * - delete_all: Remove any reaction (moderator)
+ *
+ * Resource: messages
+ * - send: Send direct messages
+ * - view: View own conversations
+ * - view_all: View all conversations (admin)
+ * - delete_own: Delete own messages
+ * - export: Export message history
+ *
+ * Resource: conversations
+ * - view: View own conversations
+ * - create: Start new conversations
+ * - edit: Edit conversation details
+ * - archive: Archive conversations
+ * - add_participants: Add participants to group chats
+ * - remove_participants: Remove participants
+ *
+ * Resource: channels
+ * - view: View accessible channels
+ * - create: Create new channels
+ * - edit: Edit channel settings
+ * - delete: Delete channels
+ * - archive: Archive channels
+ * - restore: Restore archived channels
+ * - moderate: Moderate channel content
+ * - manage: Full channel management
+ * - assign: Assign members to channels
+ *
+ * ============================================================================
+ * INTELLIGENCE RESOURCES
+ * ============================================================================
+ *
+ * Resource: ai
+ * - view_ai: View AI features
+ * - use_ai: Use AI chat/assistance
+ * - manage_ai: Configure AI settings
+ * - view_sensitive: View AI usage logs
+ *
+ * Resource: reports
+ * - view: View basic reports
+ * - view_team: View team reports
+ * - view_all: View all reports (admin)
+ * - export: Export reports
+ * - export_team: Export team reports
+ * - export_all: Export all reports (admin)
+ * - export_anonymized: Export anonymized data
+ * - create: Create custom reports
+ *
+ * ============================================================================
+ * SYSTEM RESOURCES
+ * ============================================================================
+ *
+ * Resource: audit
+ * - view: View own audit trail
+ * - view_all: View all audit logs (admin)
+ * - export: Export audit logs
+ * - delete: Delete old audit logs
+ *
+ * Resource: notifications
+ * - view: View own notifications
+ * - send: Send notifications to others
+ * - manage: Manage notification templates
+ * - broadcast: Send system-wide broadcasts
+ *
+ * Resource: announcements
+ * - view: View announcements
+ * - create: Create announcements
+ * - edit: Edit announcements
+ * - delete: Delete announcements
+ * - send: Send announcements to users
+ *
+ * Resource: settings
+ * - view: View settings
+ * - edit: Edit own settings
+ * - manage_settings: Manage system settings
+ *
+ * Resource: media
+ * - view: View media files
+ * - upload: Upload media files
+ * - delete_own: Delete own uploaded files
+ * - delete_all: Delete any file (admin)
+ *
+ * Resource: dashboard
+ * - view: View dashboard
+ * - customize: Customize dashboard layout
+ * - manage: Manage dashboard widgets
+ *
+ * Resource: profile
+ * - view_own: View own profile
+ * - edit_own: Edit own profile
+ * - view_sensitive: View sensitive profile data
  *
  * Resource: admin
  * - manage_users: Full user management
@@ -463,25 +768,42 @@ export async function isAdmin(userId: string): Promise<boolean> {
  * - manage_permissions: Manage permission assignments
  * - view_audit_logs: View system audit logs
  * - manage_settings: Manage system settings
+ * - impersonate: Impersonate other users
  *
- * ROLE DEFAULTS:
+ * ============================================================================
+ * ROLE DEFAULTS
+ * ============================================================================
  *
  * ADMIN: Bypasses all permission checks (no specific permissions needed)
  *
  * MANAGER (Base Permissions):
+ * - users: view_team, edit_team, view_sensitive
  * - availability: view_own, edit_own, view_team, edit_team
- * - timeoff: create, view_own, view_team, approve
- * - posts: create, view, edit_own, delete_own, moderate
- * - messages: send, view
- * - users: view_team, edit_team
- * - channels: create, edit, moderate
+ * - timeoff: create, view_own, view_team, approve, reject
+ * - rosters: view_team, create, edit, submit, publish, copy, import, export
  * - schedules: view_own, view_team, edit_team, publish
+ * - posts: create, view, edit_own, delete_own, moderate, pin
+ * - comments: view, create, edit_own, delete_own, moderate
+ * - messages: send, view
+ * - channels: view, create, edit, moderate, assign
  * - reports: view_team, export_team
+ * - ai: view_ai, use_ai
+ * - media: view, upload, delete_own
+ * - dashboard: view, customize
  *
  * STAFF (Base Permissions):
+ * - users: view_own, edit_own
  * - availability: view_own, edit_own
- * - timeoff: create, view_own
- * - posts: create, view, edit_own, delete_own
- * - messages: send, view
+ * - timeoff: create, view_own, edit_own, cancel
+ * - rosters: view_own
  * - schedules: view_own
+ * - posts: create, view, edit_own, delete_own
+ * - comments: view, create, edit_own, delete_own
+ * - reactions: view, create, delete_own
+ * - messages: send, view
+ * - channels: view
+ * - reports: view (limited)
+ * - media: view, upload, delete_own
+ * - dashboard: view
+ * - profile: view_own, edit_own
  */

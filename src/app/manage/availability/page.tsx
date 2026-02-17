@@ -1,0 +1,286 @@
+import { requireManager } from "@/lib/rbac/access";
+import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import {
+  getAllUsersAvailability,
+  getAvailabilityStats,
+} from "@/lib/actions/availability";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { DAYS_OF_WEEK } from "@/lib/schemas/availability";
+import { Calendar, Users, UserCheck, UserX, Clock } from "lucide-react";
+
+export const metadata = {
+  title: "Staff Availability | Team Management",
+  description: "View and manage all staff availability schedules",
+};
+
+export default async function ManageAvailabilityPage() {
+  const user = await requireManager();
+
+  const [usersResult, statsResult] = await Promise.all([
+    getAllUsersAvailability(),
+    getAvailabilityStats(),
+  ]);
+
+  if ("error" in usersResult || "error" in statsResult) {
+    return (
+      <DashboardLayout user={user}>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Error</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">
+                {usersResult.error || statsResult.error}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  const { users: staffUsers } = usersResult;
+  const { stats } = statsResult;
+
+  return (
+    <DashboardLayout user={user}>
+      <div className="space-y-8">
+        {/* Header */}
+        <div>
+          <div className="flex items-center gap-2">
+            <Calendar className="h-6 w-6 text-primary" />
+            <h2 className="text-3xl font-bold tracking-tight">
+              Staff Availability
+            </h2>
+          </div>
+          <p className="mt-2 text-muted-foreground">
+            View and manage your team's availability schedules
+          </p>
+        </div>
+
+        {/* Stats Grid */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Total Staff
+              </CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.totalUsers}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                With Availability
+              </CardTitle>
+              <UserCheck className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.usersConfigured}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {stats.totalUsers > 0
+                  ? Math.round((stats.usersConfigured / stats.totalUsers) * 100)
+                  : 0}
+                % configured
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Without Availability
+              </CardTitle>
+              <UserX className="h-4 w-4 text-red-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {stats.usersNotConfigured}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Not yet configured
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Days Configured
+              </CardTitle>
+              <Clock className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {stats.byDay.reduce((sum, day) => sum + day.available, 0)}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Total availability slots
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Availability by Day */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Availability by Day</CardTitle>
+            <CardDescription>
+              Number of staff available each day of the week
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {stats.byDay.map((dayStat) => {
+                const dayInfo = DAYS_OF_WEEK.find(
+                  (d) => d.value === dayStat.dayOfWeek
+                );
+                if (!dayInfo) return null;
+
+                return (
+                  <div key={dayStat.dayOfWeek} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{dayInfo.label}</span>
+                      <div className="flex gap-2">
+                        <Badge variant="default" className="bg-green-600">
+                          {dayStat.available} staff ({dayStat.percentage}%)
+                        </Badge>
+                        <Badge variant="secondary">
+                          {dayStat.unavailable} unavailable
+                        </Badge>
+                        {dayStat.notSet > 0 && (
+                          <Badge variant="outline">
+                            {dayStat.notSet} not set
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-secondary">
+                      <div
+                        className="h-2 rounded-full bg-green-600"
+                        style={{ width: `${dayStat.percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Staff Availability List */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Staff Schedules</CardTitle>
+            <CardDescription>
+              Detailed availability for each team member
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-6">
+              {staffUsers.map((staffUser) => (
+                <div
+                  key={staffUser.id}
+                  className="rounded-lg border p-4 space-y-4"
+                >
+                  {/* Staff Info */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">
+                          {staffUser.firstName && staffUser.lastName
+                            ? `${staffUser.firstName} ${staffUser.lastName}`
+                            : staffUser.email}
+                        </p>
+                        <Badge variant="secondary">{staffUser.role.name}</Badge>
+                      </div>
+                    </div>
+                    <div>
+                      {staffUser.availability.some((a) => a.isAvailable) ? (
+                        <Badge variant="default" className="bg-green-600">
+                          Available
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary">No availability set</Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Weekly Schedule */}
+                  {staffUser.availability.length > 0 && (
+                    <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7">
+                      {DAYS_OF_WEEK.map((dayInfo) => {
+                        const dayAvailability = staffUser.availability.find(
+                          (a) => a.dayOfWeek === dayInfo.value
+                        );
+
+                        const isAvailable = dayAvailability?.isAvailable || false;
+                        const isAllDay = dayAvailability?.isAllDay || false;
+
+                        return (
+                          <div
+                            key={dayInfo.value}
+                            className={`rounded-md border p-3 text-center ${
+                              isAvailable
+                                ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950"
+                                : "border-muted bg-muted/50"
+                            }`}
+                          >
+                            <div className="text-xs font-medium text-muted-foreground mb-1">
+                              {dayInfo.short}
+                            </div>
+                            {isAvailable ? (
+                              <div className="space-y-1">
+                                {isAllDay ? (
+                                  <div className="px-2 py-1 bg-blue-100 dark:bg-blue-900 rounded text-xs font-medium text-blue-700 dark:text-blue-300">
+                                    All Day
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="text-xs font-medium text-green-700 dark:text-green-300">
+                                      {dayAvailability?.startTime}
+                                    </div>
+                                    <div className="text-xs text-green-600 dark:text-green-400">to</div>
+                                    <div className="text-xs font-medium text-green-700 dark:text-green-300">
+                                      {dayAvailability?.endTime}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="text-xs text-muted-foreground">
+                                —
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {staffUsers.length === 0 && (
+                <div className="py-12 text-center text-muted-foreground">
+                  No team members found
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </DashboardLayout>
+  );
+}

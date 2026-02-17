@@ -100,10 +100,10 @@ export function Header({ user, unreadCount = 0, onMenuClick }: HeaderProps) {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <a href="/settings">Settings</a>
+              <a href="/my/settings">Settings</a>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <a href="/settings/profile">Profile</a>
+              <a href="/my/profile">Profile</a>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleLogout} className="text-red-600">

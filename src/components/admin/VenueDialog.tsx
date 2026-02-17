@@ -33,17 +33,29 @@ interface Venue {
   active: boolean;
   businessHoursStart?: string;
   businessHoursEnd?: string;
-  operatingDays?: number[];
+  operatingDays?: number[] | unknown;
+  _count?: {
+    userVenues: number;
+  };
 }
 
 interface VenueDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  venue?: Venue | null;
+  venue: Venue | null;
   onSuccess?: () => void;
 }
 
-type FormData = CreateVenueInput | (UpdateVenueInput & { venueId?: string });
+// Use a broader type that works for both create and update
+type FormData = {
+  venueId?: string;
+  name: string;
+  code: string;
+  active?: boolean;
+  businessHoursStart?: string;
+  businessHoursEnd?: string;
+  operatingDays?: number[];
+};
 
 /**
  * VenueDialog Component
@@ -78,7 +90,7 @@ export function VenueDialog({
     watch,
     setValue,
   } = useForm<FormData>({
-    resolver: zodResolver(isEditing ? updateVenueSchema : createVenueSchema),
+    resolver: zodResolver(isEditing ? updateVenueSchema : createVenueSchema) as any,
     defaultValues: venue
       ? {
           venueId: venue.id,
@@ -87,7 +99,7 @@ export function VenueDialog({
           active: venue.active,
           businessHoursStart: venue.businessHoursStart || "08:00",
           businessHoursEnd: venue.businessHoursEnd || "22:00",
-          operatingDays: venue.operatingDays || [1, 2, 3, 4, 5],
+          operatingDays: (Array.isArray(venue.operatingDays) ? venue.operatingDays : [1, 2, 3, 4, 5]) as number[],
         }
       : {
           name: "",
@@ -111,7 +123,7 @@ export function VenueDialog({
           active: venue.active,
           businessHoursStart: venue.businessHoursStart || "08:00",
           businessHoursEnd: venue.businessHoursEnd || "22:00",
-          operatingDays: venue.operatingDays || [1, 2, 3, 4, 5],
+          operatingDays: (Array.isArray(venue.operatingDays) ? venue.operatingDays : [1, 2, 3, 4, 5]) as number[],
         });
       } else {
         // Creating new venue - clear form
@@ -219,7 +231,7 @@ export function VenueDialog({
               onChange={(e) => {
                 // Auto-uppercase and validate format
                 const value = e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "");
-                setValue("code", value);
+                setValue("code", value, { shouldDirty: true });
               }}
             />
             <p className="text-xs text-gray-500">
@@ -288,9 +300,9 @@ export function VenueDialog({
                       onCheckedChange={(checked) => {
                         const current = operatingDaysValue;
                         if (checked) {
-                          setValue("operatingDays", [...current, day.value].sort());
+                          setValue("operatingDays", [...current, day.value].sort(), { shouldDirty: true });
                         } else {
-                          setValue("operatingDays", current.filter((d: number) => d !== day.value));
+                          setValue("operatingDays", current.filter((d: number) => d !== day.value), { shouldDirty: true });
                         }
                       }}
                       disabled={loading}
@@ -319,7 +331,7 @@ export function VenueDialog({
             <Switch
               id="active"
               checked={activeValue}
-              onCheckedChange={(checked) => setValue("active", checked)}
+              onCheckedChange={(checked) => setValue("active", checked, { shouldDirty: true })}
               disabled={loading}
             />
           </div>

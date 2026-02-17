@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 
 export interface ChannelMember {
   id: string;
-  role: "CREATOR" | "MODERATOR" | "MEMBER";
+  role: "CREATOR" | "MODERATOR" | "MEMBER" | string;
   addedAt: Date;
   addedVia: string | null;
   user: {

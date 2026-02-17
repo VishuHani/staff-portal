@@ -20,17 +20,11 @@ interface Notification {
   id: string;
   type: NotificationType;
   title: string;
-  message?: string | null;
-  actionUrl?: string | null;
-  actionLabel?: string | null;
-  read: boolean;
+  message: string;
+  link: string | null;
+  readAt: Date | null;
   createdAt: Date;
-  sender?: {
-    id: string;
-    firstName: string | null;
-    lastName: string | null;
-    email: string;
-  } | null;
+  userId: string;
 }
 
 interface NotificationListProps {
@@ -190,7 +184,7 @@ export function NotificationList({
     window.location.reload();
   };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = notifications.filter((n) => !n.readAt).length;
 
   return (
     <div className="space-y-4">
@@ -199,7 +193,7 @@ export function NotificationList({
         <NotificationStats
           notifications={notifications.map(n => ({
             type: n.type,
-            readAt: n.read ? new Date() : null
+            readAt: n.readAt
           }))}
         />
       )}

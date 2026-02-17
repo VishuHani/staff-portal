@@ -55,6 +55,14 @@ export const createUserSchema = z.object({
     }
   );
 
+// Pay rate validation helper
+const payRateSchema = z
+  .number()
+  .min(0, "Rate cannot be negative")
+  .max(1000, "Rate cannot exceed 1000")
+  .nullable()
+  .optional();
+
 // Update user schema
 export const updateUserSchema = z.object({
   userId: z.string().min(1, "User ID is required"),
@@ -86,6 +94,10 @@ export const updateUserSchema = z.object({
     .optional(),
   primaryVenueId: z.string().cuid("Invalid primary venue ID").optional(),
   active: z.boolean().optional(),
+  // Pay rate fields
+  weekdayRate: payRateSchema,
+  saturdayRate: payRateSchema,
+  sundayRate: payRateSchema,
 })
   .refine(
     (data) => {

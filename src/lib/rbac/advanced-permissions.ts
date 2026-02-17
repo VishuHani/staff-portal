@@ -277,7 +277,7 @@ export async function hasConditionalPermission(
 
     // Evaluate all conditions - ALL must pass
     for (const condPerm of user.role.conditionalPermissions) {
-      const condition = condPerm.conditions as PermissionCondition;
+      const condition = condPerm.conditions as unknown as PermissionCondition;
 
       if (!evaluateCondition(condition, data)) {
         return false; // Condition failed

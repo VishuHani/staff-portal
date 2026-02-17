@@ -272,7 +272,7 @@ export async function notifyTimeOffSubmitted(
       type: "TIME_OFF_REQUEST",
       title: `${requesterName} requested time off`,
       message: `Time off request for ${dateRange}`,
-      link: `/time-off?request=${requestId}`,
+      link: `/my/time-off?request=${requestId}`,
     },
     approverIds
   );
@@ -308,7 +308,7 @@ export async function notifyTimeOffApproved(
     type: "TIME_OFF_APPROVED",
     title: "Time off request approved",
     message: `Your time off request for ${dateRange} has been approved by ${approverName}`,
-    link: `/time-off?request=${requestId}`,
+    link: `/my/time-off?request=${requestId}`,
   });
 
   // Notify approver (confirmation of their action)
@@ -317,7 +317,7 @@ export async function notifyTimeOffApproved(
     type: "TIME_OFF_APPROVED",
     title: "Time off request approved",
     message: `You approved ${requesterName}'s time off request for ${dateRange}`,
-    link: `/time-off?request=${requestId}`,
+    link: `/my/time-off?request=${requestId}`,
   });
 
   // Send both notifications in parallel
@@ -357,7 +357,7 @@ export async function notifyTimeOffRejected(
     message: reason
       ? `Your time off request for ${dateRange} was rejected: ${reason}`
       : `Your time off request for ${dateRange} was rejected by ${rejectorName}`,
-    link: `/time-off?request=${requestId}`,
+    link: `/my/time-off?request=${requestId}`,
   });
 
   // Notify rejector (confirmation of their action)
@@ -368,7 +368,7 @@ export async function notifyTimeOffRejected(
     message: reason
       ? `You rejected ${requesterName}'s time off request for ${dateRange}: ${reason}`
       : `You rejected ${requesterName}'s time off request for ${dateRange}`,
-    link: `/time-off?request=${requestId}`,
+    link: `/my/time-off?request=${requestId}`,
   });
 
   // Send both notifications in parallel
@@ -393,7 +393,7 @@ export async function notifyTimeOffCancelled(
       type: "TIME_OFF_CANCELLED",
       title: `${requesterName} cancelled time off`,
       message: `Time off for ${dateRange} has been cancelled`,
-      link: `/time-off`,
+      link: `/my/time-off`,
     },
     notifyUserIds
   );
@@ -574,5 +574,81 @@ export async function notifyGroupRemoved(
     type: "GROUP_REMOVED",
     title: `Removed from ${groupName}`,
     message: `You have been removed from ${groupName} by ${removerName}`,
+  });
+}
+
+// ============================================================================
+// PERMISSION NOTIFICATIONS
+// ============================================================================
+
+/**
+ * Notify user when a permission is granted to them
+ */
+export async function notifyPermissionGranted(
+  userId: string,
+  granterId: string,
+  granterName: string,
+  permission: string,
+  venueName?: string
+) {
+  const venueText = venueName ? ` at ${venueName}` : "";
+  return createNotification({
+    userId,
+    type: "PERMISSION_GRANTED",
+    title: "Permission granted",
+    message: `You have been granted the "${permission}" permission${venueText} by ${granterName}`,
+    link: "/my/settings/permissions",
+  });
+}
+
+/**
+ * Notify user when a permission is revoked from them
+ */
+export async function notifyPermissionRevoked(
+  userId: string,
+  revokerId: string,
+  revokerName: string,
+  permission: string,
+  venueName?: string
+) {
+  const venueText = venueName ? ` at ${venueName}` : "";
+  return createNotification({
+    userId,
+    type: "PERMISSION_REVOKED",
+    title: "Permission revoked",
+    message: `Your "${permission}" permission${venueText} has been revoked by ${revokerName}`,
+    link: "/my/settings/permissions",
+  });
+}
+
+/**
+ * Notify user when multiple permissions are changed at once
+ */
+export async function notifyPermissionsBulkChanged(
+  userId: string,
+  changerId: string,
+  changerName: string,
+  grantedCount: number,
+  revokedCount: number,
+  venueName?: string
+) {
+  const venueText = venueName ? ` at ${venueName}` : "";
+  const parts: string[] = [];
+  
+  if (grantedCount > 0) {
+    parts.push(`${grantedCount} granted`);
+  }
+  if (revokedCount > 0) {
+    parts.push(`${revokedCount} revoked`);
+  }
+  
+  const changeText = parts.join(", ");
+  
+  return createNotification({
+    userId,
+    type: grantedCount > 0 ? "PERMISSION_GRANTED" : "PERMISSION_REVOKED",
+    title: "Permissions updated",
+    message: `Your permissions${venueText} have been updated by ${changerName}: ${changeText}`,
+    link: "/my/settings/permissions",
   });
 }

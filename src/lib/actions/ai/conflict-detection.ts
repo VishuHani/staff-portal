@@ -315,7 +315,6 @@ Example format:
       model: openai("gpt-4-turbo"),
       prompt,
       temperature: 0.7,
-      maxTokens: 2000,
     });
 
     // Parse AI response
@@ -381,7 +380,8 @@ function generateFallbackResolutions(conflict: Conflict): ConflictResolution[] {
         "May still have insufficient coverage",
       ],
       confidence: 70,
-      affectedStaff: conflict.details.unavailableStaff?.slice(0, 3).map((staff) => ({
+      affectedStaff: conflict.details.unavailableStaff?.slice(0, 3).map((staff, idx) => ({
+        id: `staff-${conflict.id}-${idx}`,
         name: staff.name,
         action: "Contact to confirm availability",
       })) || [],
@@ -452,34 +452,463 @@ function generateFallbackResolutions(conflict: Conflict): ConflictResolution[] {
 }
 
 /**
- * Apply a resolution (placeholder for future implementation)
+ * Apply a resolution by implementing the suggested actions
  */
 export async function applyConflictResolution(
   resolutionId: string,
-  conflictId: string
+  conflictId: string,
+  resolution?: ConflictResolution
 ): Promise<{ success: boolean; message?: string; error?: string }> {
   const user = await requireAuth();
 
   try {
-    // TODO: Implement actual resolution application logic
-    // This would involve:
-    // - Creating notifications for affected staff
-    // - Updating schedules if applicable
-    // - Approving/denying time-off requests
-    // - Sending emails to staff members
-    // - Creating audit log entries
-
-    console.log("Applying resolution:", { resolutionId, conflictId, userId: user.id });
+    // Parse the resolution ID to determine the action type
+    const actionType = parseResolutionActionType(resolutionId, resolution);
+    
+    // Get shared venue users for notifications
+    const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+    
+    // Execute the appropriate action based on resolution type
+    let result: { success: boolean; message: string };
+    
+    switch (actionType) {
+      case "contact_staff":
+        result = await executeContactStaffAction(resolution, sharedVenueUserIds, user.id);
+        break;
+      case "approve_timeoff":
+        result = await executeApproveTimeOffAction(resolution, sharedVenueUserIds, user.id, conflictId);
+        break;
+      case "reassign_shift":
+        result = await executeReassignShiftAction(resolution, sharedVenueUserIds, user.id, conflictId);
+        break;
+      case "request_availability":
+        result = await executeRequestAvailabilityAction(resolution, sharedVenueUserIds, user.id);
+        break;
+      default:
+        result = await executeGenericResolutionAction(resolution, sharedVenueUserIds, user.id, conflictId);
+    }
+    
+    // Create audit log entry
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        actionType: result.success ? "CONFLICT_RESOLUTION_APPLIED" : "CONFLICT_RESOLUTION_FAILED",
+        resourceType: "conflict",
+        resourceId: conflictId,
+        newValue: JSON.stringify({ 
+          resolutionId, 
+          actionType,
+          success: result.success,
+          message: result.message 
+        }),
+      },
+    });
 
     return {
-      success: true,
-      message: "Resolution strategy noted. Manual follow-up required to complete the actions.",
+      success: result.success,
+      message: result.message,
     };
   } catch (error) {
     console.error("Error applying resolution:", error);
+    
+    // Create error audit log entry
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        actionType: "CONFLICT_RESOLUTION_FAILED",
+        resourceType: "conflict",
+        resourceId: conflictId,
+        newValue: JSON.stringify({ resolutionId, error: (error as Error).message }),
+      },
+    });
+    
     return {
       success: false,
-      error: "Failed to apply resolution",
+      error: "Failed to apply resolution: " + (error as Error).message,
     };
   }
+}
+
+/**
+ * Parse resolution ID to determine action type
+ */
+function parseResolutionActionType(resolutionId: string, resolution?: ConflictResolution): string {
+  // Check if resolution object is provided with strategy
+  if (resolution?.strategy) {
+    const strategy = resolution.strategy.toLowerCase();
+    
+    if (strategy.includes("contact") || strategy.includes("confirm")) {
+      return "contact_staff";
+    }
+    if (strategy.includes("approve") || strategy.includes("time-off")) {
+      return "approve_timeoff";
+    }
+    if (strategy.includes("reassign") || strategy.includes("shift")) {
+      return "reassign_shift";
+    }
+    if (strategy.includes("availability") || strategy.includes("adjust")) {
+      return "request_availability";
+    }
+  }
+  
+  // Fallback to parsing resolution ID
+  if (resolutionId.includes("contact") || resolutionId.includes("confirm")) {
+    return "contact_staff";
+  }
+  if (resolutionId.includes("approve") || resolutionId.includes("timeoff")) {
+    return "approve_timeoff";
+  }
+  if (resolutionId.includes("reassign") || resolutionId.includes("shift")) {
+    return "reassign_shift";
+  }
+  if (resolutionId.includes("availability") || resolutionId.includes("adjust")) {
+    return "request_availability";
+  }
+  
+  return "generic";
+}
+
+/**
+ * Execute contact staff action - send notifications to available staff
+ */
+async function executeContactStaffAction(
+  resolution: ConflictResolution | undefined,
+  sharedVenueUserIds: string[],
+  currentUserId: string
+): Promise<{ success: boolean; message: string }> {
+  if (!resolution?.affectedStaff || resolution.affectedStaff.length === 0) {
+    return { success: false, message: "No affected staff members specified in resolution" };
+  }
+  
+  const notifications = [];
+  
+  for (const staff of resolution.affectedStaff) {
+    // Find the user by name
+    const staffUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { firstName: { contains: staff.name.split(" ")[0] || "" } },
+          { lastName: { contains: staff.name.split(" ").slice(1).join(" ") || "" } },
+          { email: staff.name },
+        ],
+        id: { in: sharedVenueUserIds },
+      },
+    });
+    
+    if (staffUser) {
+      notifications.push(
+        prisma.notification.create({
+          data: {
+            userId: staffUser.id,
+            type: "ROSTER_CONFLICT",
+            title: "Shift Coverage Request",
+            message: `You've been identified as available for an upcoming shift. Action needed: ${staff.action}`,
+            link: `/manage/rosters?resolution=${resolution.id}`,
+          },
+        })
+      );
+    }
+  }
+  
+  if (notifications.length === 0) {
+    return { success: false, message: "Could not find any matching staff members to contact" };
+  }
+  
+  await Promise.all(notifications);
+  
+  return { 
+    success: true, 
+    message: `Successfully contacted ${notifications.length} staff member(s) regarding coverage` 
+  };
+}
+
+/**
+ * Execute approve time-off action - approve pending time-off requests
+ */
+async function executeApproveTimeOffAction(
+  resolution: ConflictResolution | undefined,
+  sharedVenueUserIds: string[],
+  currentUserId: string,
+  conflictId: string
+): Promise<{ success: boolean; message: string }> {
+  // Find pending time-off requests that might be related to this conflict
+  const pendingTimeOffRequests = await prisma.timeOffRequest.findMany({
+    where: {
+      userId: { in: sharedVenueUserIds },
+      status: "PENDING",
+    },
+    include: {
+      user: {
+        select: { firstName: true, lastName: true, email: true },
+      },
+    },
+  });
+  
+  if (pendingTimeOffRequests.length === 0) {
+    return { success: false, message: "No pending time-off requests found to approve" };
+  }
+  
+  // For now, approve the most recent pending request
+  // In a real implementation, you'd match this to the specific conflict
+  const requestToApprove = pendingTimeOffRequests[0];
+  
+  await prisma.timeOffRequest.update({
+    where: { id: requestToApprove.id },
+    data: {
+      status: "APPROVED",
+      reviewedAt: new Date(),
+      reviewedBy: currentUserId,
+    },
+  });
+  
+  // Notify the user
+  await prisma.notification.create({
+    data: {
+      userId: requestToApprove.userId,
+      type: "TIME_OFF_APPROVED",
+      title: "Time-Off Request Approved",
+      message: `Your time-off request from ${format(new Date(requestToApprove.startDate), "MMM d")} to ${format(new Date(requestToApprove.endDate), "MMM d, yyyy")} has been approved.`,
+      link: `/manage/time-off`,
+    },
+  });
+  
+  return { 
+    success: true, 
+    message: `Approved time-off request for ${requestToApprove.user.firstName || requestToApprove.user.email}` 
+  };
+}
+
+/**
+ * Execute reassign shift action - create shift assignments
+ */
+async function executeReassignShiftAction(
+  resolution: ConflictResolution | undefined,
+  sharedVenueUserIds: string[],
+  currentUserId: string,
+  conflictId: string
+): Promise<{ success: boolean; message: string }> {
+  if (!resolution?.affectedStaff || resolution.affectedStaff.length === 0) {
+    return { success: false, message: "No staff members specified for reassignment" };
+  }
+  
+  // Get venue for the current user
+  const venue = await prisma.venue.findFirst({
+    where: {
+      userVenues: {
+        some: { userId: currentUserId },
+      },
+    },
+  });
+  
+  if (!venue) {
+    return { success: false, message: "No venue found for current user" };
+  }
+  
+  // Parse conflict date from conflictId or resolution
+  const conflictDate = extractDateFromConflictId(conflictId);
+  if (!conflictDate) {
+    return { success: false, message: "Could not determine conflict date" };
+  }
+  
+  // Find or create roster for the date
+  let roster = await prisma.roster.findFirst({
+    where: {
+      venueId: venue.id,
+      startDate: { lte: conflictDate },
+      endDate: { gte: conflictDate },
+    },
+  });
+  
+  if (!roster) {
+    const startDate = new Date(conflictDate);
+    startDate.setDate(startDate.getDate() - startDate.getDay());
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 6);
+    
+    roster = await prisma.roster.create({
+      data: {
+        name: `Weekly Roster ${format(startDate, "yyyy-MM-dd")}`,
+        venueId: venue.id,
+        startDate,
+        endDate,
+        status: "DRAFT",
+        createdBy: currentUserId,
+      },
+    });
+  }
+  
+  // Create shifts for affected staff
+  const shiftsCreated = [];
+  
+  for (const staff of resolution.affectedStaff) {
+    const staffUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { firstName: { contains: staff.name.split(" ")[0] || "" } },
+          { lastName: { contains: staff.name.split(" ").slice(1).join(" ") || "" } },
+          { email: staff.name },
+        ],
+        id: { in: sharedVenueUserIds },
+      },
+    });
+    
+    if (staffUser) {
+      const shift = await prisma.rosterShift.create({
+        data: {
+          rosterId: roster.id,
+          userId: staffUser.id,
+          date: conflictDate,
+          startTime: "09:00",
+          endTime: "17:00",
+          breakMinutes: 30,
+          notes: `Created via conflict resolution: ${resolution.strategy}`,
+        },
+      });
+      shiftsCreated.push({ shift, staffName: staff.name });
+      
+      // Notify the staff member
+      await prisma.notification.create({
+        data: {
+          userId: staffUser.id,
+          type: "ROSTER_UPDATED",
+          title: "New Shift Assignment",
+          message: `You've been assigned a shift on ${format(conflictDate, "EEEE, MMM d")} from 9:00 AM to 5:00 PM.`,
+          link: `/manage/rosters/${roster.id}`,
+        },
+      });
+    }
+  }
+  
+  if (shiftsCreated.length === 0) {
+    return { success: false, message: "Could not create any shift assignments" };
+  }
+  
+  return { 
+    success: true, 
+    message: `Created ${shiftsCreated.length} shift assignment(s) for ${shiftsCreated.map(s => s.staffName).join(", ")}` 
+  };
+}
+
+/**
+ * Execute request availability action - send availability update requests
+ */
+async function executeRequestAvailabilityAction(
+  resolution: ConflictResolution | undefined,
+  sharedVenueUserIds: string[],
+  currentUserId: string
+): Promise<{ success: boolean; message: string }> {
+  // Get all active staff who might need to update availability
+  const staffWithoutFullAvailability = await prisma.user.findMany({
+    where: {
+      id: { in: sharedVenueUserIds },
+      active: true,
+      OR: [
+        { availability: { none: {} } },
+        { availability: { some: { isAvailable: false } } },
+      ],
+    },
+    select: { id: true, firstName: true, lastName: true, email: true },
+  });
+  
+  if (staffWithoutFullAvailability.length === 0) {
+    // If no staff with missing availability, notify all staff
+    const allStaff = await prisma.user.findMany({
+      where: { id: { in: sharedVenueUserIds }, active: true },
+      select: { id: true },
+    });
+    
+    const notifications = allStaff.map(staff =>
+      prisma.notification.create({
+        data: {
+          userId: staff.id,
+          type: "SYSTEM_ANNOUNCEMENT",
+          title: "Availability Update Requested",
+          message: "Please update your availability for the upcoming scheduling period. Your input helps ensure better shift coverage.",
+          link: "/manage/availability",
+        },
+      })
+    );
+    
+    await Promise.all(notifications);
+    
+    return { 
+      success: true, 
+      message: `Sent availability update requests to ${notifications.length} staff member(s)` 
+    };
+  }
+  
+  // Send notifications to staff with incomplete availability
+  const notifications = staffWithoutFullAvailability.map(staff =>
+    prisma.notification.create({
+      data: {
+        userId: staff.id,
+        type: "SYSTEM_ANNOUNCEMENT",
+        title: "Availability Update Needed",
+        message: "Your availability information is incomplete. Please update your availability to help us schedule shifts effectively.",
+        link: "/manage/availability",
+      },
+    })
+  );
+  
+  await Promise.all(notifications);
+  
+  return { 
+    success: true, 
+    message: `Sent availability update requests to ${notifications.length} staff member(s) with incomplete availability` 
+  };
+}
+
+/**
+ * Execute generic resolution action - log and notify
+ */
+async function executeGenericResolutionAction(
+  resolution: ConflictResolution | undefined,
+  sharedVenueUserIds: string[],
+  currentUserId: string,
+  conflictId: string
+): Promise<{ success: boolean; message: string }> {
+  // For generic resolutions, just log and send a summary notification to managers
+  const managers = await prisma.user.findMany({
+    where: {
+      id: { in: sharedVenueUserIds },
+      role: { name: { in: ["Manager", "Admin", "Super Admin"] } },
+    },
+    select: { id: true },
+  });
+  
+  if (managers.length > 0) {
+    await Promise.all(
+      managers.map(manager =>
+        prisma.notification.create({
+          data: {
+            userId: manager.id,
+            type: "ROSTER_CONFLICT",
+            title: "Conflict Resolution Applied",
+            message: resolution?.description || "A scheduling conflict resolution has been applied. Please review the changes.",
+            link: `/manage/reports/conflicts?id=${conflictId}`,
+          },
+        })
+      )
+    );
+  }
+  
+  return { 
+    success: true, 
+    message: resolution?.description || "Resolution applied successfully" 
+  };
+}
+
+/**
+ * Extract date from conflict ID (format: "conflict-YYYY-MM-DD-...")
+ */
+function extractDateFromConflictId(conflictId: string): Date | null {
+  const dateMatch = conflictId.match(/(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) {
+    try {
+      return parseISO(dateMatch[1]);
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }

@@ -1,13 +1,14 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAdmin, requireAuth } from "@/lib/rbac/access";
 import { auditLogFilterSchema, type AuditLogFilterInput } from "@/lib/schemas/admin/audit-logs";
 import {
   handleAuditLogFailure,
   retryAuditLogCreation,
   type AuditLogData,
 } from "@/lib/utils/audit-alert";
+import { getClientIpAddress } from "@/lib/utils/audit-helpers";
 
 /**
  * Get audit logs with filtering and pagination
@@ -265,8 +266,12 @@ export async function getAuditLogFilterOptions() {
  * Create an audit log entry (utility function for other actions to use)
  * Internal use only - not exported as server action
  *
- * ENHANCED: Now includes retry mechanism, backup storage, and admin alerting
- * to ensure compliance with audit logging requirements (SOC 2, GDPR, HIPAA)
+ * ENHANCED: Now includes:
+ * - Automatic IP address capture if not provided
+ * - Retry mechanism with exponential backoff
+ * - Backup storage to file system
+ * - Admin alerting on failure
+ * - Compliance with SOC 2, GDPR, HIPAA
  */
 export async function createAuditLog({
   userId,
@@ -275,7 +280,7 @@ export async function createAuditLog({
   resourceId,
   oldValue,
   newValue,
-  ipAddress,
+  ipAddress: providedIpAddress,
 }: {
   userId: string;
   actionType: string;
@@ -285,6 +290,17 @@ export async function createAuditLog({
   newValue?: string;
   ipAddress?: string;
 }) {
+  // Auto-capture IP address if not provided
+  let ipAddress = providedIpAddress;
+  if (!ipAddress) {
+    try {
+      ipAddress = await getClientIpAddress();
+    } catch (error) {
+      console.error("Error capturing IP address for audit log:", error);
+      ipAddress = "unknown";
+    }
+  }
+
   const auditData: AuditLogData = {
     userId,
     actionType,

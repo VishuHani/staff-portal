@@ -384,7 +384,7 @@ export async function updateUser(data: UpdateUserInput) {
     };
   }
 
-  const { userId, email, firstName, lastName, phone, roleId, venueIds, primaryVenueId, active } = validatedFields.data;
+  const { userId, email, firstName, lastName, phone, roleId, venueIds, primaryVenueId, active, weekdayRate, saturdayRate, sundayRate } = validatedFields.data;
 
   try {
     // Get current user state before update
@@ -441,6 +441,9 @@ export async function updateUser(data: UpdateUserInput) {
         ...(phone !== undefined && { phone }),
         ...(roleId && { roleId }),
         ...(active !== undefined && { active }),
+        ...(weekdayRate !== undefined && { weekdayRate }),
+        ...(saturdayRate !== undefined && { saturdayRate }),
+        ...(sundayRate !== undefined && { sundayRate }),
       },
       include: {
         role: true,

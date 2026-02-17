@@ -2,7 +2,104 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/rbac/access";
-import { startOfDay, subDays, format, subWeeks, startOfWeek } from "date-fns";
+import { startOfDay, subDays, format, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval } from "date-fns";
+
+/**
+ * Calculate system health based on multiple metrics
+ * Returns: { score: 0-100, status: "Good" | "Fair" | "Poor", metrics: {...} }
+ */
+async function calculateSystemHealth() {
+  const today = new Date();
+  const last24Hours = subDays(today, 1);
+  const last7Days = subDays(today, 7);
+
+  try {
+    // 1. Check for failed actions in audit logs (errors)
+    const failedActions = await prisma.auditLog.count({
+      where: {
+        createdAt: { gte: last24Hours },
+        actionType: { in: ["ERROR", "FAILED", "CONFLICT_RESOLUTION_FAILED"] },
+      },
+    });
+
+    // 2. Check pending time-off requests older than 7 days (backlog)
+    const oldPendingRequests = await prisma.timeOffRequest.count({
+      where: {
+        status: "PENDING",
+        createdAt: { lte: last7Days },
+      },
+    });
+
+    // 3. Check for roster conflicts
+    const rosterConflicts = await prisma.rosterShift.count({
+      where: {
+        hasConflict: true,
+        date: { gte: today },
+      },
+    });
+
+    // 4. Check user activity (active engagement)
+    const activeUsersLast24h = await prisma.auditLog.groupBy({
+      by: ["userId"],
+      where: {
+        createdAt: { gte: last24Hours },
+      },
+    });
+
+    // 5. Check for unpublished rosters in the past (missed schedules)
+    const missedRosters = await prisma.roster.count({
+      where: {
+        status: "DRAFT",
+        endDate: { lt: today },
+      },
+    });
+
+    // Calculate health score (0-100)
+    let healthScore = 100;
+
+    // Deduct for failed actions (up to 20 points)
+    healthScore -= Math.min(20, failedActions * 5);
+
+    // Deduct for old pending requests (up to 15 points)
+    healthScore -= Math.min(15, oldPendingRequests * 3);
+
+    // Deduct for roster conflicts (up to 25 points)
+    healthScore -= Math.min(25, rosterConflicts * 5);
+
+    // Deduct for missed rosters (up to 20 points)
+    healthScore -= Math.min(20, missedRosters * 10);
+
+    // Bonus for active users (up to 10 points back if engagement is high)
+    const totalUsers = await prisma.user.count({ where: { active: true } });
+    const engagementRate = totalUsers > 0 ? (activeUsersLast24h.length / totalUsers) * 100 : 0;
+    if (engagementRate > 50) {
+      healthScore += 10;
+    } else if (engagementRate > 25) {
+      healthScore += 5;
+    }
+
+    // Clamp score between 0 and 100
+    healthScore = Math.max(0, Math.min(100, healthScore));
+
+    const status = healthScore >= 80 ? "Good" : healthScore >= 50 ? "Fair" : "Poor";
+
+    return {
+      score: healthScore,
+      status,
+      metrics: {
+        failedActions,
+        oldPendingRequests,
+        rosterConflicts,
+        missedRosters,
+        activeUsersLast24h: activeUsersLast24h.length,
+        engagementRate: Math.round(engagementRate),
+      },
+    };
+  } catch (error) {
+    console.error("Error calculating system health:", error);
+    return { score: 50, status: "Fair", metrics: {} };
+  }
+}
 
 /**
  * Get admin global stats
@@ -17,6 +114,11 @@ export async function getAdminGlobalStats() {
     // Total active staff
     const totalActiveStaff = await prisma.user.count({
       where: { active: true },
+    });
+
+    // Total inactive staff
+    const totalInactiveStaff = await prisma.user.count({
+      where: { active: false },
     });
 
     // Calculate multi-venue average coverage
@@ -53,22 +155,22 @@ export async function getAdminGlobalStats() {
 
     const avgCoverage = venues.length > 0 ? Math.round(totalCoverage / venues.length) : 0;
 
-    // System health (based on recent activity)
-    // Simplified: Good health if we have recent audit log activity
-    const recentActivity = await prisma.auditLog.count({
-      where: {
-        createdAt: { gte: last30Days },
-      },
-    });
-
-    const systemHealth = recentActivity > 100 ? "Good" : recentActivity > 20 ? "Fair" : "Poor";
+    // System health - now using comprehensive calculation
+    const healthData = await calculateSystemHealth();
+    const systemHealth = healthData.status;
 
     // Pending actions
     const pendingTimeOff = await prisma.timeOffRequest.count({
       where: { status: "PENDING" },
     });
 
-    const conflictsCount = 0; // Placeholder - would need conflicts table
+    // Real conflicts count from RosterShift
+    const conflictsCount = await prisma.rosterShift.count({
+      where: {
+        hasConflict: true,
+        date: { gte: today },
+      },
+    });
 
     const pendingActions = pendingTimeOff + conflictsCount;
 
@@ -78,7 +180,6 @@ export async function getAdminGlobalStats() {
       by: ["userId"],
       where: {
         createdAt: { gte: todayStart },
-        actionType: "LOGIN",
       },
     });
 
@@ -86,9 +187,14 @@ export async function getAdminGlobalStats() {
       success: true,
       stats: {
         totalActiveStaff,
+        totalInactiveStaff,
         multiVenueCoverage: avgCoverage,
         systemHealth,
+        healthScore: healthData.score,
+        healthMetrics: healthData.metrics,
         pendingActions,
+        pendingTimeOff,
+        conflictsCount,
         activeUsersToday: activeUsersToday.length,
       },
     };
@@ -260,30 +366,35 @@ export async function getActionDistribution() {
 }
 
 /**
- * Get role distribution
+ * Get role distribution with active and inactive counts
  */
 export async function getRoleDistribution() {
   await requireAdmin();
 
   try {
+    // Get all roles with their users
     const roles = await prisma.role.findMany({
       select: {
         name: true,
-        _count: {
+        users: {
           select: {
-            users: {
-              where: { active: true },
-            },
+            active: true,
           },
         },
       },
     });
 
-    const distribution = roles.map((role) => ({
-      name: role.name,
-      active: role._count.users,
-      inactive: 0, // Simplified - could add inactive count
-    }));
+    const distribution = roles.map((role) => {
+      const activeCount = role.users.filter((u) => u.active).length;
+      const inactiveCount = role.users.filter((u) => !u.active).length;
+
+      return {
+        name: role.name,
+        active: activeCount,
+        inactive: inactiveCount,
+        total: role.users.length,
+      };
+    });
 
     return { success: true, distribution };
   } catch (error) {

@@ -34,8 +34,7 @@ export const systemAnnouncementSchema = z.object({
   link: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   targetRoles: z
     .array(z.string())
-    .min(1, "Select at least one role")
-    .default(["all"]),
+    .min(1, "Select at least one role"),
 });
 
 export type SystemAnnouncementInput = z.infer<

@@ -65,6 +65,11 @@ const NOTIFICATION_TYPES = [
   "ROLE_CHANGED",
   "SYSTEM_ANNOUNCEMENT",
   "GROUP_REMOVED",
+  "ROSTER_PUBLISHED",
+  "ROSTER_UPDATED",
+  "ROSTER_SHIFT_REMINDER",
+  "ROSTER_CONFLICT",
+  "ROSTER_PENDING_REVIEW",
 ] as const;
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -84,6 +89,11 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   ROLE_CHANGED: "Role Changed",
   SYSTEM_ANNOUNCEMENT: "System Announcement",
   GROUP_REMOVED: "Group Removed",
+  ROSTER_PUBLISHED: "Roster Published",
+  ROSTER_UPDATED: "Roster Updated",
+  ROSTER_SHIFT_REMINDER: "Shift Reminder",
+  ROSTER_CONFLICT: "Roster Conflict",
+  ROSTER_PENDING_REVIEW: "Roster Pending Review",
 };
 
 const TYPE_COLORS: Record<NotificationType, string> = {
@@ -103,6 +113,11 @@ const TYPE_COLORS: Record<NotificationType, string> = {
   ROLE_CHANGED: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300",
   SYSTEM_ANNOUNCEMENT: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300",
   GROUP_REMOVED: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300",
+  ROSTER_PUBLISHED: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-300",
+  ROSTER_UPDATED: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
+  ROSTER_SHIFT_REMINDER: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300",
+  ROSTER_CONFLICT: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
+  ROSTER_PENDING_REVIEW: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
 };
 
 export function NotificationHistoryTable({

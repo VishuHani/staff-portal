@@ -53,6 +53,28 @@ export async function login(formData: LoginInput) {
   });
 
   if (error) {
+    // Log failed login attempt (wrong password, invalid email, etc.)
+    try {
+      // Try to find user for logging purposes
+      const userAttempt = await prisma.user.findUnique({
+        where: { email: validatedEmail },
+      });
+      
+      await createAuditLog({
+        userId: userAttempt?.id || "unknown",
+        actionType: "LOGIN_FAILED",
+        resourceType: "Auth",
+        resourceId: userAttempt?.id,
+        newValue: JSON.stringify({ 
+          email: validatedEmail, 
+          reason: error.message,
+          attemptIp: ip 
+        }),
+        ipAddress: ip,
+      });
+    } catch (auditError) {
+      console.error("Error creating audit log:", auditError);
+    }
     return { error: error.message };
   }
 

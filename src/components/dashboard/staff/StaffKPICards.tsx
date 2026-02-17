@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { Clock, CalendarOff, AlertCircle, Mail } from "lucide-react";
+import { Clock, CalendarOff, AlertCircle, Mail, CalendarDays } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface StaffKPIs {
@@ -9,6 +9,7 @@ interface StaffKPIs {
   upcomingTimeOff: number;
   pendingRequests: number;
   unreadMessages: number;
+  shiftsThisWeek?: number;
 }
 
 interface StaffKPICardsProps {
@@ -32,12 +33,13 @@ export function StaffKPICards({ kpis }: StaffKPICardsProps) {
 
   const cards = [
     {
-      title: "Hours This Week",
+      title: "Scheduled Hours",
       value: kpis.hoursThisWeek,
-      unit: "hrs",
+      unit: "hrs this week",
       icon: Clock,
       color: "text-blue-600",
       bgColor: "bg-blue-50",
+      subtitle: kpis.shiftsThisWeek ? `${kpis.shiftsThisWeek} shifts` : undefined,
     },
     {
       title: "Upcoming Time Off",
@@ -83,6 +85,11 @@ export function StaffKPICards({ kpis }: StaffKPICardsProps) {
                     <span className="text-3xl font-bold">{card.value}</span>
                     <span className="text-sm text-muted-foreground">{card.unit}</span>
                   </div>
+                  {card.subtitle && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {card.subtitle}
+                    </p>
+                  )}
                 </div>
                 <div className={`rounded-lg p-2 ${card.bgColor}`}>
                   <Icon className={`h-5 w-5 ${card.color}`} />

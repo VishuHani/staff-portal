@@ -78,7 +78,7 @@ export function AuditLogFeed({ logs }: AuditLogFeedProps) {
                 <SelectItem value="changes">Changes</SelectItem>
               </SelectContent>
             </Select>
-            <Link href="/admin/audit">
+            <Link href="/system/audit">
               <Button variant="outline" size="sm">
                 View All
               </Button>

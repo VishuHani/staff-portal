@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -59,6 +60,7 @@ interface RoleDialogProps {
 }
 
 export function RoleDialog({ open, onOpenChange, role, mode }: RoleDialogProps) {
+  const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<z.infer<typeof createRoleSchema>>({
@@ -113,7 +115,7 @@ export function RoleDialog({ open, onOpenChange, role, mode }: RoleDialogProps) 
         );
         onOpenChange(false);
         form.reset();
-        window.location.reload();
+        router.refresh();
       }
     } catch (error) {
       toast.error("An unexpected error occurred");

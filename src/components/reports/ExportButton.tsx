@@ -37,31 +37,28 @@ export function ExportButton({
         data: reportData,
       });
 
-      if (result.success && result.data && result.filename) {
+      if ('error' in result && result.error) {
+        toast.error(result.error);
+      } else if ('success' in result && result.success && result.data && result.filename) {
         // Convert data to downloadable format
         let blob: Blob;
-        let mimeType: string;
 
         switch (format) {
           case "csv":
             blob = new Blob([result.data], { type: "text/csv;charset=utf-8;" });
-            mimeType = "text/csv";
             break;
           case "excel":
             const excelBuffer = Buffer.from(result.data, "base64");
             blob = new Blob([excelBuffer], {
               type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             });
-            mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
             break;
           case "pdf":
             const pdfBuffer = Buffer.from(result.data, "base64");
             blob = new Blob([pdfBuffer], { type: "application/pdf" });
-            mimeType = "application/pdf";
             break;
           case "ical":
             blob = new Blob([result.data], { type: "text/calendar;charset=utf-8" });
-            mimeType = "text/calendar";
             break;
           default:
             throw new Error(`Unsupported format: ${format}`);
@@ -79,7 +76,7 @@ export function ExportButton({
 
         toast.success(`Report exported as ${format.toUpperCase()}`);
       } else {
-        toast.error(result.error || "Failed to export report");
+        toast.error("Failed to export report");
       }
     } catch (error) {
       console.error("Export error:", error);
@@ -114,8 +111,11 @@ export function ExportButton({
         return "Export as PDF";
       case "ical":
         return "Export as iCal";
-      default:
-        return `Export as ${format.toUpperCase()}`;
+      default: {
+        // Exhaustiveness check - this should never be reached
+        const _exhaustiveCheck: never = format;
+        return `Export as ${String(_exhaustiveCheck).toUpperCase()}`;
+      }
     }
   };
 

@@ -406,6 +406,86 @@ export function getEmailTemplate(
         ),
       };
 
+    case "ROSTER_PUBLISHED":
+      return {
+        subject: `📅 New roster published: ${safeTitle}`,
+        htmlContent: createTemplate(
+          `
+            <h2>Your New Schedule is Ready!</h2>
+            <p>${safeMessage}</p>
+            <div class="highlight">
+              <p style="margin: 0;"><strong>📅 Schedule Alert:</strong> A new roster has been published with your shifts. Please review your schedule and note any important dates.</p>
+            </div>
+          `,
+          "View My Shifts",
+          "#10b981"
+        ),
+      };
+
+    case "ROSTER_UPDATED":
+      return {
+        subject: `🔄 Roster updated: ${safeTitle}`,
+        htmlContent: createTemplate(
+          `
+            <h2>Your Schedule Has Been Updated</h2>
+            <p>${safeMessage}</p>
+            <div class="highlight">
+              <p style="margin: 0;"><strong>⚠️ Schedule Change:</strong> The roster has been updated with changes that may affect your shifts. Please review the details carefully.</p>
+            </div>
+          `,
+          "View Changes",
+          "#f59e0b"
+        ),
+      };
+
+    case "ROSTER_SHIFT_REMINDER":
+      return {
+        subject: `⏰ Shift reminder: ${safeTitle}`,
+        htmlContent: createTemplate(
+          `
+            <h2>Upcoming Shift Reminder</h2>
+            <p>${safeMessage}</p>
+            <div class="highlight">
+              <p style="margin: 0;"><strong>⏰ Don't forget:</strong> You have a shift coming up. Make sure you're prepared and arrive on time!</p>
+            </div>
+          `,
+          "View Shift Details",
+          "#3b82f6"
+        ),
+      };
+
+    case "ROSTER_CONFLICT":
+      return {
+        subject: `⚠️ Schedule conflict detected: ${safeTitle}`,
+        htmlContent: createTemplate(
+          `
+            <h2>Schedule Conflict Detected</h2>
+            <p>${safeMessage}</p>
+            <div class="highlight">
+              <p style="margin: 0;"><strong>⚠️ Action Required:</strong> A conflict has been detected with your schedule. Please contact your manager to resolve this issue.</p>
+            </div>
+          `,
+          "View Conflict",
+          "#ef4444"
+        ),
+      };
+
+    case "ROSTER_PENDING_REVIEW":
+      return {
+        subject: `📋 Roster pending review: ${safeTitle}`,
+        htmlContent: createTemplate(
+          `
+            <h2>Roster Pending Review</h2>
+            <p>${safeMessage}</p>
+            <div class="highlight">
+              <p style="margin: 0;"><strong>📋 Action Required:</strong> A roster has been submitted for review and requires your attention.</p>
+            </div>
+          `,
+          "Review Roster",
+          "#8b5cf6"
+        ),
+      };
+
     // Default fallback template
     default:
       return {

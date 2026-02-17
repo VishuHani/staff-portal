@@ -1,0 +1,85 @@
+import { requireAuth } from "@/lib/rbac/access";
+import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { getMyAvailability } from "@/lib/actions/availability";
+import { AvailabilityForm } from "@/components/availability/availability-form";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Calendar } from "lucide-react";
+
+export const metadata = {
+  title: "My Availability | Staff Portal",
+  description: "Set your weekly availability schedule",
+};
+
+export default async function MyAvailabilityPage() {
+  const user = await requireAuth();
+
+  const result = await getMyAvailability();
+
+  if ("error" in result) {
+    return (
+      <DashboardLayout user={user}>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Error</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">{result.error}</p>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  return (
+    <DashboardLayout user={user}>
+      <div className="space-y-6">
+        {/* Header */}
+        <div>
+          <div className="flex items-center gap-2">
+            <Calendar className="h-6 w-6 text-primary" />
+            <h2 className="text-3xl font-bold tracking-tight">
+              My Availability
+            </h2>
+          </div>
+          <p className="mt-2 text-muted-foreground">
+            Set your weekly availability schedule
+          </p>
+        </div>
+
+        {/* Instructions */}
+        <Card>
+          <CardHeader>
+            <CardTitle>How it works</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              • Toggle each day on or off to indicate your availability
+            </p>
+            <p className="text-sm text-muted-foreground">
+              • Check "All Day" for full availability (00:00 - 23:59)
+            </p>
+            <p className="text-sm text-muted-foreground">
+              • Or set specific start and end times for each day
+            </p>
+            <p className="text-sm text-muted-foreground">
+              • Click "Save Availability" to update your schedule
+            </p>
+            <p className="text-sm text-muted-foreground">
+              • Your manager will use this information for scheduling
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Availability Form */}
+        <AvailabilityForm initialAvailability={result.availability} />
+      </div>
+    </DashboardLayout>
+  );
+}

@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
 import { getAccessibleChannelIds } from "@/lib/utils/venue";
+import { createAuditLog } from "@/lib/actions/admin/audit-logs";
+import { getAuditContext } from "@/lib/utils/audit-helpers";
 import {
   createChannelSchema,
   updateChannelSchema,
@@ -216,6 +218,24 @@ export async function createChannel(data: CreateChannelInput) {
       });
     }
 
+    // Audit log for channel creation
+    const auditContext = await getAuditContext();
+    await createAuditLog({
+      userId: user.id,
+      actionType: "CHANNEL_CREATED",
+      resourceType: "Channel",
+      resourceId: channel.id,
+      newValue: JSON.stringify({
+        name: channel.name,
+        description: channel.description,
+        type: channel.type,
+        icon: channel.icon,
+        color: channel.color,
+        venueIds: venueIds || [],
+      }),
+      ipAddress: auditContext.ipAddress,
+    });
+
     revalidatePath("/posts");
     revalidatePath("/admin/channels");
 
@@ -305,6 +325,27 @@ export async function updateChannel(data: UpdateChannelInput) {
       });
     }
 
+    // Audit log for channel update
+    const auditContext = await getAuditContext();
+    await createAuditLog({
+      userId: user.id,
+      actionType: "CHANNEL_UPDATED",
+      resourceType: "Channel",
+      resourceId: id,
+      oldValue: JSON.stringify({
+        name: existing.name,
+        description: existing.description,
+        type: existing.type,
+        icon: existing.icon,
+        color: existing.color,
+      }),
+      newValue: JSON.stringify({
+        ...updateData,
+        venueIds: venueIds || [],
+      }),
+      ipAddress: auditContext.ipAddress,
+    });
+
     revalidatePath("/posts");
     revalidatePath("/admin/channels");
 
@@ -336,12 +377,39 @@ export async function archiveChannel(data: ArchiveChannelInput) {
   const { id, archived } = validatedFields.data;
 
   try {
+    const existingChannel = await prisma.channel.findUnique({
+      where: { id },
+    });
+
+    if (!existingChannel) {
+      return { error: "Channel not found" };
+    }
+
     const channel = await prisma.channel.update({
       where: { id },
       data: {
         archived,
         archivedAt: archived ? new Date() : null,
       },
+    });
+
+    // Audit log for channel archive/restore
+    const auditContext = await getAuditContext();
+    await createAuditLog({
+      userId: user.id,
+      actionType: archived ? "CHANNEL_ARCHIVED" : "CHANNEL_RESTORED",
+      resourceType: "Channel",
+      resourceId: id,
+      oldValue: JSON.stringify({
+        name: existingChannel.name,
+        archived: existingChannel.archived,
+      }),
+      newValue: JSON.stringify({
+        name: channel.name,
+        archived: channel.archived,
+        archivedAt: channel.archivedAt,
+      }),
+      ipAddress: auditContext.ipAddress,
     });
 
     revalidatePath("/posts");
@@ -399,6 +467,21 @@ export async function deleteChannel(data: DeleteChannelInput) {
 
     await prisma.channel.delete({
       where: { id },
+    });
+
+    // Audit log for channel deletion
+    const auditContext = await getAuditContext();
+    await createAuditLog({
+      userId: user.id,
+      actionType: "CHANNEL_DELETED",
+      resourceType: "Channel",
+      resourceId: id,
+      oldValue: JSON.stringify({
+        name: channel.name,
+        description: channel.description,
+        type: channel.type,
+      }),
+      ipAddress: auditContext.ipAddress,
     });
 
     revalidatePath("/posts");

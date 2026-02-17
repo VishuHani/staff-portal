@@ -20,6 +20,7 @@ import {
   Megaphone,
   BarChart3,
   Hash,
+  CalendarDays,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -41,20 +42,26 @@ interface NavItem {
 export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProps) {
   const pathname = usePathname();
 
-  const navItems: NavItem[] = [
+  // Personal navigation items (/my/*)
+  const personalItems: NavItem[] = [
     {
       title: "Dashboard",
       href: "/dashboard",
       icon: LayoutDashboard,
     },
     {
-      title: "Availability",
-      href: "/availability",
+      title: "My Shifts",
+      href: "/my/rosters",
+      icon: CalendarDays,
+    },
+    {
+      title: "My Availability",
+      href: "/my/availability",
       icon: Calendar,
     },
     {
-      title: "Time Off",
-      href: "/time-off",
+      title: "My Time Off",
+      href: "/my/time-off",
       icon: Clock,
     },
     {
@@ -70,64 +77,75 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
     },
   ];
 
-  const adminItems: NavItem[] = [
+  // Team management items (/manage/*) - MANAGER + ADMIN
+  const teamItems: NavItem[] = [
     {
-      title: "Staff Availability",
-      href: "/admin/availability",
+      title: "Rosters",
+      href: userRole === "ADMIN" ? "/system/rosters" : "/manage/rosters",
+      icon: CalendarDays,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
+      title: "Team Availability",
+      href: "/manage/availability",
       icon: Calendar,
       roles: ["ADMIN", "MANAGER"],
     },
     {
-      title: "Time-Off Approval",
-      href: "/admin/time-off",
+      title: "Time-Off Approvals",
+      href: "/manage/time-off",
       icon: Clock,
       roles: ["ADMIN", "MANAGER"],
     },
     {
       title: "Reports & Analytics",
-      href: "/admin/reports",
+      href: userRole === "ADMIN" ? "/system/reports" : "/manage/reports",
       icon: BarChart3,
       roles: ["ADMIN", "MANAGER"],
     },
     {
       title: "Channels",
-      href: "/admin/channels",
+      href: "/manage/channels",
       icon: Hash,
       roles: ["ADMIN", "MANAGER"],
     },
     {
-      title: "User Management",
-      href: "/admin/users",
+      title: "Team Members",
+      href: "/manage/users",
       icon: Users,
       roles: ["ADMIN", "MANAGER"],
     },
+  ];
+
+  // System administration items (/system/*) - ADMIN only
+  const systemItems: NavItem[] = [
     {
       title: "Role Management",
-      href: "/admin/roles",
+      href: "/system/roles",
       icon: Shield,
       roles: ["ADMIN"],
     },
     {
       title: "Venue Management",
-      href: "/admin/stores",
+      href: "/system/venues",
       icon: Store,
       roles: ["ADMIN"],
     },
     {
       title: "Audit Logs",
-      href: "/admin/audit",
+      href: "/system/audit",
       icon: FileText,
       roles: ["ADMIN"],
     },
     {
-      title: "Notifications",
-      href: "/admin/notifications",
+      title: "Announcements",
+      href: "/system/announcements",
       icon: Megaphone,
       roles: ["ADMIN"],
     },
     {
-      title: "Venue Permissions",
-      href: "/admin/venue-permissions",
+      title: "Permissions",
+      href: "/system/permissions",
       icon: Lock,
       roles: ["ADMIN"],
     },
@@ -141,12 +159,12 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
     },
     {
       title: "Profile",
-      href: "/settings/profile",
+      href: "/my/profile",
       icon: User,
     },
     {
       title: "Settings",
-      href: "/settings",
+      href: "/my/settings",
       icon: Settings,
     },
   ];
@@ -154,6 +172,20 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
   const isActive = (href: string) => {
     if (href === "/dashboard") {
       return pathname === "/dashboard";
+    }
+    // Handle /manage/reports and /system/reports separately
+    if (href === "/manage/reports") {
+      return pathname.startsWith("/manage/reports");
+    }
+    if (href === "/system/reports") {
+      return pathname.startsWith("/system/reports");
+    }
+    // Handle /manage/rosters and /system/rosters separately
+    if (href === "/manage/rosters") {
+      return pathname.startsWith("/manage/rosters");
+    }
+    if (href === "/system/rosters") {
+      return pathname.startsWith("/system/rosters");
     }
     return pathname.startsWith(href);
   };
@@ -193,24 +225,37 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
 
   return (
     <div className={cn("flex h-full flex-col gap-2", className)}>
-      {/* Main Navigation */}
+      {/* Personal Navigation */}
       <div className="flex-1 space-y-1">
         <div className="px-3 py-2">
           <h2 className="mb-2 px-2 text-xs font-semibold uppercase tracking-tight text-muted-foreground">
-            Main
+            Personal
           </h2>
-          <div className="space-y-1">{navItems.map(renderNavItem)}</div>
+          <div className="space-y-1">{personalItems.map(renderNavItem)}</div>
         </div>
 
-        {/* Admin Section */}
+        {/* Team Management Section */}
         {(userRole === "ADMIN" || userRole === "MANAGER") && (
           <>
             <Separator />
             <div className="px-3 py-2">
               <h2 className="mb-2 px-2 text-xs font-semibold uppercase tracking-tight text-muted-foreground">
-                Administration
+                Team Management
               </h2>
-              <div className="space-y-1">{adminItems.map(renderNavItem)}</div>
+              <div className="space-y-1">{teamItems.map(renderNavItem)}</div>
+            </div>
+          </>
+        )}
+
+        {/* System Administration Section - ADMIN only */}
+        {userRole === "ADMIN" && (
+          <>
+            <Separator />
+            <div className="px-3 py-2">
+              <h2 className="mb-2 px-2 text-xs font-semibold uppercase tracking-tight text-muted-foreground">
+                System
+              </h2>
+              <div className="space-y-1">{systemItems.map(renderNavItem)}</div>
             </div>
           </>
         )}

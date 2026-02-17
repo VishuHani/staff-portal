@@ -11,6 +11,8 @@ import {
   type UpdateProfileInput,
 } from "@/lib/schemas/profile";
 import { uploadAvatar, deleteAvatar } from "@/lib/storage/avatars";
+import { createAuditLog } from "@/lib/actions/admin/audit-logs";
+import { getAuditContext } from "@/lib/utils/audit-helpers";
 
 /**
  * Complete user profile (for users with profileCompletedAt = null)
@@ -78,6 +80,18 @@ export async function updateProfile(data: UpdateProfileInput) {
   const { firstName, lastName, phone, bio, dateOfBirth } = validatedFields.data;
 
   try {
+    // Get current user data for audit log
+    const currentUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        firstName: true,
+        lastName: true,
+        phone: true,
+        bio: true,
+        dateOfBirth: true,
+      },
+    });
+
     // Build update data object dynamically (only include provided fields)
     const updateData: any = {};
 
@@ -90,6 +104,18 @@ export async function updateProfile(data: UpdateProfileInput) {
     await prisma.user.update({
       where: { id: user.id },
       data: updateData,
+    });
+
+    // Audit log
+    const auditContext = await getAuditContext();
+    await createAuditLog({
+      userId: user.id,
+      actionType: "PROFILE_UPDATED",
+      resourceType: "User",
+      resourceId: user.id,
+      oldValue: JSON.stringify(currentUser),
+      newValue: JSON.stringify(updateData),
+      ipAddress: auditContext.ipAddress,
     });
 
     revalidatePath("/", "layout");

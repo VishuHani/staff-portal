@@ -14,6 +14,10 @@ import {
   type AssignPermissionsInput,
 } from "@/lib/schemas/admin/roles";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
+import { getAuditContext } from "@/lib/utils/audit-helpers";
+
+// System roles that cannot be renamed or deleted
+const SYSTEM_ROLES = ["ADMIN", "MANAGER", "STAFF"];
 
 /**
  * Get all roles with their permissions
@@ -115,8 +119,9 @@ export async function createRole(data: CreateRoleInput & { permissionIds?: strin
       },
     });
 
-    // Create audit log
+    // Create audit log with IP address
     try {
+      const auditContext = await getAuditContext();
       await createAuditLog({
         userId: admin.id,
         actionType: "ROLE_CREATED",
@@ -128,6 +133,7 @@ export async function createRole(data: CreateRoleInput & { permissionIds?: strin
           permissionIds: data.permissionIds || [],
           permissionCount: role.rolePermissions.length,
         }),
+        ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
       console.error("Error creating audit log:", error);
@@ -174,6 +180,11 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
 
     if (!oldRole) {
       return { error: "Role not found" };
+    }
+
+    // Prevent renaming system roles
+    if (SYSTEM_ROLES.includes(oldRole.name) && name && name !== oldRole.name) {
+      return { error: "Cannot rename system roles (ADMIN, MANAGER, STAFF)" };
     }
 
     // Check if role name is being changed and if it's already taken
@@ -226,8 +237,9 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
       },
     });
 
-    // Create audit log
+    // Create audit log with IP address
     try {
+      const auditContext = await getAuditContext();
       await createAuditLog({
         userId: admin.id,
         actionType: "ROLE_UPDATED",
@@ -243,6 +255,7 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
           description: role.description,
           permissionCount: role.rolePermissions.length,
         }),
+        ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
       console.error("Error creating audit log:", error);
@@ -292,8 +305,8 @@ export async function deleteRole(data: DeleteRoleInput) {
       return { error: "Role not found" };
     }
 
-    const systemRoles = ["ADMIN", "MANAGER", "STAFF"];
-    if (systemRoles.includes(role.name)) {
+    // Prevent deletion of system roles
+    if (SYSTEM_ROLES.includes(role.name)) {
       return { error: "Cannot delete system roles (ADMIN, MANAGER, STAFF)" };
     }
 
@@ -312,8 +325,9 @@ export async function deleteRole(data: DeleteRoleInput) {
       where: { id: roleId },
     });
 
-    // Create audit log
+    // Create audit log with IP address
     try {
+      const auditContext = await getAuditContext();
       await createAuditLog({
         userId: admin.id,
         actionType: "ROLE_DELETED",
@@ -324,6 +338,7 @@ export async function deleteRole(data: DeleteRoleInput) {
           description: role.description,
           permissionCount: role.rolePermissions.length,
         }),
+        ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
       console.error("Error creating audit log:", error);
@@ -387,8 +402,9 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
       })),
     });
 
-    // Create audit log
+    // Create audit log with IP address
     try {
+      const auditContext = await getAuditContext();
       await createAuditLog({
         userId: admin.id,
         actionType: "ROLE_PERMISSIONS_UPDATED",
@@ -404,6 +420,7 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
           permissionIds,
           permissionCount: permissionIds.length,
         }),
+        ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
       console.error("Error creating audit log:", error);
@@ -417,5 +434,97 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
   } catch (error) {
     console.error("Error assigning permissions:", error);
     return { error: "Failed to assign permissions" };
+  }
+}
+
+/**
+ * Clone a role with all its permissions
+ * Admin only
+ */
+export async function cloneRole(sourceRoleId: string, newName: string) {
+  const admin = await requireAdmin();
+
+  if (!newName || newName.trim().length < 2) {
+    return { error: "Role name must be at least 2 characters" };
+  }
+
+  // Validate name format
+  if (!/^[A-Z_]+$/.test(newName)) {
+    return { error: "Role name must be uppercase letters and underscores only" };
+  }
+
+  try {
+    // Get source role with permissions
+    const sourceRole = await prisma.role.findUnique({
+      where: { id: sourceRoleId },
+      include: {
+        rolePermissions: {
+          include: {
+            permission: true,
+          },
+        },
+      },
+    });
+
+    if (!sourceRole) {
+      return { error: "Source role not found" };
+    }
+
+    // Check if new name already exists
+    const existingRole = await prisma.role.findUnique({
+      where: { name: newName },
+    });
+
+    if (existingRole) {
+      return { error: "Role name already exists" };
+    }
+
+    // Create new role with cloned permissions
+    const newRole = await prisma.role.create({
+      data: {
+        name: newName,
+        description: `Cloned from ${sourceRole.name}`,
+        rolePermissions: {
+          create: sourceRole.rolePermissions.map((rp) => ({
+            permissionId: rp.permissionId,
+          })),
+        },
+      },
+      include: {
+        rolePermissions: {
+          include: {
+            permission: true,
+          },
+        },
+      },
+    });
+
+    // Create audit log with IP address
+    try {
+      const auditContext = await getAuditContext();
+      await createAuditLog({
+        userId: admin.id,
+        actionType: "ROLE_CREATED",
+        resourceType: "Role",
+        resourceId: newRole.id,
+        newValue: JSON.stringify({
+          name: newRole.name,
+          description: newRole.description,
+          clonedFrom: sourceRole.name,
+          permissionCount: newRole.rolePermissions.length,
+        }),
+        ipAddress: auditContext.ipAddress,
+      });
+    } catch (error) {
+      console.error("Error creating audit log:", error);
+      // Don't fail role clone if audit log fails
+    }
+
+    revalidatePath("/admin/roles");
+
+    return { success: true, role: newRole };
+  } catch (error) {
+    console.error("Error cloning role:", error);
+    return { error: "Failed to clone role" };
   }
 }

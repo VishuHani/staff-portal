@@ -1,0 +1,80 @@
+import { Suspense } from "react";
+import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { redirect } from "next/navigation";
+import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { CalendarViewClient } from "./calendar-view-client";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { prisma } from "@/lib/prisma";
+
+export const metadata = {
+  title: "Calendar View | Team Reports",
+  description: "Monthly calendar view of your team's availability",
+};
+
+function CalendarSkeleton() {
+  return (
+    <Card>
+      <CardContent className="p-6">
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-10 w-32" />
+          </div>
+          <div className="grid grid-cols-7 gap-2">
+            {Array.from({ length: 35 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 w-full" />
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default async function ManagerCalendarViewPage() {
+  const user = await requireAuth();
+
+  // Only allow managers with view_team permission
+  const hasAccess = await canAccess("reports", "view_team");
+  if (!hasAccess) {
+    redirect("/dashboard");
+  }
+
+  // Redirect admins to their version
+  if (user.role.name === "ADMIN") {
+    redirect("/system/reports/calendar");
+  }
+
+  // Fetch venues and roles in parallel
+  const [venues, roles] = await Promise.all([
+    prisma.venue.findMany({
+      where: { active: true },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.role.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+
+  return (
+    <DashboardLayout user={user}>
+      <div className="space-y-6">
+        {/* Header */}
+        <div>
+          <h1 className="text-3xl font-bold">Calendar View</h1>
+          <p className="text-muted-foreground mt-1">
+            Monthly calendar showing your team's availability patterns
+          </p>
+        </div>
+
+        {/* Calendar Content */}
+        <Suspense fallback={<CalendarSkeleton />}>
+          <CalendarViewClient venues={venues} roles={roles} />
+        </Suspense>
+      </div>
+    </DashboardLayout>
+  );
+}

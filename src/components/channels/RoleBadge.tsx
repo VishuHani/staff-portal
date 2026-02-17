@@ -2,8 +2,10 @@ import { Badge } from "@/components/ui/badge";
 import { Crown, Shield, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+type ChannelRole = "CREATOR" | "MODERATOR" | "MEMBER";
+
 interface RoleBadgeProps {
-  role: "CREATOR" | "MODERATOR" | "MEMBER";
+  role: ChannelRole | string;
   size?: "sm" | "md" | "lg";
   showIcon?: boolean;
   className?: string;
@@ -51,7 +53,9 @@ export function RoleBadge({
   showIcon = true,
   className,
 }: RoleBadgeProps) {
-  const config = roleConfig[role];
+  // Normalize role to uppercase for matching
+  const normalizedRole = role.toUpperCase() as keyof typeof roleConfig;
+  const config = roleConfig[normalizedRole] || roleConfig.MEMBER;
   const sizeClasses = sizeConfig[size];
   const Icon = config.icon;
 
@@ -71,20 +75,20 @@ export function RoleBadge({
 /**
  * Role Badge for display in lists/tables
  */
-export function RoleBadgeCompact({ role }: { role: "CREATOR" | "MODERATOR" | "MEMBER" }) {
+export function RoleBadgeCompact({ role }: { role: ChannelRole | string }) {
   return <RoleBadge role={role} size="sm" showIcon={false} />;
 }
 
 /**
  * Role Badge with icon for detailed views
  */
-export function RoleBadgeWithIcon({ role }: { role: "CREATOR" | "MODERATOR" | "MEMBER" }) {
+export function RoleBadgeWithIcon({ role }: { role: ChannelRole | string }) {
   return <RoleBadge role={role} size="md" showIcon={true} />;
 }
 
 /**
  * Large role badge for headers/emphasis
  */
-export function RoleBadgeLarge({ role }: { role: "CREATOR" | "MODERATOR" | "MEMBER" }) {
+export function RoleBadgeLarge({ role }: { role: ChannelRole | string }) {
   return <RoleBadge role={role} size="lg" showIcon={true} />;
 }

@@ -96,7 +96,7 @@ export function HeroStatsBar({ stats }: HeroStatsBarProps) {
       </Card>
 
       {/* Pending Approvals */}
-      <Link href="/admin/time-off?status=PENDING">
+      <Link href="/manage/time-off?status=PENDING">
         <Card className="cursor-pointer hover:shadow-md transition-shadow">
           <CardContent className="pt-6">
             <div className="flex items-start justify-between">
