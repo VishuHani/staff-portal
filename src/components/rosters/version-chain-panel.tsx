@@ -41,7 +41,7 @@ import {
   Edit,
   ArrowRight,
 } from "lucide-react";
-import { getRosterVersionChain, getVersionDiff } from "@/lib/actions/rosters";
+import { getRosterVersionChain, compareRosterVersions } from "@/lib/actions/rosters";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +66,7 @@ interface VersionDiff {
     date: string;
     startTime: string;
     endTime: string;
+    breakMinutes: number;
     position: string | null;
     notes: string | null;
   }>;
@@ -76,6 +77,7 @@ interface VersionDiff {
     date: string;
     startTime: string;
     endTime: string;
+    breakMinutes: number;
     position: string | null;
     notes: string | null;
   }>;
@@ -87,6 +89,7 @@ interface VersionDiff {
       date: string;
       startTime: string;
       endTime: string;
+      breakMinutes: number;
       position: string | null;
       notes: string | null;
     };
@@ -97,16 +100,34 @@ interface VersionDiff {
       date: string;
       startTime: string;
       endTime: string;
+      breakMinutes: number;
       position: string | null;
       notes: string | null;
     };
     changes: string[];
+  }>;
+  reassigned: Array<{
+    shift: {
+      id: string;
+      userId: string | null;
+      userName: string | null;
+      date: string;
+      startTime: string;
+      endTime: string;
+      breakMinutes: number;
+      position: string | null;
+      notes: string | null;
+    };
+    previousUser: string | null;
+    newUser: string | null;
   }>;
   summary: {
     totalChanges: number;
     addedCount: number;
     removedCount: number;
     modifiedCount: number;
+    reassignedCount: number;
+    affectedUsers: string[];
   };
 }
 
@@ -172,7 +193,8 @@ export function VersionChainPanel({
       setSelectedForCompare(version);
       setCompareDialogOpen(true);
       
-      const result = await getVersionDiff(rosterId, currentVersionNumber, version.versionNumber);
+      // Use compareRosterVersions server action with roster IDs
+      const result = await compareRosterVersions(rosterId, version.id);
       
       if (result.success && result.diff) {
         setCompareDiff(result.diff as VersionDiff);
@@ -513,7 +535,7 @@ export function VersionChainPanel({
             <ScrollArea className="max-h-[60vh]">
               <div className="space-y-4 pr-4">
                 {/* Summary */}
-                <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="grid grid-cols-5 gap-2 text-center">
                   <div className="rounded-lg border p-2">
                     <p className="text-2xl font-bold">{compareDiff.summary.totalChanges}</p>
                     <p className="text-xs text-muted-foreground">Total Changes</p>
@@ -529,6 +551,10 @@ export function VersionChainPanel({
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-2">
                     <p className="text-2xl font-bold text-amber-600">{compareDiff.summary.modifiedCount}</p>
                     <p className="text-xs text-amber-600">Modified</p>
+                  </div>
+                  <div className="rounded-lg border border-purple-200 bg-purple-50 p-2">
+                    <p className="text-2xl font-bold text-purple-600">{compareDiff.summary.reassignedCount}</p>
+                    <p className="text-xs text-purple-600">Reassigned</p>
                   </div>
                 </div>
 
@@ -597,6 +623,30 @@ export function VersionChainPanel({
                               </Badge>
                             ))}
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Reassigned Shifts */}
+                {compareDiff.reassigned && compareDiff.reassigned.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium flex items-center gap-2">
+                      <ArrowRight className="h-4 w-4 text-purple-600" />
+                      Reassigned Shifts ({compareDiff.reassigned.length})
+                    </h4>
+                    <div className="space-y-1">
+                      {compareDiff.reassigned.map((reassign, i) => (
+                        <div key={i} className="flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 p-2 text-sm">
+                          <span className="font-medium text-red-600">{reassign.previousUser || "Unassigned"}</span>
+                          <ArrowRight className="h-4 w-4 text-purple-600" />
+                          <span className="font-medium text-green-600">{reassign.newUser || "Unassigned"}</span>
+                          <span className="text-muted-foreground">{format(new Date(reassign.shift.date), "EEE, MMM d")}</span>
+                          <span className="text-muted-foreground">{reassign.shift.startTime} - {reassign.shift.endTime}</span>
+                          {reassign.shift.position && (
+                            <Badge variant="outline" className="text-xs">{reassign.shift.position}</Badge>
+                          )}
                         </div>
                       ))}
                     </div>

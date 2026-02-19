@@ -49,11 +49,18 @@ export interface VersionDiff {
     after: ShiftSnapshot;
     changes: string[];
   }>;
+  reassigned: Array<{
+    shift: ShiftSnapshot;
+    previousUser: string | null;
+    newUser: string | null;
+  }>;
   summary: {
     totalChanges: number;
     addedCount: number;
     removedCount: number;
     modifiedCount: number;
+    reassignedCount: number;
+    affectedUsers: string[];
   };
 }
 
@@ -249,6 +256,102 @@ export async function getVersionDiff(
 }
 
 /**
+ * Compare two rosters by their IDs (for version chain comparison)
+ * This is the preferred method for comparing versions in a chain
+ */
+export async function compareRosterVersions(
+  rosterIdA: string,
+  rosterIdB: string
+): Promise<{
+  success: boolean;
+  diff?: VersionDiff;
+  error?: string;
+}> {
+  try {
+    await requireAuth();
+
+    // Get both rosters with their shifts
+    const [rosterA, rosterB] = await Promise.all([
+      prisma.roster.findUnique({
+        where: { id: rosterIdA },
+        include: {
+          shifts: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.roster.findUnique({
+        where: { id: rosterIdB },
+        include: {
+          shifts: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    if (!rosterA) {
+      return { success: false, error: "Source roster not found" };
+    }
+    if (!rosterB) {
+      return { success: false, error: "Target roster not found" };
+    }
+
+    // Convert shifts to snapshots
+    const snapshotA: ShiftSnapshot[] = rosterA.shifts.map((shift) => ({
+      id: shift.id,
+      userId: shift.userId,
+      userName: shift.user
+        ? `${shift.user.firstName || ""} ${shift.user.lastName || ""}`.trim() || shift.user.email
+        : null,
+      date: shift.date.toISOString().split("T")[0],
+      startTime: shift.startTime,
+      endTime: shift.endTime,
+      position: shift.position,
+      notes: shift.notes,
+    }));
+
+    const snapshotB: ShiftSnapshot[] = rosterB.shifts.map((shift) => ({
+      id: shift.id,
+      userId: shift.userId,
+      userName: shift.user
+        ? `${shift.user.firstName || ""} ${shift.user.lastName || ""}`.trim() || shift.user.email
+        : null,
+      date: shift.date.toISOString().split("T")[0],
+      startTime: shift.startTime,
+      endTime: shift.endTime,
+      position: shift.position,
+      notes: shift.notes,
+    }));
+
+    const diff = calculateDiff(snapshotA, snapshotB);
+
+    return { success: true, diff };
+  } catch (error) {
+    console.error("Error comparing roster versions:", error);
+    return { success: false, error: "Failed to compare roster versions" };
+  }
+}
+
+/**
  * Calculate differences between two shift snapshots
  */
 function calculateDiff(before: ShiftSnapshot[], after: ShiftSnapshot[]): VersionDiff {
@@ -258,12 +361,15 @@ function calculateDiff(before: ShiftSnapshot[], after: ShiftSnapshot[]): Version
   const added: ShiftSnapshot[] = [];
   const removed: ShiftSnapshot[] = [];
   const modified: VersionDiff["modified"] = [];
+  const reassigned: VersionDiff["reassigned"] = [];
+  const affectedUserIds = new Set<string>();
 
   // Find removed and modified
   for (const [key, beforeShift] of beforeMap) {
     const afterShift = afterMap.get(key);
     if (!afterShift) {
       removed.push(beforeShift);
+      if (beforeShift.userId) affectedUserIds.add(beforeShift.userId);
     } else {
       const changes = compareShifts(beforeShift, afterShift);
       if (changes.length > 0) {
@@ -272,6 +378,7 @@ function calculateDiff(before: ShiftSnapshot[], after: ShiftSnapshot[]): Version
           after: afterShift,
           changes,
         });
+        if (afterShift.userId) affectedUserIds.add(afterShift.userId);
       }
     }
   }
@@ -280,6 +387,7 @@ function calculateDiff(before: ShiftSnapshot[], after: ShiftSnapshot[]): Version
   for (const [key, afterShift] of afterMap) {
     if (!beforeMap.has(key)) {
       added.push(afterShift);
+      if (afterShift.userId) affectedUserIds.add(afterShift.userId);
     }
   }
 
@@ -287,11 +395,14 @@ function calculateDiff(before: ShiftSnapshot[], after: ShiftSnapshot[]): Version
     added,
     removed,
     modified,
+    reassigned,
     summary: {
-      totalChanges: added.length + removed.length + modified.length,
+      totalChanges: added.length + removed.length + modified.length + reassigned.length,
       addedCount: added.length,
       removedCount: removed.length,
       modifiedCount: modified.length,
+      reassignedCount: reassigned.length,
+      affectedUsers: Array.from(affectedUserIds),
     },
   };
 }

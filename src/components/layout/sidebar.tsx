@@ -21,6 +21,7 @@ import {
   BarChart3,
   Hash,
   CalendarDays,
+  Sparkles,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -83,6 +84,12 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       title: "Rosters",
       href: userRole === "ADMIN" ? "/system/rosters" : "/manage/rosters",
       icon: CalendarDays,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
+      title: "Roster Upload V3",
+      href: "/manage/rosters-v2",
+      icon: Sparkles,
       roles: ["ADMIN", "MANAGER"],
     },
     {

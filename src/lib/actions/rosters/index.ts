@@ -76,6 +76,7 @@ export {
   getVersionHistory,
   getVersionSnapshot,
   getVersionDiff,
+  compareRosterVersions,
   createVersionSnapshot,
   rollbackToVersion,
   restoreFromVersion,
@@ -92,3 +93,18 @@ export {
   repairChainActiveFlags,
   diagnoseChainIntegrity,
 } from "./repair-chains";
+
+// Extraction V2 Actions (Multi-phase extraction)
+export {
+  uploadAndExtractRosterV2,
+  confirmExtractionAndCreateRosterV2,
+  cancelExtractionV2,
+  manualStaffMatchV2,
+  getMatchableStaffV2,
+  getExtractionV2,
+} from "./extraction-v2-actions";
+
+export type {
+  ExtractionV2ActionResult,
+  ConfirmActionResult as ConfirmV2ActionResult,
+} from "./extraction-v2-actions";

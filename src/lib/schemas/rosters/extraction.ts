@@ -83,6 +83,56 @@ export interface StaffMatch {
 }
 
 /**
+ * V2 Extraction Metadata
+ * Additional metadata for multi-phase extraction
+ */
+export interface ExtractionV2Metadata {
+  extractionVersion: "v2";
+  phasesCompleted: number;
+  processingTimeMs: number;
+  structure: {
+    type: string;
+    columns: Array<{
+      name: string;
+      type: string;
+      index: number;
+    }>;
+    staffRows: Array<{
+      rowIndex: number;
+      staffName: string;
+      dataRegion: { startCol: number; endCol: number };
+    }>;
+    complexCells: Array<{
+      row: number;
+      col: number;
+      columnName: string;
+      type: string;
+      rawContent: string;
+    }>;
+    congestedAreas: string[];
+    confidence: number;
+  };
+  validation: {
+    totalShifts: number;
+    staffCounts: Record<string, {
+      extracted: number;
+      expected: string;
+      daysWithShifts: string[];
+      daysWithoutShifts: string[];
+    }>;
+    anomalies: Array<{
+      type: string;
+      staff: string;
+      details: string;
+      severity: string;
+    }>;
+    overallConfidence: number;
+    recommendations: string[];
+    extractionQuality: "excellent" | "good" | "fair" | "poor";
+  };
+}
+
+/**
  * Overall extraction result
  */
 export interface RosterExtractionResult {
@@ -118,6 +168,9 @@ export interface RosterExtractionResult {
   // For image extraction
   ocrConfidence?: number;
   imageQuality?: "good" | "fair" | "poor";
+
+  // V2 metadata (optional, only for multi-phase extraction)
+  metadata?: ExtractionV2Metadata;
 }
 
 /**

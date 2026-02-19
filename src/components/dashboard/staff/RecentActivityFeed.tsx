@@ -6,7 +6,7 @@ import { Bell, CheckCircle2, AlertCircle, Info, Calendar } from "lucide-react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 
-interface Notification {
+export interface Notification {
   id: string;
   type: string;
   message: string;

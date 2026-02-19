@@ -757,3 +757,19 @@ model ReportCache {
   @@index([reportType, expiresAt])
   @@map("report_cache")
 }
+
+// ============================================================================
+// USER PREFERENCES
+// ============================================================================
+
+model UserDashboardPreferences {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  widgets      Json     @default("[]")  // Array of { id, enabled, order }
+  dateRange    Json?    // { from, to } - saved date range preference
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@map("user_dashboard_preferences")
+}

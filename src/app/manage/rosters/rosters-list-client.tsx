@@ -234,20 +234,36 @@ export function RostersListClient({
               </DropdownMenuItem>
             </Link>
             {venues.length === 1 ? (
-              <DropdownMenuItem onClick={() => handleUploadClick(venues[0])}>
-                <Upload className="h-4 w-4 mr-2" />
-                Upload File
-              </DropdownMenuItem>
-            ) : (
-              venues.map((venue) => (
-                <DropdownMenuItem
-                  key={venue.id}
-                  onClick={() => handleUploadClick(venue)}
-                >
+              <>
+                <DropdownMenuItem onClick={() => handleUploadClick(venues[0])}>
                   <Upload className="h-4 w-4 mr-2" />
-                  Upload for {venue.name}
+                  Upload File
                 </DropdownMenuItem>
-              ))
+                <Link href={`/manage/rosters/new/v2?venueId=${venues[0].id}`}>
+                  <DropdownMenuItem>
+                    <Upload className="h-4 w-4 mr-2 text-purple-600" />
+                    Upload File (V2 Beta)
+                  </DropdownMenuItem>
+                </Link>
+              </>
+            ) : (
+              <>
+                {venues.map((venue) => (
+                  <DropdownMenuItem
+                    key={venue.id}
+                    onClick={() => handleUploadClick(venue)}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload for {venue.name}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuItem className="text-purple-600">
+                  <Link href="/manage/rosters/new/v2" className="flex items-center">
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload V2 (Beta)
+                  </Link>
+                </DropdownMenuItem>
+              </>
             )}
           </DropdownMenuContent>
         </DropdownMenu>

@@ -7,7 +7,7 @@ import { Calendar, Clock, MapPin, ChevronRight, Sun, Sunrise, Sunset } from "luc
 import Link from "next/link";
 import { format, isToday, isTomorrow, isThisWeek, differenceInMinutes } from "date-fns";
 
-interface Shift {
+export interface Shift {
   id: string;
   date: Date;
   startTime: string;
