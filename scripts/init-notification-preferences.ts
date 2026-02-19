@@ -14,7 +14,7 @@ config({ path: resolve(process.cwd(), ".env") }); // Load .env first
 config({ path: resolve(process.cwd(), ".env.local"), override: true }); // Then .env.local with override
 
 import { prisma } from "../src/lib/prisma";
-import { NotificationType } from "@prisma/client";
+import { NotificationType, NotificationChannel } from "@prisma/client";
 
 const NOTIFICATION_TYPES: NotificationType[] = [
   "NEW_MESSAGE",
@@ -78,7 +78,7 @@ async function initializeNotificationPreferences() {
         userId: user.id,
         type,
         enabled: true,
-        channels: ["IN_APP", "EMAIL"],
+        channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
       }));
 
       const result = await prisma.notificationPreference.createMany({

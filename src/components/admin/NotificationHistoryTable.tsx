@@ -70,6 +70,8 @@ const NOTIFICATION_TYPES = [
   "ROSTER_SHIFT_REMINDER",
   "ROSTER_CONFLICT",
   "ROSTER_PENDING_REVIEW",
+  "PERMISSION_GRANTED",
+  "PERMISSION_REVOKED",
 ] as const;
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -94,6 +96,8 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   ROSTER_SHIFT_REMINDER: "Shift Reminder",
   ROSTER_CONFLICT: "Roster Conflict",
   ROSTER_PENDING_REVIEW: "Roster Pending Review",
+  PERMISSION_GRANTED: "Permission Granted",
+  PERMISSION_REVOKED: "Permission Revoked",
 };
 
 const TYPE_COLORS: Record<NotificationType, string> = {
@@ -118,6 +122,8 @@ const TYPE_COLORS: Record<NotificationType, string> = {
   ROSTER_SHIFT_REMINDER: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300",
   ROSTER_CONFLICT: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
   ROSTER_PENDING_REVIEW: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
+  PERMISSION_GRANTED: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
+  PERMISSION_REVOKED: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
 };
 
 export function NotificationHistoryTable({

@@ -26,7 +26,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  uploadAndExtractRoster,
+  uploadAndExtractRosterV3,
+} from "@/lib/actions/rosters/extraction-v3-actions";
+import {
   previewMerge,
   applyMerge,
   type ShiftSnapshot,
@@ -79,42 +81,25 @@ export function ReuploadDialog({
       formData.append("file", fileToExtract);
       formData.append("venueId", venueId);
 
-      const extractResult = await uploadAndExtractRoster(formData);
+      const extractResult = await uploadAndExtractRosterV3(formData);
 
       if (!extractResult.success) {
-        throw new Error("error" in extractResult ? extractResult.error : "Extraction failed");
+        throw new Error(extractResult.error || "Extraction failed");
       }
 
-      const extraction = extractResult.extraction;
-
-      // Create a map of staff matches for quick lookup
-      const staffMatchMap = new Map<string, { userId: string | null; userName: string | null }>();
-      for (const match of extraction.staffMatches) {
-        const key = `${match.extractedName || ""}-${match.extractedEmail || ""}`;
-        staffMatchMap.set(key, {
-          userId: match.matchedUserId,
-          userName: match.matchedUserName || match.extractedName,
-        });
-      }
-
-      // Convert extracted shifts to ShiftSnapshot format
-      const shifts: ShiftSnapshot[] = extraction.shifts
-        .filter((shift) => shift.date && shift.startTime && shift.endTime)
-        .map((shift) => {
-          const key = `${shift.staffName || ""}-${shift.staffEmail || ""}`;
-          const matchedStaff = staffMatchMap.get(key);
-
-          return {
-            id: crypto.randomUUID(), // Temporary ID
-            userId: shift.staffId || matchedStaff?.userId || null,
-            userName: matchedStaff?.userName || shift.staffName || null,
-            date: shift.date!,
-            startTime: shift.startTime!,
-            endTime: shift.endTime!,
-            position: shift.position || null,
-            notes: shift.notes || null,
-          };
-        });
+      // Convert V3 matched shifts to ShiftSnapshot format
+      const shifts: ShiftSnapshot[] = (extractResult.matchedShifts || [])
+        .filter((matched) => matched.shift.date && matched.shift.start_time && matched.shift.end_time)
+        .map((matched) => ({
+          id: crypto.randomUUID(), // Temporary ID
+          userId: matched.matchedUserId,
+          userName: matched.shift.staff_name || null,
+          date: matched.shift.date,
+          startTime: matched.shift.start_time,
+          endTime: matched.shift.end_time,
+          position: matched.shift.role || null,
+          notes: null,
+        }));
 
       // Get merge preview
       const previewResult = await previewMerge(rosterId, shifts);

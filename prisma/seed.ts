@@ -401,6 +401,8 @@ async function main() {
         password: ADMIN_PASSWORD,
         roleId: adminRole.id,
         active: true,
+        firstName: "Admin",
+        lastName: "User",
       });
 
       if (result.success) {

@@ -3,9 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -26,8 +27,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { RosterStatusBadge, RosterUploadWizardV3, RosterActionsMenu, VersionBadge } from "@/components/rosters";
+import { RosterStatusBadge, RosterActionsMenu, VersionBadge } from "@/components/rosters";
+import { RosterUploadWizardV3 } from "@/components/rosters/roster-upload-wizard-v3";
 import { RosterStatus } from "@prisma/client";
 import { format } from "date-fns";
 import {
@@ -37,10 +40,14 @@ import {
   FileEdit,
   Send,
   AlertTriangle,
-  Archive,
-  ChevronRight,
   Upload,
   ChevronDown,
+  Sparkles,
+  Zap,
+  ShieldCheck,
+  Brain,
+  CheckCircle2,
+  ArrowRight,
 } from "lucide-react";
 
 interface Roster {
@@ -79,17 +86,17 @@ interface Venue {
   code: string;
 }
 
-interface RostersListClientProps {
+interface RostersV3ClientProps {
   initialRosters: Roster[];
   stats: RosterStats | null;
   venues: Venue[];
 }
 
-export function RostersListClient({
+export function RostersV3Client({
   initialRosters,
   stats,
   venues,
-}: RostersListClientProps) {
+}: RostersV3ClientProps) {
   const router = useRouter();
   const [rosters] = useState(initialRosters);
   const [searchQuery, setSearchQuery] = useState("");
@@ -120,6 +127,55 @@ export function RostersListClient({
 
   return (
     <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold">Rosters</h1>
+            <Badge variant="secondary" className="bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0">
+              <Sparkles className="h-3 w-3 mr-1" />
+              V3
+            </Badge>
+          </div>
+          <p className="text-muted-foreground mt-1">
+            AI-powered roster extraction with GPT-4o Vision
+          </p>
+        </div>
+      </div>
+
+      {/* V3 Features Banner */}
+      <Card className="bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20 border-purple-200 dark:border-purple-800">
+        <CardContent className="py-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex -space-x-2">
+                <div className="p-2 rounded-full bg-purple-100 dark:bg-purple-900">
+                  <Brain className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div className="p-2 rounded-full bg-pink-100 dark:bg-pink-900">
+                  <Zap className="h-4 w-4 text-pink-600 dark:text-pink-400" />
+                </div>
+                <div className="p-2 rounded-full bg-green-100 dark:bg-green-900">
+                  <ShieldCheck className="h-4 w-4 text-green-600 dark:text-green-400" />
+                </div>
+              </div>
+              <div>
+                <h3 className="font-semibold text-purple-700 dark:text-purple-300">
+                  V3 Extraction Engine
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Image preprocessing • Strict JSON schema • Code validation • Retry mechanism
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <span className="text-sm text-green-600 dark:text-green-400">70% confidence threshold</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Stats Cards */}
       {stats && (
         <div className="grid gap-4 md:grid-cols-4">
@@ -220,7 +276,7 @@ export function RostersListClient({
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button>
+            <Button className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600">
               <Plus className="h-4 w-4 mr-2" />
               Create Roster
               <ChevronDown className="h-4 w-4 ml-2" />
@@ -233,23 +289,22 @@ export function RostersListClient({
                 Create Manually
               </DropdownMenuItem>
             </Link>
+            <DropdownMenuSeparator />
             {venues.length === 1 ? (
               <DropdownMenuItem onClick={() => handleUploadClick(venues[0])}>
-                <Upload className="h-4 w-4 mr-2" />
-                Upload File
+                <Upload className="h-4 w-4 mr-2 text-purple-500" />
+                Upload with V3 AI
               </DropdownMenuItem>
             ) : (
-              <>
-                {venues.map((venue) => (
-                  <DropdownMenuItem
-                    key={venue.id}
-                    onClick={() => handleUploadClick(venue)}
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload for {venue.name}
-                  </DropdownMenuItem>
-                ))}
-              </>
+              venues.map((venue) => (
+                <DropdownMenuItem
+                  key={venue.id}
+                  onClick={() => handleUploadClick(venue)}
+                >
+                  <Upload className="h-4 w-4 mr-2 text-purple-500" />
+                  Upload for {venue.name}
+                </DropdownMenuItem>
+              ))
             )}
           </DropdownMenuContent>
         </DropdownMenu>
@@ -267,13 +322,14 @@ export function RostersListClient({
                   ? "Create your first roster to get started"
                   : "Try adjusting your filters"}
               </p>
-              {rosters.length === 0 && (
-                <Link href="/manage/rosters/new">
-                  <Button className="mt-4">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Roster
-                  </Button>
-                </Link>
+              {rosters.length === 0 && venues.length > 0 && (
+                <Button 
+                  className="mt-4 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
+                  onClick={() => handleUploadClick(venues[0])}
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Roster with V3 AI
+                </Button>
               )}
             </div>
           ) : (

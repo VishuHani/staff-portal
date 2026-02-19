@@ -82,14 +82,8 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
   const teamItems: NavItem[] = [
     {
       title: "Rosters",
-      href: userRole === "ADMIN" ? "/system/rosters" : "/manage/rosters",
+      href: "/manage/rosters-v3",
       icon: CalendarDays,
-      roles: ["ADMIN", "MANAGER"],
-    },
-    {
-      title: "Roster Upload V3",
-      href: "/manage/rosters-v2",
-      icon: Sparkles,
       roles: ["ADMIN", "MANAGER"],
     },
     {

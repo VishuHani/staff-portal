@@ -99,8 +99,7 @@ async function checkSharedVenueUsers() {
     if (sharedUserIds.length > 0) {
       const sharedUsers = await prisma.user.findMany({
         where: {
-          id: { in: sharedUserIds },
-          id: { not: manager.id },
+          id: { in: sharedUserIds.filter(id => id !== manager.id) },
         },
         select: {
           id: true,

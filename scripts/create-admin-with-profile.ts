@@ -29,7 +29,7 @@ async function main() {
         lastName: 'Sharma',
         profileCompletedAt: null, // Force profile completion on next login
       },
-      include: { role: true, store: true, venues: true }
+      include: { role: true, venues: true }
     });
     console.log('✅ User profile updated:');
     console.log(JSON.stringify(updated, null, 2));
@@ -48,10 +48,9 @@ async function main() {
       lastName: 'Sharma',
       profileCompletedAt: null, // Force profile completion on next login
       roleId: adminRole.id,
-      storeId: mainStore?.id || null,
       active: true,
     },
-    include: { role: true, store: true, venues: true }
+    include: { role: true, venues: true }
   });
 
   console.log('✅ Admin user created:');

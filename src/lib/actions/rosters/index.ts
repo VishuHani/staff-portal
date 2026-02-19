@@ -34,22 +34,6 @@ export {
   type DateRange,
 } from "./roster-queries";
 
-// Extraction Actions
-export {
-  uploadAndExtractRoster,
-  startExtraction,
-  updateColumnMappings,
-  getExtraction,
-  confirmExtractionAndCreateRoster,
-  cancelExtraction,
-  manualStaffMatch,
-  getMatchableStaff,
-  checkForDuplicateRoster,
-  type ExtractionActionResult,
-  type ConfirmActionResult,
-  type DuplicateCheckResult,
-} from "./extraction-actions";
-
 // Approval Actions (New Manager Self-Review Workflow)
 export {
   // New workflow functions
@@ -93,18 +77,3 @@ export {
   repairChainActiveFlags,
   diagnoseChainIntegrity,
 } from "./repair-chains";
-
-// Extraction V2 Actions (Multi-phase extraction)
-export {
-  uploadAndExtractRosterV2,
-  confirmExtractionAndCreateRosterV2,
-  cancelExtractionV2,
-  manualStaffMatchV2,
-  getMatchableStaffV2,
-  getExtractionV2,
-} from "./extraction-v2-actions";
-
-export type {
-  ExtractionV2ActionResult,
-  ConfirmActionResult as ConfirmV2ActionResult,
-} from "./extraction-v2-actions";

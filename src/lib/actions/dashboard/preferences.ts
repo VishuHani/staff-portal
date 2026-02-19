@@ -53,8 +53,8 @@ export async function getDashboardPreferences(): Promise<{
       };
     }
 
-    const widgets = preferences.widgets as DashboardWidget[];
-    const dateRange = preferences.dateRange as { from: string | null; to: string | null } | null;
+    const widgets = preferences.widgets as unknown as DashboardWidget[];
+    const dateRange = preferences.dateRange as unknown as { from: string | null; to: string | null } | null;
 
     return {
       success: true,

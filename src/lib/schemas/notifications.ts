@@ -29,6 +29,8 @@ export const notificationTypeSchema = z.enum([
   "ROSTER_SHIFT_REMINDER",
   "ROSTER_CONFLICT",
   "ROSTER_PENDING_REVIEW",
+  "PERMISSION_GRANTED",
+  "PERMISSION_REVOKED",
 ]);
 
 // Schema for creating a notification

@@ -9,7 +9,7 @@ export { RosterMatrixView } from "./roster-matrix-view";
 export { FileUploadZone } from "./file-upload-zone";
 export { ExtractionPreview } from "./extraction-preview";
 export { ColumnMapper } from "./column-mapper";
-export { RosterUploadWizard } from "./roster-upload-wizard";
+export { RosterUploadWizardV3 } from "./roster-upload-wizard-v3";
 
 // Approval Workflow Components
 export { ApprovalWorkflow, RosterStatusBadge as ApprovalStatusBadge } from "./approval-workflow";
