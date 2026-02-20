@@ -1,6 +1,6 @@
 "use client";
 
-import { format } from "date-fns";
+import { format, startOfDay } from "date-fns";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,8 @@ interface DayDetailsModalProps {
 }
 
 export function DayDetailsModal({ date, open, onClose, matrixData }: DayDetailsModalProps) {
-  const dateStr = format(date, "yyyy-MM-dd");
+  // Matrix keys are ISO strings from computeEffectiveAvailability
+  const dateStr = startOfDay(date).toISOString();
 
   // Get staff availability for this day
   const staffList = matrixData?.users?.map((user: any) => {

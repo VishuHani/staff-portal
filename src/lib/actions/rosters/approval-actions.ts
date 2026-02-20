@@ -33,6 +33,8 @@ export interface ApprovalResult {
   };
   error?: string;
   notifiedCount?: number; // Number of staff members notified when publishing
+  conflictCount?: number; // Number of shifts with conflicts
+  hasConflicts?: boolean; // Whether roster has any conflicts
 }
 
 export interface PendingApproval {
@@ -191,6 +193,7 @@ export async function finalizeRoster(
 
     // Warn about conflicts but allow finalization
     const hasConflicts = roster.shifts.some((s) => s.hasConflict);
+    const conflictCount = roster.shifts.filter((s) => s.hasConflict).length;
 
     const previousStatus = roster.status;
 
@@ -217,6 +220,7 @@ export async function finalizeRoster(
             notes: notes || undefined,
             finalizedBy: user.email,
             hasConflicts,
+            conflictCount,
             shiftCount: roster.shifts.length,
             previousStatus,
             newStatus: RosterStatus.APPROVED,
@@ -234,7 +238,12 @@ export async function finalizeRoster(
     revalidatePath("/manage/rosters");
     revalidatePath("/system/rosters");
 
-    return { success: true, roster: { id: updatedRoster.id, status: updatedRoster.status } };
+    return { 
+      success: true, 
+      roster: { id: updatedRoster.id, status: updatedRoster.status },
+      hasConflicts,
+      conflictCount,
+    };
   } catch (error) {
     console.error("Error finalizing roster:", error);
     return { success: false, error: "Failed to finalize roster" };
@@ -519,7 +528,11 @@ export async function publishRoster(rosterId: string): Promise<ApprovalResult> {
     revalidatePath("/system/rosters");
     revalidatePath("/my/rosters");
 
-    return { success: true, roster: { id: updatedRoster.id, status: updatedRoster.status } };
+    return { 
+      success: true, 
+      roster: { id: updatedRoster.id, status: updatedRoster.status },
+      notifiedCount: staffIds.length,
+    };
   } catch (error) {
     console.error("Error publishing roster:", error);
     return { success: false, error: "Failed to publish roster" };

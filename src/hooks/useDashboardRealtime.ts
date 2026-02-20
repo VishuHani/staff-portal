@@ -51,12 +51,13 @@ export function useDashboardRealtime({
     });
 
     // Subscribe to notifications for this user
+    // NOTE: Supabase Realtime requires actual PostgreSQL table names, not Prisma model names
     channel.on(
       "postgres_changes",
       {
         event: "*",
         schema: "public",
-        table: "Notification",
+        table: "notifications", // Prisma: Notification → PostgreSQL: notifications
         filter: `userId=eq.${userId}`,
       },
       (payload) => {
@@ -71,7 +72,7 @@ export function useDashboardRealtime({
       {
         event: "*",
         schema: "public",
-        table: "RosterShift",
+        table: "roster_shifts", // Prisma: RosterShift → PostgreSQL: roster_shifts
         filter: `userId=eq.${userId}`,
       },
       (payload) => {
@@ -86,7 +87,7 @@ export function useDashboardRealtime({
       {
         event: "*",
         schema: "public",
-        table: "TimeOffRequest",
+        table: "time_off_requests", // Prisma: TimeOffRequest → PostgreSQL: time_off_requests
         filter: `userId=eq.${userId}`,
       },
       (payload) => {
@@ -101,7 +102,7 @@ export function useDashboardRealtime({
       {
         event: "INSERT",
         schema: "public",
-        table: "Message",
+        table: "messages", // Prisma: Message → PostgreSQL: messages
       },
       (payload) => {
         const messageData = payload.new as { senderId?: string } | undefined;
@@ -121,7 +122,7 @@ export function useDashboardRealtime({
         {
           event: "INSERT",
           schema: "public",
-          table: "TimeOffRequest",
+          table: "time_off_requests", // Prisma: TimeOffRequest → PostgreSQL: time_off_requests
         },
         () => {
           refreshDashboard();
@@ -134,7 +135,7 @@ export function useDashboardRealtime({
         {
           event: "UPDATE",
           schema: "public",
-          table: "RosterShift",
+          table: "roster_shifts", // Prisma: RosterShift → PostgreSQL: roster_shifts
           filter: "hasConflict=eq.true",
         },
         () => {

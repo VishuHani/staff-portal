@@ -39,6 +39,9 @@ interface User {
   weekdayRate?: number | null;
   saturdayRate?: number | null;
   sundayRate?: number | null;
+  publicHolidayRate?: number | null;
+  employmentType?: string | null;
+  employmentStartDate?: Date | null;
   role: {
     id: string;
     name: string;
@@ -98,6 +101,9 @@ type FormData = {
   weekdayRate?: number | null;
   saturdayRate?: number | null;
   sundayRate?: number | null;
+  publicHolidayRate?: number | null;
+  employmentType?: string | null;
+  employmentStartDate?: string | null;
 };
 
 export function UserDialog({

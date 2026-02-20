@@ -429,7 +429,7 @@ export async function checkShiftConflicts(
       }
     }
 
-    // Check against availability (optional - non-blocking warning)
+    // Check against availability (warning if shift is outside availability hours)
     const dayOfWeek = date.getDay();
     const availability = await prisma.availability.findFirst({
       where: {
@@ -444,6 +444,26 @@ export async function checkShiftConflicts(
         conflictType: "AVAILABILITY",
         details: "Staff member is not available on this day",
       };
+    }
+
+    // Check if shift time falls within availability hours
+    if (availability && availability.isAvailable && !availability.isAllDay) {
+      const shiftStart = parseInt(startTime.replace(":", ""));
+      const shiftEnd = parseInt(endTime.replace(":", ""));
+      const availStart = availability.startTime 
+        ? parseInt(availability.startTime.replace(":", ""))
+        : 0;
+      const availEnd = availability.endTime
+        ? parseInt(availability.endTime.replace(":", ""))
+        : 2359;
+
+      if (shiftStart < availStart || shiftEnd > availEnd) {
+        return {
+          hasConflict: true,
+          conflictType: "AVAILABILITY",
+          details: `Shift time (${startTime}-${endTime}) is outside staff availability (${availability.startTime || "00:00"}-${availability.endTime || "23:59"})`,
+        };
+      }
     }
 
     return { hasConflict: false, conflictType: null };

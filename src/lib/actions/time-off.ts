@@ -21,6 +21,58 @@ import {
   notifyTimeOffCancelled,
 } from "@/lib/services/notifications";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
+import { RosterStatus } from "@prisma/client";
+
+/**
+ * Recalculate shift conflicts when time-off is approved
+ * This ensures existing shifts are flagged if they conflict with newly approved time-off
+ */
+async function recalculateShiftConflictsForTimeOff(
+  userId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<void> {
+  try {
+    // Find all shifts for this user that fall within the time-off period
+    const affectedShifts = await prisma.rosterShift.findMany({
+      where: {
+        userId,
+        date: {
+          gte: startDate,
+          lte: endDate,
+        },
+        roster: {
+          status: { in: [RosterStatus.DRAFT, RosterStatus.APPROVED, RosterStatus.PUBLISHED] },
+        },
+      },
+      include: {
+        roster: {
+          select: { id: true, status: true },
+        },
+      },
+    });
+
+    if (affectedShifts.length === 0) {
+      return;
+    }
+
+    // Update all affected shifts to have a time-off conflict
+    await prisma.rosterShift.updateMany({
+      where: {
+        id: { in: affectedShifts.map(s => s.id) },
+      },
+      data: {
+        hasConflict: true,
+        conflictType: "TIME_OFF",
+      },
+    });
+
+    console.log(`[Time-Off] Updated ${affectedShifts.length} shifts with TIME_OFF conflict for user ${userId}`);
+  } catch (error) {
+    console.error("Error recalculating shift conflicts for time-off:", error);
+    // Don't throw - this is a background operation
+  }
+}
 
 /**
  * Get all time-off requests for the current user
@@ -600,6 +652,14 @@ export async function reviewTimeOffRequest(data: ReviewTimeOffRequestInput) {
           request.userId,
           user.id,
           reviewerName,
+          request.startDate,
+          request.endDate
+        );
+
+        // IMPORTANT: Recalculate conflicts for all existing shifts during this time-off period
+        // This ensures that any shifts that now conflict with the approved time-off are flagged
+        await recalculateShiftConflictsForTimeOff(
+          request.userId,
           request.startDate,
           request.endDate
         );

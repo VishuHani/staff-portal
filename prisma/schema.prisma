@@ -77,10 +77,27 @@ model User {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  // Address fields
+  addressStreet      String?
+  addressCity        String?
+  addressState       String?
+  addressPostcode    String?
+  addressCountry     String?   @default("Australia")
+
+  // Emergency contact
+  emergencyContactName   String?
+  emergencyContactPhone  String?
+  emergencyContactRelation String?
+
+  // Employment details
+  employmentType     String?   // FULL_TIME, PART_TIME, CASUAL, CONTRACTOR
+  employmentStartDate DateTime?
+
   // Pay rates (hourly)
   weekdayRate        Decimal?  @db.Decimal(10, 2)
   saturdayRate       Decimal?  @db.Decimal(10, 2)
   sundayRate         Decimal?  @db.Decimal(10, 2)
+  publicHolidayRate  Decimal?  @db.Decimal(10, 2)
 
   // Relations
   venues                  UserVenue[]
@@ -108,6 +125,8 @@ model User {
   resolvedMatches         UnmatchedRosterEntry[]     @relation("ResolvedMatch")
   venuePermissions        UserVenuePermission[]      @relation("UserVenuePermissionUser")
   grantedPermissions      UserVenuePermission[]      @relation("UserVenuePermissionGranter")
+  skills                  UserSkill[]
+  certifications          UserCertification[]
 
   @@index([email])
   @@index([roleId])
@@ -578,17 +597,43 @@ model Message {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   senderId       String
   sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  content        String
-  mediaUrls      String?
+  content        String       // Encrypted content (JSON with encryptedContent, iv, authTag)
+  mediaUrls      String?      // Encrypted media URLs
   reactions      String?
-  readAt         DateTime?
-  readBy         String[]     @default([])
+  
+  // Encryption metadata
+  isEncrypted    Boolean      @default(false)  // Flag for migration purposes
+  encryptionVersion Int       @default(1)      // For future algorithm upgrades
+  
+  // Delivery status tracking
+  deliveryStatus String       @default("SENT") // SENT, DELIVERED, READ
+  deliveredAt    DateTime?    // When message was delivered to recipient's device
+  deliveredTo    String[]     @default([])     // User IDs who received the message
+  readAt         DateTime?    // Deprecated - use readBy with timestamps
+  readBy         String[]     @default([])     // User IDs who read the message
+  
+  // Message expiration (self-destruct feature)
+  expiresAt      DateTime?    // When message should be deleted
+  expireType     String?      // "AFTER_READ", "TIMED", null
+  
+  // Edit tracking
+  isEdited       Boolean      @default(false)
+  editedAt       DateTime?
+  editHistory    String?      // JSON array of previous encrypted versions
+  
+  // Soft delete
+  deletedAt      DateTime?
+  deletedBy      String?      // User ID who deleted the message
+  
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   @@index([conversationId])
   @@index([senderId])
   @@index([createdAt])
+  @@index([deliveryStatus])
+  @@index([expiresAt])
+  @@index([deletedAt])
   @@map("messages")
 }
 
@@ -772,4 +817,50 @@ model UserDashboardPreferences {
 
   @@index([userId])
   @@map("user_dashboard_preferences")
+}
+
+// ============================================================================
+// SKILLS & CERTIFICATIONS
+// ============================================================================
+
+model UserSkill {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  category    String?   // e.g., "Technical", "Safety", "Customer Service"
+  level       String?   // e.g., "Beginner", "Intermediate", "Expert"
+  notes       String?
+  verified    Boolean   @default(false)
+  verifiedBy  String?
+  verifiedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([category])
+  @@map("user_skills")
+}
+
+model UserCertification {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  issuingBody     String?   // Organization that issued the certification
+  issueDate       DateTime?
+  expiryDate      DateTime?
+  certificateNumber String?
+  documentUrl     String?   // Link to uploaded certificate document
+  status          String    @default("ACTIVE")  // ACTIVE, EXPIRED, PENDING_RENEWAL
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([status])
+  @@index([expiryDate])
+  @@map("user_certifications")
 }

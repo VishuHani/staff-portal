@@ -13,6 +13,7 @@ import {
   subMonths,
   isSameDay,
   isToday,
+  startOfDay,
 } from "date-fns";
 import { getAvailabilityMatrix } from "@/lib/actions/reports/availability-reports";
 import { toast } from "sonner";
@@ -46,21 +47,21 @@ export function CalendarViewClient({ venues = [], roles = [] }: CalendarViewClie
   const [showDayDetails, setShowDayDetails] = useState(false);
   const [filters, setFilters] = useState<FilterValues>({});
 
-  // Calculate calendar grid
-  const monthStart = startOfMonth(currentDate);
-  const monthEnd = endOfMonth(currentDate);
-  const calendarStart = startOfWeek(monthStart, { weekStartsOn: 0 });
-  const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
+  // Calculate calendar grid - use filter date range if provided, otherwise use month navigation
+  const viewStartDate = filters.dateRange?.from || startOfMonth(currentDate);
+  const viewEndDate = filters.dateRange?.to || endOfMonth(currentDate);
+  const calendarStart = startOfWeek(viewStartDate, { weekStartsOn: 0 });
+  const calendarEnd = endOfWeek(viewEndDate, { weekStartsOn: 0 });
   const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
-  // Fetch calendar data when month or filters change
+  // Fetch calendar data when date range or filters change
   useEffect(() => {
     const fetchCalendarData = async () => {
       setLoading(true);
       try {
         const result = await getAvailabilityMatrix({
-          startDate: monthStart,
-          endDate: monthEnd,
+          startDate: viewStartDate,
+          endDate: viewEndDate,
           venueId: filters.venueId,
         });
 
@@ -79,17 +80,23 @@ export function CalendarViewClient({ venues = [], roles = [] }: CalendarViewClie
     };
 
     fetchCalendarData();
-  }, [currentDate, filters.venueId]);
+  }, [viewStartDate.toISOString(), viewEndDate.toISOString(), filters.venueId]);
 
   const handlePreviousMonth = () => {
+    // Clear filter date range and use month navigation
+    setFilters((prev) => ({ ...prev, dateRange: undefined }));
     setCurrentDate((prev) => subMonths(prev, 1));
   };
 
   const handleNextMonth = () => {
+    // Clear filter date range and use month navigation
+    setFilters((prev) => ({ ...prev, dateRange: undefined }));
     setCurrentDate((prev) => addMonths(prev, 1));
   };
 
   const handleToday = () => {
+    // Clear filter date range and use month navigation
+    setFilters((prev) => ({ ...prev, dateRange: undefined }));
     setCurrentDate(new Date());
   };
 
@@ -101,10 +108,16 @@ export function CalendarViewClient({ venues = [], roles = [] }: CalendarViewClie
 
   const handleApplyFilters = (newFilters: FilterValues) => {
     setFilters(newFilters);
+    // If new filters have date range, update currentDate to match for display purposes
+    if (newFilters.dateRange?.from) {
+      setCurrentDate(newFilters.dateRange.from);
+    }
   };
 
   const getDayData = (date: Date): CalendarDay => {
-    const dateStr = format(date, "yyyy-MM-dd");
+    // Matrix keys are ISO strings from computeEffectiveAvailability
+    // We need to match the exact format used in availability.ts
+    const dateStr = startOfDay(date).toISOString();
     let availableCount = 0;
     let totalCount = 0;
 
@@ -175,7 +188,13 @@ export function CalendarViewClient({ venues = [], roles = [] }: CalendarViewClie
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-2xl">
-              {format(currentDate, "MMMM yyyy")}
+              {filters.dateRange?.from && filters.dateRange?.to ? (
+                // Show custom date range if filters are applied
+                `${format(viewStartDate, "MMM d")} - ${format(viewEndDate, "MMM d, yyyy")}`
+              ) : (
+                // Show month if using month navigation
+                format(currentDate, "MMMM yyyy")
+              )}
             </CardTitle>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={handleToday}>

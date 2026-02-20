@@ -45,6 +45,17 @@ function transformCoverageData(serverData: any) {
     }
   }
 
+  // Transform dailyCoverage to map 'percentage' to 'coveragePercentage'
+  // Server returns 'percentage' but CoverageChart expects 'coveragePercentage'
+  const dailyCoverage = (serverData.dailyCoverage || []).map((day: any) => ({
+    date: day.date,
+    availableStaff: day.availableStaff,
+    totalStaff: day.totalStaff,
+    coveragePercentage: day.percentage ?? 0, // Map 'percentage' to 'coveragePercentage'
+    requiredStaff: day.requiredStaff,
+    status: day.status,
+  }));
+
   // Transform summary to stats with correct field names
   return {
     stats: {
@@ -53,7 +64,7 @@ function transformCoverageData(serverData: any) {
       averageCoverage: serverData.summary?.averageAvailability || 0,
       peakCoverage: serverData.summary?.peakAvailability?.count || 0,
     },
-    dailyCoverage: serverData.dailyCoverage || [],
+    dailyCoverage,
     heatmap: heatmapArray,
   };
 }

@@ -21,6 +21,83 @@ import {
   notifyMessageMention,
   notifyMessageReaction,
 } from "@/lib/services/notifications";
+import {
+  encryptForStorage,
+  decryptFromStorage,
+  isEncrypted,
+} from "@/lib/utils/encryption";
+import {
+  messageRateLimiter,
+  combinedRateLimit,
+} from "@/lib/utils/rate-limiter";
+import {
+  MESSAGE_EDIT_WINDOW_MINUTES,
+  MAX_EDITS_PER_MESSAGE,
+  MAX_MESSAGE_LENGTH,
+  MAX_MENTIONS_PER_MESSAGE,
+  ENCRYPTION_ENABLED,
+  TRACK_DELIVERY_STATUS,
+  canEditMessage,
+  calculateExpirationDate,
+  type DeliveryStatus,
+  type ExpireType,
+} from "@/lib/config/messaging";
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Extract @mentions from message content
+ * Supports @email, @username, and @firstname patterns
+ */
+function extractMentions(content: string): string[] {
+  // Match @email.com patterns
+  const emailRegex = /@([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+  const emailMatches = Array.from(content.matchAll(emailRegex), (match) => match[1]);
+
+  // Match @username patterns (word characters, underscores, hyphens)
+  const usernameRegex = /@([a-zA-Z0-9_-]{2,})(?!\S)/g;
+  const usernameMatches = Array.from(content.matchAll(usernameRegex), (match) => match[1]);
+
+  // Combine and dedupe
+  return [...new Set([...emailMatches, ...usernameMatches])];
+}
+
+/**
+ * Encrypt message content if encryption is enabled
+ */
+function encryptMessageContent(
+  content: string,
+  conversationId: string
+): { content: string; isEncrypted: boolean } {
+  if (!ENCRYPTION_ENABLED) {
+    return { content, isEncrypted: false };
+  }
+
+  const encryptedContent = encryptForStorage(content, conversationId);
+  return { content: encryptedContent, isEncrypted: true };
+}
+
+/**
+ * Decrypt message content
+ */
+function decryptMessageContent(
+  content: string,
+  conversationId: string,
+  messageIsEncrypted: boolean
+): string {
+  if (!messageIsEncrypted && !isEncrypted(content)) {
+    // Legacy unencrypted message
+    return content;
+  }
+
+  return decryptFromStorage(content, conversationId);
+}
+
+// ============================================================================
+// MESSAGE QUERIES
+// ============================================================================
 
 /**
  * Get messages for a conversation with pagination
@@ -31,9 +108,6 @@ export async function getMessages(
   cursor?: string
 ) {
   const user = await requireAuth();
-
-  // Messages are available to all authenticated users
-  // Future: Add permission check if needed: canAccess("messages", "read")
 
   try {
     // Check if user is a participant
@@ -48,9 +122,15 @@ export async function getMessages(
       return { error: "You don't have access to this conversation" };
     }
 
+    // Get messages that haven't expired or been deleted
     const messages = await prisma.message.findMany({
       where: {
         conversationId,
+        deletedAt: null,
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: new Date() } },
+        ],
         ...(cursor
           ? {
               createdAt: {
@@ -64,7 +144,6 @@ export async function getMessages(
           select: {
             id: true,
             email: true,
-            // PROFILE FIELDS: Include name and avatar
             firstName: true,
             lastName: true,
             profileImage: true,
@@ -82,8 +161,14 @@ export async function getMessages(
       take: limit,
     });
 
+    // Decrypt messages
+    const decryptedMessages = messages.map((msg) => ({
+      ...msg,
+      content: decryptMessageContent(msg.content, conversationId, msg.isEncrypted),
+    }));
+
     // Reverse to show oldest first
-    const orderedMessages = messages.reverse();
+    const orderedMessages = decryptedMessages.reverse();
 
     return {
       success: true,
@@ -100,13 +185,36 @@ export async function getMessages(
   }
 }
 
+// ============================================================================
+// MESSAGE ACTIONS
+// ============================================================================
+
 /**
  * Send a new message
  */
-export async function sendMessage(data: CreateMessageInput) {
+export async function sendMessage(data: CreateMessageInput & {
+  expireType?: ExpireType;
+  expireDurationMs?: number;
+}) {
   const user = await requireAuth();
 
-  // Use "send" permission for sending messages
+  // Check rate limit
+  const rateLimitResult = await combinedRateLimit(
+    user.id,
+    messageRateLimiter,
+    "MESSAGE_SENT",
+    30,
+    60000
+  );
+
+  if (!rateLimitResult.allowed) {
+    return {
+      error: rateLimitResult.reason || "Rate limit exceeded",
+      retryAfter: rateLimitResult.retryAfter,
+    };
+  }
+
+  // Check permission
   const hasAccess = await canAccess("messages", "send");
   if (!hasAccess) {
     return { error: "You don't have permission to send messages" };
@@ -119,7 +227,12 @@ export async function sendMessage(data: CreateMessageInput) {
     };
   }
 
-  const { conversationId, content, mediaUrls } = validatedFields.data;
+  const { conversationId, content, mediaUrls, expireType, expireDurationMs } = validatedFields.data;
+
+  // Validate message length
+  if (content.length > MAX_MESSAGE_LENGTH) {
+    return { error: `Message exceeds ${MAX_MESSAGE_LENGTH} character limit` };
+  }
 
   try {
     // Check if user is a participant
@@ -144,7 +257,6 @@ export async function sendMessage(data: CreateMessageInput) {
               select: {
                 id: true,
                 email: true,
-                // PROFILE FIELDS: Include name and avatar
                 firstName: true,
                 lastName: true,
                 profileImage: true,
@@ -159,20 +271,32 @@ export async function sendMessage(data: CreateMessageInput) {
       return { error: "Conversation not found" };
     }
 
+    // Encrypt message content
+    const { content: encryptedContent, isEncrypted } = encryptMessageContent(
+      content,
+      conversationId
+    );
+
+    // Calculate expiration
+    const expiresAt = calculateExpirationDate(expireType || null, expireDurationMs);
+
     // Create message
     const message = await prisma.message.create({
       data: {
         conversationId,
         senderId: user.id,
-        content,
+        content: encryptedContent,
         mediaUrls: mediaUrls ? JSON.stringify(mediaUrls) : null,
+        isEncrypted,
+        deliveryStatus: TRACK_DELIVERY_STATUS ? "SENT" : undefined,
+        expiresAt,
+        expireType: expireType || null,
       },
       include: {
         sender: {
           select: {
             id: true,
             email: true,
-            // PROFILE FIELDS: Include name and avatar
             firstName: true,
             lastName: true,
             profileImage: true,
@@ -196,37 +320,47 @@ export async function sendMessage(data: CreateMessageInput) {
     });
 
     // Extract @mentions from message content
-    const mentionRegex = /@(\w+)/g;
-    const mentions = content.match(mentionRegex) || [];
-    const mentionedUsernames = mentions.map((m) => m.substring(1)); // Remove @ symbol
+    const mentionedUsernames = extractMentions(content);
 
-    // Get user IDs for mentioned users (match by email prefix or name)
-    const mentionedUsers = await prisma.user.findMany({
-      where: {
-        OR: [
-          {
-            email: {
-              in: mentionedUsernames.map((u) => `${u}@`), // Partial email match
-              mode: "insensitive",
-            },
-          },
-          {
-            firstName: {
-              in: mentionedUsernames,
-              mode: "insensitive",
-            },
-          },
-        ],
-      },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-      },
-    });
+    // Get user IDs for mentioned users
+    let mentionedUserIds = new Set<string>();
+    if (mentionedUsernames.length > 0 && mentionedUsernames.length <= MAX_MENTIONS_PER_MESSAGE) {
+      const mentionedUsers = await prisma.user.findMany({
+        where: {
+          OR: [
+            { email: { in: mentionedUsernames, mode: "insensitive" } },
+            { firstName: { in: mentionedUsernames, mode: "insensitive" } },
+            { lastName: { in: mentionedUsernames, mode: "insensitive" } },
+          ],
+        },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+        },
+      });
 
-    const mentionedUserIds = new Set(mentionedUsers.map((u) => u.id));
+      mentionedUserIds = new Set(mentionedUsers.map((u) => u.id));
+
+      // Notify mentioned users
+      for (const mentionedUser of mentionedUsers) {
+        if (mentionedUser.id !== user.id) {
+          const senderName =
+            user.firstName || user.lastName
+              ? `${user.firstName || ""} ${user.lastName || ""}`.trim()
+              : user.email;
+
+          await notifyMessageMention(
+            mentionedUser.id,
+            user.id,
+            message.id,
+            conversationId,
+            senderName
+          );
+        }
+      }
+    }
 
     // Create notifications for other participants
     const otherParticipants = conversation.participants.filter(
@@ -243,33 +377,28 @@ export async function sendMessage(data: CreateMessageInput) {
       const isMuted =
         participant.mutedUntil && participant.mutedUntil > new Date();
 
-      if (!isMuted) {
-        // If user was mentioned, send mention notification instead of regular message notification
-        if (mentionedUserIds.has(participant.userId)) {
-          await notifyMessageMention(
-            participant.userId,
-            user.id,
-            message.id,
-            conversationId,
-            senderName
-          );
-        } else {
-          // Send regular new message notification using service layer
-          await notifyNewDirectMessage(
-            participant.userId,
-            user.id,
-            message.id,
-            conversationId,
-            senderName,
-            content
-          );
-        }
+      if (!isMuted && !mentionedUserIds.has(participant.userId)) {
+        await notifyNewDirectMessage(
+          participant.userId,
+          user.id,
+          message.id,
+          conversationId,
+          senderName,
+          content
+        );
       }
     }
 
     revalidatePath("/messages");
 
-    return { success: true, message };
+    // Return decrypted message
+    return {
+      success: true,
+      message: {
+        ...message,
+        content, // Return plaintext to sender
+      },
+    };
   } catch (error) {
     console.error("Error sending message:", error);
     return { error: "Failed to send message" };
@@ -294,26 +423,65 @@ export async function updateMessage(data: UpdateMessageInput) {
   try {
     const existingMessage = await prisma.message.findUnique({
       where: { id },
+      include: {
+        conversation: {
+          include: {
+            participants: true,
+          },
+        },
+      },
     });
 
     if (!existingMessage) {
       return { error: "Message not found" };
     }
 
-    if (existingMessage.senderId !== user.id) {
-      return { error: "You can only edit your own messages" };
+    if (existingMessage.deletedAt) {
+      return { error: "Cannot edit deleted message" };
     }
 
-    // Don't allow editing messages older than 15 minutes
-    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-    if (existingMessage.createdAt < fifteenMinutesAgo) {
-      return { error: "Messages can only be edited within 15 minutes" };
+    // Check edit permissions
+    const editCheck = canEditMessage(
+      existingMessage.createdAt,
+      existingMessage.senderId,
+      user.id,
+      0 // TODO: Track edit count
+    );
+
+    if (!editCheck.canEdit) {
+      return { error: editCheck.reason };
     }
+
+    // Get previous content for edit history
+    const previousContent = decryptMessageContent(
+      existingMessage.content,
+      existingMessage.conversationId,
+      existingMessage.isEncrypted
+    );
+
+    // Encrypt new content
+    const { content: encryptedContent, isEncrypted } = encryptMessageContent(
+      content,
+      existingMessage.conversationId
+    );
+
+    // Build edit history
+    const editHistory = existingMessage.editHistory
+      ? JSON.parse(existingMessage.editHistory)
+      : [];
+
+    editHistory.push({
+      content: encryptForStorage(previousContent, existingMessage.conversationId),
+      editedAt: existingMessage.editedAt || existingMessage.updatedAt.toISOString(),
+    });
 
     const message = await prisma.message.update({
       where: { id },
       data: {
-        content,
+        content: encryptedContent,
+        isEdited: true,
+        editedAt: new Date(),
+        editHistory: JSON.stringify(editHistory),
         updatedAt: new Date(),
       },
       include: {
@@ -321,7 +489,6 @@ export async function updateMessage(data: UpdateMessageInput) {
           select: {
             id: true,
             email: true,
-            // PROFILE FIELDS: Include name and avatar
             firstName: true,
             lastName: true,
             profileImage: true,
@@ -337,7 +504,13 @@ export async function updateMessage(data: UpdateMessageInput) {
 
     revalidatePath("/messages");
 
-    return { success: true, message };
+    return {
+      success: true,
+      message: {
+        ...message,
+        content, // Return plaintext
+      },
+    };
   } catch (error) {
     console.error("Error updating message:", error);
     return { error: "Failed to update message" };
@@ -345,7 +518,7 @@ export async function updateMessage(data: UpdateMessageInput) {
 }
 
 /**
- * Delete a message (own messages only)
+ * Delete a message (own messages only, or soft delete)
  */
 export async function deleteMessage(data: DeleteMessageInput) {
   const user = await requireAuth();
@@ -372,8 +545,13 @@ export async function deleteMessage(data: DeleteMessageInput) {
       return { error: "You can only delete your own messages" };
     }
 
-    await prisma.message.delete({
+    // Soft delete
+    await prisma.message.update({
       where: { id },
+      data: {
+        deletedAt: new Date(),
+        deletedBy: user.id,
+      },
     });
 
     revalidatePath("/messages");
@@ -385,6 +563,10 @@ export async function deleteMessage(data: DeleteMessageInput) {
   }
 }
 
+// ============================================================================
+// READ RECEIPTS & DELIVERY STATUS
+// ============================================================================
+
 /**
  * Mark a message as read
  */
@@ -394,6 +576,13 @@ export async function markMessageAsRead(messageId: string) {
   try {
     const message = await prisma.message.findUnique({
       where: { id: messageId },
+      include: {
+        conversation: {
+          include: {
+            participants: true,
+          },
+        },
+      },
     });
 
     if (!message) {
@@ -417,16 +606,37 @@ export async function markMessageAsRead(messageId: string) {
       return { success: true };
     }
 
+    // Update message read status
+    const updates: any = {};
+
     // Add user to readBy array if not already there
     if (!message.readBy.includes(user.id)) {
+      updates.readBy = { push: user.id };
+    }
+
+    // Update delivery status if tracking enabled
+    if (TRACK_DELIVERY_STATUS && message.deliveryStatus !== "READ") {
+      updates.deliveryStatus = "READ";
+      updates.readAt = new Date();
+    }
+
+    // Check if message should expire after read
+    if (message.expireType === "AFTER_READ") {
+      const allParticipants = message.conversation.participants;
+      const newReadBy = [...message.readBy, user.id];
+      const allRead = allParticipants.every((p) =>
+        newReadBy.includes(p.userId)
+      );
+
+      if (allRead) {
+        updates.expiresAt = new Date(); // Expire immediately
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
       await prisma.message.update({
         where: { id: messageId },
-        data: {
-          readBy: {
-            push: user.id,
-          },
-          readAt: new Date(),
-        },
+        data: updates,
       });
     }
 
@@ -478,6 +688,7 @@ export async function markConversationAsRead(data: MarkAsReadInput) {
       where: {
         conversationId,
         senderId: { not: user.id },
+        deletedAt: null,
         NOT: {
           readBy: {
             has: user.id,
@@ -496,6 +707,10 @@ export async function markConversationAsRead(data: MarkAsReadInput) {
           readBy: {
             push: user.id,
           },
+          ...(TRACK_DELIVERY_STATUS && {
+            deliveryStatus: "READ",
+            readAt: new Date(),
+          }),
         },
       });
     }
@@ -533,6 +748,7 @@ export async function getUnreadMessageCount(conversationId?: string) {
         where: {
           conversationId,
           senderId: { not: user.id },
+          deletedAt: null,
           createdAt: {
             gt: participant.lastReadAt || new Date(0),
           },
@@ -555,6 +771,7 @@ export async function getUnreadMessageCount(conversationId?: string) {
           where: {
             conversationId: participant.conversationId,
             senderId: { not: user.id },
+            deletedAt: null,
             createdAt: {
               gt: participant.lastReadAt || new Date(0),
             },
@@ -571,14 +788,15 @@ export async function getUnreadMessageCount(conversationId?: string) {
   }
 }
 
+// ============================================================================
+// MESSAGE SEARCH
+// ============================================================================
+
 /**
  * Search messages across conversations
  */
 export async function searchMessages(query: string, limit = 50) {
   const user = await requireAuth();
-
-  // Messages are available to all authenticated users
-  // Future: Add permission check if needed: canAccess("messages", "read")
 
   if (!query || query.trim().length < 2) {
     return { error: "Search query must be at least 2 characters" };
@@ -606,10 +824,10 @@ export async function searchMessages(query: string, limit = 50) {
         conversationId: {
           in: conversationIds,
         },
-        // VENUE FILTERING: Only show messages from users in shared venues
         senderId: {
           in: sharedVenueUserIds,
         },
+        deletedAt: null,
         content: {
           contains: query,
           mode: "insensitive",
@@ -620,7 +838,6 @@ export async function searchMessages(query: string, limit = 50) {
           select: {
             id: true,
             email: true,
-            // PROFILE FIELDS: Include name and avatar
             firstName: true,
             lastName: true,
             profileImage: true,
@@ -640,16 +857,25 @@ export async function searchMessages(query: string, limit = 50) {
       take: limit,
     });
 
-    return { success: true, messages };
+    // Decrypt messages for display
+    const decryptedMessages = messages.map((msg) => ({
+      ...msg,
+      content: decryptMessageContent(msg.content, msg.conversationId, msg.isEncrypted),
+    }));
+
+    return { success: true, messages: decryptedMessages };
   } catch (error) {
     console.error("Error searching messages:", error);
     return { error: "Failed to search messages" };
   }
 }
 
+// ============================================================================
+// REACTIONS
+// ============================================================================
+
 /**
  * Toggle a reaction on a message
- * If the user already reacted with this emoji, remove it. Otherwise, add it.
  */
 export async function toggleReaction(data: ToggleReactionInput) {
   const user = await requireAuth();
@@ -681,6 +907,10 @@ export async function toggleReaction(data: ToggleReactionInput) {
 
     if (!message) {
       return { error: "Message not found" };
+    }
+
+    if (message.deletedAt) {
+      return { error: "Cannot react to deleted message" };
     }
 
     // Check if user is a participant
@@ -717,7 +947,7 @@ export async function toggleReaction(data: ToggleReactionInput) {
       },
     });
 
-    // Send notification to message author when someone reacts (but not if reacting to own message)
+    // Send notification to message author
     if (reactionAdded && message.senderId !== user.id) {
       const reactorName =
         user.firstName || user.lastName
@@ -740,5 +970,64 @@ export async function toggleReaction(data: ToggleReactionInput) {
   } catch (error) {
     console.error("Error toggling reaction:", error);
     return { error: "Failed to toggle reaction" };
+  }
+}
+
+// ============================================================================
+// MESSAGE EXPIRATION CLEANUP
+// ============================================================================
+
+/**
+ * Delete expired messages (should be called by a cron job)
+ */
+export async function cleanupExpiredMessages() {
+  try {
+    const now = new Date();
+
+    // Find and delete expired messages
+    const result = await prisma.message.deleteMany({
+      where: {
+        expiresAt: {
+          lt: now,
+        },
+        expireType: "TIMED",
+      },
+    });
+
+    // Find messages that should expire after all recipients have read
+    const afterReadMessages = await prisma.message.findMany({
+      where: {
+        expireType: "AFTER_READ",
+        expiresAt: null,
+      },
+      include: {
+        conversation: {
+          include: {
+            participants: true,
+          },
+        },
+      },
+    });
+
+    for (const message of afterReadMessages) {
+      const allParticipants = message.conversation.participants;
+      const allRead = allParticipants.every((p) =>
+        message.readBy.includes(p.userId)
+      );
+
+      if (allRead) {
+        await prisma.message.delete({
+          where: { id: message.id },
+        });
+      }
+    }
+
+    return {
+      success: true,
+      deletedCount: result.count + afterReadMessages.length,
+    };
+  } catch (error) {
+    console.error("Error cleaning up expired messages:", error);
+    return { error: "Failed to cleanup expired messages" };
   }
 }

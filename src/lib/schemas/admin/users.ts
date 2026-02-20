@@ -98,6 +98,10 @@ export const updateUserSchema = z.object({
   weekdayRate: payRateSchema,
   saturdayRate: payRateSchema,
   sundayRate: payRateSchema,
+  publicHolidayRate: payRateSchema,
+  // Employment details
+  employmentType: z.enum(["FULL_TIME", "PART_TIME", "CASUAL", "CONTRACTOR"]).optional(),
+  employmentStartDate: z.string().optional(),
 })
   .refine(
     (data) => {

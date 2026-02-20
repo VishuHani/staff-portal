@@ -171,7 +171,8 @@ async function analyzeLowCoverage(
   const dates = eachDayOfInterval({ start: startDate, end: endDate });
 
   for (const date of dates) {
-    const dateStr = format(date, "yyyy-MM-dd");
+    // Use ISO string format to match computeEffectiveAvailability keys
+    const dateStr = startOfDay(date).toISOString();
     let availableCount = 0;
     const totalCount = staff.length;
 
@@ -323,7 +324,8 @@ async function analyzeWeekendCoverage(
   const weekendCoverage: { date: Date; available: number }[] = [];
 
   for (const date of weekends) {
-    const dateStr = format(date, "yyyy-MM-dd");
+    // Use ISO string format to match computeEffectiveAvailability keys
+    const dateStr = startOfDay(date).toISOString();
     let availableCount = 0;
 
     for (const staffMember of staff) {
@@ -386,7 +388,8 @@ async function analyzeAvailabilityPatterns(
     let availableDays = 0;
 
     for (const date of dates) {
-      const dateStr = format(date, "yyyy-MM-dd");
+      // Use ISO string format to match computeEffectiveAvailability keys
+      const dateStr = startOfDay(date).toISOString();
       const availability = computeEffectiveAvailability(s, date, date);
       if (availability[dateStr]?.available) {
         availableDays++;
@@ -422,7 +425,8 @@ async function analyzeAvailabilityPatterns(
   const overStaffedDays: string[] = [];
 
   for (const date of dates) {
-    const dateStr = format(date, "yyyy-MM-dd");
+    // Use ISO string format to match computeEffectiveAvailability keys
+    const dateStr = startOfDay(date).toISOString();
     let availableCount = 0;
 
     for (const staffMember of staff) {
@@ -488,7 +492,8 @@ async function analyzeRecurringIssues(
 
   for (const date of dates) {
     const dayName = format(date, "EEEE");
-    const dateStr = format(date, "yyyy-MM-dd");
+    // Use ISO string format to match computeEffectiveAvailability keys
+    const dateStr = startOfDay(date).toISOString();
     let availableCount = 0;
 
     for (const staffMember of staff) {

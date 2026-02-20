@@ -1,10 +1,13 @@
 import { z } from "zod";
 
 // Constants
-export const MAX_MESSAGE_LENGTH = 2000;
+export const MAX_MESSAGE_LENGTH = 10000; // Updated to match config
 export const MAX_CONVERSATION_NAME_LENGTH = 100;
-export const MAX_MEDIA_FILES = 4;
+export const MAX_MEDIA_FILES = 5; // Updated to match config
 export const MAX_PARTICIPANTS = 50; // For group conversations
+
+// Expiration types for self-destructing messages
+export const expireTypeSchema = z.enum(["NONE", "AFTER_READ", "TIMED"]).optional();
 
 // Message schemas
 export const createMessageSchema = z.object({
@@ -18,6 +21,9 @@ export const createMessageSchema = z.object({
     .array(z.string().url("Invalid media URL"))
     .max(MAX_MEDIA_FILES, `Maximum ${MAX_MEDIA_FILES} files allowed`)
     .optional(),
+  // Self-destruct options
+  expireType: expireTypeSchema,
+  expireDurationMs: z.number().int().positive().optional(), // Duration in milliseconds for TIMED expiration
 });
 
 export const updateMessageSchema = z.object({
