@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { AvatarUpload } from "@/components/profile/AvatarUpload";
 import { ProfileForm } from "@/components/profile/ProfileForm";
+import { SuperFundForm } from "@/components/profile/SuperFundForm";
 import { getFullName } from "@/lib/utils/profile";
 import { Building2, Calendar, Mail } from "lucide-react";
 
@@ -28,6 +29,13 @@ interface ProfilePageClientProps {
       code: string;
       isPrimary: boolean;
     }>;
+    // Superannuation fields
+    superEnabled?: boolean | null;
+    customSuperRate?: number | null;
+    superFundName?: string | null;
+    superFundMemberNumber?: string | null;
+    superFundUSI?: string | null;
+    superFundABN?: string | null;
   };
 }
 
@@ -143,6 +151,24 @@ export function ProfilePageClient({ profile }: ProfilePageClientProps) {
               />
             </CardContent>
           </Card>
+
+          {/* Superannuation Settings */}
+          <div className="mt-6">
+            <SuperFundForm
+              initialData={{
+                id: profile.id,
+                firstName: profile.firstName,
+                lastName: profile.lastName,
+                email: profile.email,
+                superEnabled: profile.superEnabled ?? null,
+                customSuperRate: profile.customSuperRate ?? null,
+                superFundName: profile.superFundName ?? null,
+                superFundMemberNumber: profile.superFundMemberNumber ?? null,
+                superFundUSI: profile.superFundUSI ?? null,
+                superFundABN: profile.superFundABN ?? null,
+              }}
+            />
+          </div>
         </div>
       </div>
     </div>

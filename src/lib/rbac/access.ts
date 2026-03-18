@@ -25,6 +25,9 @@ export {
   type FieldAccessLevel,
 } from "./advanced-permissions";
 
+// Re-export role check functions
+export { isAdmin, isManager, hasPermission, hasVenuePermission } from "./permissions";
+
 /**
  * Require authentication - redirect to login if not authenticated
  * @returns The authenticated user

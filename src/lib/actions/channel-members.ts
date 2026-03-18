@@ -296,7 +296,7 @@ export async function addChannelMembers(data: AddChannelMembersInput) {
     });
 
     revalidatePath("/posts");
-    revalidatePath("/admin/channels");
+    revalidatePath("/manage/channels");
 
     return {
       success: true,
@@ -392,7 +392,7 @@ export async function removeChannelMembers(data: RemoveChannelMembersInput) {
     });
 
     revalidatePath("/posts");
-    revalidatePath("/admin/channels");
+    revalidatePath("/manage/channels");
 
     return {
       success: true,
@@ -487,7 +487,7 @@ export async function updateMemberRole(data: UpdateMemberRoleInput) {
     });
 
     revalidatePath("/posts");
-    revalidatePath("/admin/channels");
+    revalidatePath("/manage/channels");
 
     return {
       success: true,

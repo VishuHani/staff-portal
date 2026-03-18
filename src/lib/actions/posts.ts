@@ -84,8 +84,10 @@ async function checkChannelPermission(
 
 /**
  * Get posts with filtering and pagination
- * Filtered by venues: Users only see posts from authors in their shared venues
- * Filtered by channels: Users only see posts from channels assigned to their venues
+ * Filtered by venues: Users see their own posts + posts from authors in shared venues
+ * Filtered by channels: Users see posts from accessible channels (venue-assigned or public)
+ * 
+ * FIX: Users can now see their own posts (previously excluded due to getSharedVenueUsers excluding self)
  */
 export async function getPosts(filters?: FilterPostsInput) {
   const user = await requireAuth();
@@ -101,26 +103,47 @@ export async function getPosts(filters?: FilterPostsInput) {
     // Get accessible channels for venue-based channel filtering
     const accessibleChannelIds = await getAccessibleChannelIds(user.id);
 
-    const posts = await prisma.post.findMany({
-      where: {
-        // VENUE FILTERING: Only show posts from users in shared venues
-        authorId: {
-          in: sharedVenueUserIds,
-        },
-        // CHANNEL FILTERING: Only show posts from accessible channels
-        channelId: {
-          in: accessibleChannelIds,
-        },
-        ...(validatedFilters.channelId && {
+    // Build the base filter conditions
+    const buildWhereClause = () => {
+      // If specific channelId filter is provided, use simpler logic
+      if (validatedFilters.channelId) {
+        return {
           channelId: validatedFilters.channelId,
-        }),
+          OR: [
+            // User's own posts in this channel
+            { authorId: user.id },
+            // Posts from shared venue users in this channel
+            { authorId: { in: sharedVenueUserIds } },
+          ],
+          ...(validatedFilters.authorId && {
+            authorId: validatedFilters.authorId,
+          }),
+          ...(validatedFilters.pinned !== undefined && {
+            pinned: validatedFilters.pinned,
+          }),
+        };
+      }
+
+      // General case: show posts from accessible channels
+      return {
+        channelId: { in: accessibleChannelIds },
+        OR: [
+          // User's own posts in any accessible channel
+          { authorId: user.id },
+          // Posts from shared venue users in accessible channels
+          { authorId: { in: sharedVenueUserIds } },
+        ],
         ...(validatedFilters.authorId && {
           authorId: validatedFilters.authorId,
         }),
         ...(validatedFilters.pinned !== undefined && {
           pinned: validatedFilters.pinned,
         }),
-      },
+      };
+    };
+
+    const posts = await prisma.post.findMany({
+      where: buildWhereClause(),
       include: {
         author: {
           select: {
@@ -255,7 +278,11 @@ export async function getPostById(id: string) {
     }
 
     // VENUE FILTERING: Check if user has access to this post
-    if (!sharedVenueUserIds.includes(post.authorId)) {
+    // FIX: Users can always access their own posts
+    const isOwnPost = post.authorId === user.id;
+    const hasVenueAccess = sharedVenueUserIds.includes(post.authorId);
+    
+    if (!isOwnPost && !hasVenueAccess) {
       return { error: "Post not found" };
     }
 

@@ -3,13 +3,18 @@
 /**
  * Roster Extraction V3 Server Actions
  * 
- * Server actions for the V3 extraction system.
+ * Server actions for the V3 extraction system with:
+ * - Transaction-safe confirm pipeline
+ * - Idempotency key enforcement
+ * - Duplicate roster prevention
+ * - Snapshot audit trail
  */
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
 import { RosterStatus } from "@prisma/client";
+import { randomUUID } from "crypto";
 import {
   extractRosterFromImageV3,
   getExtractionContextV3,
@@ -17,6 +22,15 @@ import {
   type ExtractionResultV3,
 } from "@/lib/services/roster-extraction-v3-service";
 import type { ExtractedShift } from "@/lib/services/extraction-validator";
+import {
+  generateIdempotencyKey,
+  checkIdempotencyKey,
+  storeIdempotencyRecord,
+  buildAuditSnapshot,
+  findExistingRosterForWeek,
+  createRosterWithIdempotency,
+} from "@/lib/rosters/extraction-idempotency";
+import type { MatchStrategy } from "@/lib/rosters/staff-matching-engine";
 
 // ============================================================================
 // TYPES
@@ -29,6 +43,10 @@ interface UploadResult {
     shift: ExtractedShift;
     matchedUserId: string | null;
     matchConfidence: number;
+    matchStrategy?: MatchStrategy;
+    matchReason?: string;
+    matchAlternatives?: Array<{ userId: string; confidence: number; staffName: string }>;
+    requiresConfirmation?: boolean;
   }>;
   error?: string;
 }
@@ -36,8 +54,36 @@ interface UploadResult {
 interface ConfirmResult {
   success: boolean;
   rosterId?: string;
+  duplicateRosterId?: string;
+  idempotencyKey?: string;
+  auditId?: string;
+  isDuplicate?: boolean;
   error?: string;
 }
+
+interface ConfirmPayload {
+  venueId: string;
+  weekStart: string;
+  idempotencyKey?: string;
+  shifts: Array<{
+    staff_name: string;
+    matchedUserId?: string;
+    date: string;
+    start_time: string;
+    end_time: string;
+    role?: string;
+    break?: boolean;
+  }>;
+  extractionMetadata?: {
+    confidence: number;
+    processingTimeMs: number;
+    attemptCount: number;
+    fileName: string;
+  };
+}
+
+// Re-export generateIdempotencyKey for use in client components
+export { generateIdempotencyKey };
 
 // ============================================================================
 // UPLOAD AND EXTRACT
@@ -104,6 +150,10 @@ export async function uploadAndExtractRosterV3(
         },
         matchedUserId: shift.matchedUserId,
         matchConfidence: shift.matchConfidence,
+        matchStrategy: shift.matchStrategy as MatchStrategy | undefined,
+        matchReason: shift.matchReason,
+        matchAlternatives: shift.matchAlternatives,
+        requiresConfirmation: shift.requiresConfirmation,
       })),
     };
   } catch (error) {
@@ -120,11 +170,12 @@ export async function uploadAndExtractRosterV3(
 // ============================================================================
 
 /**
- * Confirm extraction and create roster
+ * Confirm extraction and create roster with idempotency protection
  */
 export async function confirmExtractionAndCreateRosterV3(data: {
   venueId: string;
   weekStart: string;
+  idempotencyKey?: string;
   shifts: Array<{
     staff_name: string;
     matchedUserId?: string;
@@ -134,52 +185,107 @@ export async function confirmExtractionAndCreateRosterV3(data: {
     role?: string;
     break?: boolean;
   }>;
+  extractionMetadata?: {
+    confidence: number;
+    processingTimeMs: number;
+    attemptCount: number;
+    fileName: string;
+  };
 }): Promise<ConfirmResult> {
   try {
     const user = await requireAuth();
+
+    // Generate or use provided idempotency key
+    const idempotencyKey = data.idempotencyKey || generateIdempotencyKey();
 
     // Calculate end date (6 days after start)
     const startDate = new Date(data.weekStart);
     const endDate = new Date(startDate);
     endDate.setDate(startDate.getDate() + 6);
 
-    // Create roster
-    const roster = await prisma.roster.create({
-      data: {
+    // Guardrail: Check for existing roster for same venue/week
+    const existingRoster = await findExistingRosterForWeek(data.venueId, startDate, endDate);
+    if (existingRoster) {
+      return {
+        success: false,
+        duplicateRosterId: existingRoster.id,
+        error: `A roster already exists for this venue and week (${existingRoster.name}).`,
+      };
+    }
+
+    // Guardrail: Validate shift times before create
+    for (const [index, shift] of data.shifts.entries()) {
+      const [sh, sm] = shift.start_time.split(":").map(Number);
+      const [eh, em] = shift.end_time.split(":").map(Number);
+      if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) {
+        return {
+          success: false,
+          error: `Invalid shift time format at row ${index + 1}`,
+        };
+      }
+      const startMinutes = sh * 60 + sm;
+      const endMinutes = eh * 60 + em;
+      if (endMinutes <= startMinutes) {
+        return {
+          success: false,
+          error: `Invalid shift time order at row ${index + 1}: end time must be after start time`,
+        };
+      }
+    }
+
+    // Build audit snapshot
+    const snapshot = buildAuditSnapshot({
+      venueId: data.venueId,
+      weekStart: data.weekStart,
+      shifts: data.shifts,
+      extractionMetadata: data.extractionMetadata,
+      userId: user.id,
+    });
+
+    // Create roster with idempotency protection
+    const result = await createRosterWithIdempotency(
+      idempotencyKey,
+      {
         name: `Roster Week of ${startDate.toLocaleDateString()}`,
         venueId: data.venueId,
         startDate,
         endDate,
-        status: RosterStatus.DRAFT,
         createdBy: user.id,
-        shifts: {
-          create: data.shifts.map((shift) => ({
-            date: new Date(shift.date),
-            startTime: shift.start_time,
-            endTime: shift.end_time,
-            userId: shift.matchedUserId,
-            position: shift.role,
-            notes: shift.break ? "Break included" : undefined,
-            originalName: shift.staff_name,
-          })),
-        },
       },
-      include: {
-        shifts: true,
-      },
-    });
+      data.shifts.map((shift) => ({
+        userId: shift.matchedUserId,
+        date: new Date(shift.date),
+        startTime: shift.start_time,
+        endTime: shift.end_time,
+        position: shift.role,
+        notes: shift.break ? "Break included" : undefined,
+        originalName: shift.staff_name,
+      })),
+      snapshot
+    );
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error,
+      };
+    }
 
     console.log(`[V3] Roster created:`, {
-      rosterId: roster.id,
+      rosterId: result.rosterId,
       venueId: data.venueId,
-      shiftCount: roster.shifts?.length || 0,
+      idempotencyKey,
+      isDuplicate: result.isDuplicate,
+      shiftCount: data.shifts.length,
     });
 
     revalidatePath("/manage/rosters");
 
     return {
       success: true,
-      rosterId: roster.id,
+      rosterId: result.rosterId,
+      idempotencyKey,
+      isDuplicate: result.isDuplicate,
     };
   } catch (error) {
     console.error("[V3] Confirm and create error:", error);

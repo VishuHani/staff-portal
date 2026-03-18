@@ -11,7 +11,7 @@
  * - Confidence gating
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Upload,
@@ -26,6 +26,7 @@ import {
   Info,
   Sparkles,
   RefreshCw,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -53,13 +54,29 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { FileUploadZone } from "./file-upload-zone";
+import { ExtractionMatrixPreview } from "./extraction-matrix-preview";
+import {
+  UnresolvedIdentityPanel,
+  MatchingSummary,
+  type UnresolvedIdentity,
+} from "./unresolved-identity-panel";
 import {
   uploadAndExtractRosterV3,
   confirmExtractionAndCreateRosterV3,
   getMatchableStaffV3,
 } from "@/lib/actions/rosters/extraction-v3-actions";
 import type { ExtractionResultV3 } from "@/lib/services/roster-extraction-v3-service";
+import type { RosterExtractionResult } from "@/lib/schemas/rosters/extraction";
 import { format, startOfWeek, addDays } from "date-fns";
+import {
+  buildMatrixExtractionResult,
+  buildPreviewShiftState,
+  toConfirmPayloadShifts,
+  categorizeShiftsByMatchStatus,
+  getMatchingStatistics,
+  hasBlockingUnresolvedIdentities,
+  type PreviewShiftState,
+} from "@/lib/rosters/v3-preview-engine";
 
 // ============================================================================
 // TYPES
@@ -74,18 +91,6 @@ interface RosterUploadWizardV3Props {
 }
 
 type WizardStep = "upload" | "extracting" | "preview" | "confirm";
-
-interface ShiftData {
-  date: string;
-  day: string;
-  role: string | null;
-  staff_name: string;
-  start_time: string;
-  end_time: string;
-  break: boolean;
-  matchedUserId: string | null;
-  matchConfidence: number;
-}
 
 // ============================================================================
 // COMPONENT
@@ -102,7 +107,8 @@ export function RosterUploadWizardV3({
   const [currentStep, setCurrentStep] = useState<WizardStep>("upload");
   const [isLoading, setIsLoading] = useState(false);
   const [extraction, setExtraction] = useState<ExtractionResultV3 | null>(null);
-  const [shifts, setShifts] = useState<ShiftData[]>([]);
+  const [previewExtraction, setPreviewExtraction] = useState<RosterExtractionResult | null>(null);
+  const [previewShifts, setPreviewShifts] = useState<PreviewShiftState[]>([]);
   const [venueStaff, setVenueStaff] = useState<
     Array<{ id: string; name: string; email: string }>
   >([]);
@@ -111,13 +117,19 @@ export function RosterUploadWizardV3({
   );
   const [elapsedTime, setElapsedTime] = useState(0);
   const [showValidationDetails, setShowValidationDetails] = useState(false);
+  const [blockingIssues, setBlockingIssues] = useState<string[]>([]);
+  const [uploadedFileName, setUploadedFileName] = useState<string>("uploaded");
+  const [showUnresolvedPanel, setShowUnresolvedPanel] = useState(false);
+  const [unresolvedIdentities, setUnresolvedIdentities] = useState<UnresolvedIdentity[]>([]);
 
   // Load venue staff
   const loadVenueStaff = useCallback(async () => {
     const result = await getMatchableStaffV3(venueId);
     if (result.success) {
       setVenueStaff(result.staff);
+      return result.staff;
     }
+    return [] as Array<{ id: string; name: string; email: string }>;
   }, [venueId]);
 
   // Track elapsed time during extraction
@@ -143,25 +155,51 @@ export function RosterUploadWizardV3({
         const formData = new FormData();
         formData.append("file", file);
         formData.append("venueId", venueId);
+        setUploadedFileName(file.name);
 
         const result = await uploadAndExtractRosterV3(formData);
 
         if (result.success && result.extraction && result.extraction.data) {
           setExtraction(result.extraction);
-          setShifts(
-            result.matchedShifts?.map((s) => ({
-              date: s.shift.date,
-              day: s.shift.day,
-              role: s.shift.role,
-              staff_name: s.shift.staff_name,
-              start_time: s.shift.start_time,
-              end_time: s.shift.end_time,
-              break: s.shift.break || false,
-              matchedUserId: s.matchedUserId,
-              matchConfidence: s.matchConfidence,
-            })) || []
-          );
-          await loadVenueStaff();
+          const staff = await loadVenueStaff();
+
+          const validationErrorsByIndex = new Map<number, string[]>();
+          const validationWarningsByIndex = new Map<number, string[]>();
+
+          for (const err of result.extraction.validation?.errors || []) {
+            const list = validationErrorsByIndex.get(err.shiftIndex) || [];
+            list.push(err.message);
+            validationErrorsByIndex.set(err.shiftIndex, list);
+          }
+          for (const warn of result.extraction.validation?.warnings || []) {
+            const list = validationWarningsByIndex.get(warn.shiftIndex) || [];
+            list.push(warn.message);
+            validationWarningsByIndex.set(warn.shiftIndex, list);
+          }
+
+          const nextPreviewShifts = buildPreviewShiftState({
+            matchedShifts: (result.matchedShifts || []).map((ms) => ({
+              ...ms,
+              matchStrategy: ms.matchStrategy as import("@/lib/rosters/staff-matching-engine").MatchStrategy | undefined,
+            })),
+            weekStart: result.extraction.data.week_start || weekStart,
+            validationErrorsByIndex,
+            validationWarningsByIndex,
+          });
+          setPreviewShifts(nextPreviewShifts);
+
+          const nextPreviewExtraction = buildMatrixExtractionResult({
+            shifts: nextPreviewShifts,
+            venueStaff: staff,
+            fileName: file.name,
+            weekStart: result.extraction.data.week_start || weekStart,
+            extractionConfidence: result.extraction.validation?.confidence || 0,
+            warnings: result.extraction.validation?.warnings.map((w) => w.message) || [],
+            errors: result.extraction.validation?.errors.map((e) => e.message) || [],
+          });
+          setPreviewExtraction(nextPreviewExtraction);
+          setBlockingIssues(result.extraction.validation?.errors.map((e) => e.message) || []);
+
           setCurrentStep("preview");
 
           const timeSeconds = Math.round(result.extraction.metadata.processingTimeMs / 1000);
@@ -187,20 +225,29 @@ export function RosterUploadWizardV3({
   const handleConfirm = useCallback(async () => {
     if (!extraction?.data) return;
 
+    const includedShifts = previewShifts.filter((s) => s.included);
+    if (includedShifts.length === 0) {
+      toast.error("No included shifts. Include at least one shift before creating roster.");
+      return;
+    }
+
+    const unmatchedIncluded = includedShifts.filter((s) => !s.matchedUserId).length;
+    if (unmatchedIncluded > 0) {
+      toast.error("Please match all included staff before creating roster.");
+      return;
+    }
+
+    if (blockingIssues.length > 0) {
+      toast.error("Resolve extraction errors before creating roster.");
+      return;
+    }
+
     setIsLoading(true);
     try {
       const result = await confirmExtractionAndCreateRosterV3({
         venueId,
         weekStart,
-        shifts: shifts.map((shift) => ({
-          staff_name: shift.staff_name,
-          matchedUserId: shift.matchedUserId || undefined,
-          date: shift.date,
-          start_time: shift.start_time,
-          end_time: shift.end_time,
-          role: shift.role || undefined,
-          break: shift.break,
-        })),
+        shifts: toConfirmPayloadShifts(previewShifts),
       });
 
       if (result.success) {
@@ -217,12 +264,23 @@ export function RosterUploadWizardV3({
     } finally {
       setIsLoading(false);
     }
-  }, [extraction, shifts, venueId, weekStart, onOpenChange, onSuccess, router]);
+  }, [
+    extraction,
+    previewShifts,
+    venueId,
+    weekStart,
+    onOpenChange,
+    onSuccess,
+    router,
+    blockingIssues,
+  ]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
     setExtraction(null);
-    setShifts([]);
+    setPreviewExtraction(null);
+    setPreviewShifts([]);
+    setBlockingIssues([]);
     setCurrentStep("upload");
     setElapsedTime(0);
     onOpenChange(false);
@@ -247,8 +305,123 @@ export function RosterUploadWizardV3({
   };
 
   // Calculate summary stats
-  const matchedShiftsCount = shifts.filter((s) => s.matchedUserId).length;
-  const unmatchedShiftsCount = shifts.length - matchedShiftsCount;
+  const includedShifts = previewShifts.filter((s) => s.included);
+  const matchedShiftsCount = includedShifts.filter((s) => s.matchedUserId).length;
+  const unmatchedShiftsCount = includedShifts.length - matchedShiftsCount;
+
+  // Build unresolved identities for the panel
+  const buildUnresolvedIdentities = useCallback((): UnresolvedIdentity[] => {
+    const { unresolved, needsReview } = categorizeShiftsByMatchStatus(previewShifts);
+    const allUnresolved = [...unresolved, ...needsReview];
+    
+    // Group by staff name
+    const byName = new Map<string, PreviewShiftState[]>();
+    for (const shift of allUnresolved) {
+      const key = shift.staff_name.toLowerCase().trim();
+      const list = byName.get(key) || [];
+      list.push(shift);
+      byName.set(key, list);
+    }
+    
+    return Array.from(byName.entries()).map(([name, shifts]) => {
+      const first = shifts[0];
+      return {
+        id: `identity-${name}`,
+        staffName: first.staff_name,
+        confidence: first.matchConfidence,
+        confidenceBand: first.matchConfidenceBand || 'none',
+        strategy: first.matchStrategy || 'no_match',
+        matchReason: first.matchReason || null,
+        alternatives: first.matchAlternatives || [],
+        shiftCount: shifts.length,
+        shiftIds: shifts.map(s => s.id),
+      };
+    });
+  }, [previewShifts]);
+
+  // Handle opening unresolved identity panel
+  const handleOpenUnresolvedPanel = useCallback(() => {
+    setUnresolvedIdentities(buildUnresolvedIdentities());
+    setShowUnresolvedPanel(true);
+  }, [buildUnresolvedIdentities]);
+
+  // Handle resolving identities from the panel
+  const handleResolveIdentities = useCallback(
+    (resolutions: Array<{ identityId: string; matchedUserId: string | null }>) => {
+      const updated = previewShifts.map((shift) => {
+        const resolution = resolutions.find((r) =>
+          shift.staff_name.toLowerCase().trim() === r.identityId.replace("identity-", "").toLowerCase()
+        );
+        if (resolution && resolution.matchedUserId) {
+          return {
+            ...shift,
+            matchedUserId: resolution.matchedUserId,
+            matchConfidence: 100,
+            requiresMatchConfirmation: false,
+          };
+        }
+        return shift;
+      });
+      setPreviewShifts(updated);
+      setShowUnresolvedPanel(false);
+
+      // Update preview extraction
+      if (previewExtraction) {
+        setPreviewExtraction(
+          buildMatrixExtractionResult({
+            shifts: updated,
+            venueStaff,
+            fileName: uploadedFileName,
+            weekStart,
+            extractionConfidence: extraction?.validation?.confidence || previewExtraction.confidenceScore,
+            warnings: previewExtraction.warnings,
+            errors: previewExtraction.errors,
+          })
+        );
+      }
+
+      toast.success(`Resolved ${resolutions.filter(r => r.matchedUserId).length} identities`);
+    },
+    [previewShifts, previewExtraction, venueStaff, uploadedFileName, weekStart, extraction]
+  );
+
+  // Get matching statistics for the summary component
+  const matchingStats = useMemo(() => getMatchingStatistics(previewShifts), [previewShifts]);
+
+  const handleStaffMatch = useCallback(
+    (extractedName: string, userId: string) => {
+      const updated = previewShifts.map((shift) => {
+        if (shift.staff_name.toLowerCase().trim() !== extractedName.toLowerCase().trim()) {
+          return shift;
+        }
+        return { ...shift, matchedUserId: userId, matchConfidence: Math.max(shift.matchConfidence, 95) };
+      });
+      setPreviewShifts(updated);
+      if (previewExtraction) {
+        setPreviewExtraction(
+          buildMatrixExtractionResult({
+            shifts: updated,
+            venueStaff,
+            fileName: uploadedFileName,
+            weekStart,
+            extractionConfidence: extraction?.validation?.confidence || previewExtraction.confidenceScore,
+            warnings: previewExtraction.warnings,
+            errors: previewExtraction.errors,
+          })
+        );
+      }
+    },
+    [previewShifts, previewExtraction, venueStaff, uploadedFileName, weekStart, extraction]
+  );
+
+  const handleShiftToggle = useCallback(
+    (shiftId: string, included: boolean) => {
+      setPreviewShifts((prev) =>
+        prev.map((shift) => (shift.id === shiftId ? { ...shift, included } : shift))
+      );
+    },
+    []
+  );
 
   return (
     <Dialog open={open} onOpenChange={handleCancel}>
@@ -360,7 +533,7 @@ export function RosterUploadWizardV3({
             </div>
           )}
 
-          {currentStep === "preview" && extraction && (
+          {currentStep === "preview" && extraction && previewExtraction && (
             <div className="space-y-4">
               {/* Validation Summary */}
               {extraction.validation && (
@@ -447,49 +620,50 @@ export function RosterUploadWizardV3({
                 </Collapsible>
               )}
 
-              {/* Shifts Preview */}
-              <div className="rounded-lg border">
-                <div className="p-4 border-b">
-                  <h4 className="font-medium">Extracted Shifts</h4>
-                  <p className="text-sm text-muted-foreground">
-                    {shifts.length} shifts extracted, {matchedShiftsCount} matched to staff
-                  </p>
+              {blockingIssues.length > 0 && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Blocking issues detected</AlertTitle>
+                  <AlertDescription>
+                    Resolve extraction errors before creating the roster. Found {blockingIssues.length} blocking issue{blockingIssues.length !== 1 ? "s" : ""}.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Matching Summary and Unresolved Identity Panel */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-1">
+                  <MatchingSummary
+                    stats={matchingStats}
+                    onStartReview={handleOpenUnresolvedPanel}
+                  />
                 </div>
-                <div className="max-h-96 overflow-y-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/50 sticky top-0">
-                      <tr>
-                        <th className="text-left p-2">Staff</th>
-                        <th className="text-left p-2">Date</th>
-                        <th className="text-left p-2">Time</th>
-                        <th className="text-left p-2">Role</th>
-                        <th className="text-left p-2">Match</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {shifts.map((shift, idx) => (
-                        <tr key={idx} className="border-t">
-                          <td className="p-2">{shift.staff_name}</td>
-                          <td className="p-2">{shift.day}</td>
-                          <td className="p-2">{shift.start_time} - {shift.end_time}</td>
-                          <td className="p-2">{shift.role || "-"}</td>
-                          <td className="p-2">
-                            {shift.matchedUserId ? (
-                              <Badge variant="default" className="text-xs">
-                                {shift.matchConfidence}%
-                              </Badge>
-                            ) : (
-                              <Badge variant="destructive" className="text-xs">
-                                Unmatched
-                              </Badge>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="md:col-span-2">
+                  <Alert>
+                    <Users className="h-4 w-4" />
+                    <AlertTitle>Staff Matching</AlertTitle>
+                    <AlertDescription>
+                      {matchingStats.unmatched > 0 || matchingStats.needsConfirmation > 0 ? (
+                        <span>
+                          {matchingStats.unmatched + matchingStats.needsConfirmation} staff members need to be identified.
+                          Click "Review Issues" to resolve unmatched or low-confidence matches.
+                        </span>
+                      ) : (
+                        <span>All staff members have been successfully matched with high confidence.</span>
+                      )}
+                    </AlertDescription>
+                  </Alert>
                 </div>
               </div>
+
+              <ExtractionMatrixPreview
+                extraction={previewExtraction}
+                venueStaff={venueStaff}
+                weekStart={weekStart}
+                onStaffMatch={handleStaffMatch}
+                onShiftToggle={handleShiftToggle}
+                includedShiftIds={new Set(previewShifts.filter((s) => s.included).map((s) => s.id))}
+              />
             </div>
           )}
 
@@ -593,6 +767,36 @@ export function RosterUploadWizardV3({
             </div>
           </div>
         </DialogFooter>
+
+        {/* Unresolved Identity Panel */}
+        <UnresolvedIdentityPanel
+          open={showUnresolvedPanel}
+          onOpenChange={setShowUnresolvedPanel}
+          identities={unresolvedIdentities}
+          staffOptions={venueStaff}
+          onResolve={(identityId, matchedUserId) => {
+            // Single identity resolution
+            const updated = previewShifts.map((shift) => {
+              if (shift.staff_name.toLowerCase().trim() === identityId.replace("identity-", "").toLowerCase()) {
+                return {
+                  ...shift,
+                  matchedUserId,
+                  matchConfidence: matchedUserId ? 100 : shift.matchConfidence,
+                  requiresMatchConfirmation: false,
+                };
+              }
+              return shift;
+            });
+            setPreviewShifts(updated);
+          }}
+          onResolveAll={handleResolveIdentities}
+          onCancel={() => setShowUnresolvedPanel(false)}
+          config={{
+            allowSkipUnresolved: false,
+            requireAllResolved: true,
+            showConfidenceDetails: true,
+          }}
+        />
       </DialogContent>
     </Dialog>
   );

@@ -19,6 +19,19 @@ import { Badge } from "@/components/ui/badge";
 import { Users, UserCheck, UserX, Shield } from "lucide-react";
 import { UsersTable } from "@/components/admin/UsersTable";
 
+// Helper to convert Decimal fields to numbers for client components
+function serializeUser(user: any) {
+  return {
+    ...user,
+    weekdayRate: user.weekdayRate ? Number(user.weekdayRate) : null,
+    saturdayRate: user.saturdayRate ? Number(user.saturdayRate) : null,
+    sundayRate: user.sundayRate ? Number(user.sundayRate) : null,
+    publicHolidayRate: user.publicHolidayRate ? Number(user.publicHolidayRate) : null,
+    overtimeRate: user.overtimeRate ? Number(user.overtimeRate) : null,
+    lateRate: user.lateRate ? Number(user.lateRate) : null,
+  };
+}
+
 export const metadata = {
   title: "Team Members | Team Management",
   description: "Manage team members and their permissions",
@@ -55,6 +68,9 @@ export default async function ManageUsersPage() {
   const { roles } = rolesResult;
   const { stores } = storesResult;
   const { venues } = venuesResult;
+
+  // Serialize users to convert Decimal fields to numbers
+  const serializedUsers = teamUsers.map(serializeUser);
 
   return (
     <DashboardLayout user={user}>
@@ -124,7 +140,7 @@ export default async function ManageUsersPage() {
           </CardHeader>
           <CardContent>
             <UsersTable
-              users={teamUsers as any}
+              users={serializedUsers as any}
               roles={roles as any}
               stores={stores as any}
               venues={venues as any}

@@ -62,7 +62,15 @@ export async function getChannels(filters?: FilterChannelsInput) {
         ...(validatedFilters.type && { type: validatedFilters.type }),
         ...(validatedFilters.includeArchived === false && { archived: false }),
       },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        type: true,
+        icon: true,
+        color: true,
+        archived: true,
+        isPublic: true, // Include public flag for UI indicators
         _count: {
           select: {
             posts: true,
@@ -237,7 +245,7 @@ export async function createChannel(data: CreateChannelInput) {
     });
 
     revalidatePath("/posts");
-    revalidatePath("/admin/channels");
+    revalidatePath("/manage/channels");
 
     return { success: true, channel };
   } catch (error) {
@@ -347,7 +355,7 @@ export async function updateChannel(data: UpdateChannelInput) {
     });
 
     revalidatePath("/posts");
-    revalidatePath("/admin/channels");
+    revalidatePath("/manage/channels");
 
     return { success: true, channel };
   } catch (error) {
@@ -413,7 +421,7 @@ export async function archiveChannel(data: ArchiveChannelInput) {
     });
 
     revalidatePath("/posts");
-    revalidatePath("/admin/channels");
+    revalidatePath("/manage/channels");
 
     return { success: true, channel };
   } catch (error) {
@@ -485,7 +493,7 @@ export async function deleteChannel(data: DeleteChannelInput) {
     });
 
     revalidatePath("/posts");
-    revalidatePath("/admin/channels");
+    revalidatePath("/manage/channels");
 
     return { success: true };
   } catch (error) {

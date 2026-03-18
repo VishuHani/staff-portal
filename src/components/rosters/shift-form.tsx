@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -27,10 +28,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StaffSelector } from "./staff-selector";
-import { format } from "date-fns";
-import { CalendarIcon, Loader2 } from "lucide-react";
+import { format, addDays, startOfWeek, eachDayOfInterval, isSameDay } from "date-fns";
+import { CalendarIcon, Loader2, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { addShift, updateShift, ShiftInput } from "@/lib/actions/rosters";
+import { addShift, updateShift, bulkAddShifts, ShiftInput } from "@/lib/actions/rosters";
+import { calculateShiftHours, calculateBreakMinutes, type BreakRule } from "@/lib/utils/pay-calculator";
 import { toast } from "sonner";
 
 interface StaffMember {
@@ -49,12 +51,30 @@ interface Position {
   active: boolean;
 }
 
+interface ShiftTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string;
+  startTime: string;
+  endTime: string;
+  breakMinutes: number;
+  autoCalculateBreak: boolean;
+  position: string | null;
+  daysOfWeek: number[];
+  displayOrder: number;
+}
+
 interface ShiftFormProps {
   rosterId: string;
   rosterStartDate: Date;
   rosterEndDate: Date;
   staff: StaffMember[];
   positions?: Position[];
+  shiftTemplates?: ShiftTemplate[];
+  breakRules?: BreakRule[];
+  autoCalculateBreaks?: boolean;
+  defaultBreakMinutes?: number;
   shift?: {
     id: string;
     userId: string | null;
@@ -79,6 +99,10 @@ export function ShiftForm({
   rosterEndDate,
   staff,
   positions = [],
+  shiftTemplates = [],
+  breakRules = [],
+  autoCalculateBreaks = false,
+  defaultBreakMinutes = 30,
   shift,
   defaultDate,
   defaultUserId,
@@ -90,6 +114,9 @@ export function ShiftForm({
   const activePositions = positions.filter((p) => p.active);
   const isEditing = !!shift;
   const [isLoading, setIsLoading] = useState(false);
+  const [applyToMultipleDays, setApplyToMultipleDays] = useState(false);
+  const [selectedDays, setSelectedDays] = useState<number[]>([]); // 0=Sun, 1=Mon, ..., 6=Sat
+  const [autoBreakEnabled, setAutoBreakEnabled] = useState(autoCalculateBreaks);
 
   const [formData, setFormData] = useState({
     userId: shift?.userId || null,
@@ -100,6 +127,57 @@ export function ShiftForm({
     position: shift?.position || "",
     notes: shift?.notes || "",
   });
+
+  // Get all days in the roster period for multi-day selection
+  const rosterDays = eachDayOfInterval({ start: rosterStartDate, end: rosterEndDate });
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  const toggleDay = (dayIndex: number) => {
+    setSelectedDays((prev) =>
+      prev.includes(dayIndex)
+        ? prev.filter((d) => d !== dayIndex)
+        : [...prev, dayIndex]
+    );
+  };
+
+  // Default shift templates (used if no venue templates provided)
+  const defaultShiftTemplates = [
+    { name: "Morning Shift", startTime: "06:00", endTime: "14:00", breakMinutes: 30 },
+    { name: "Day Shift", startTime: "09:00", endTime: "17:00", breakMinutes: 30 },
+    { name: "Afternoon Shift", startTime: "12:00", endTime: "20:00", breakMinutes: 30 },
+    { name: "Evening Shift", startTime: "16:00", endTime: "23:00", breakMinutes: 30 },
+    { name: "Night Shift", startTime: "22:00", endTime: "06:00", breakMinutes: 30 },
+  ];
+
+  // Use venue templates if provided, otherwise use defaults
+  const templates = shiftTemplates.length > 0 ? shiftTemplates : defaultShiftTemplates;
+
+  // Auto-calculate break when times change
+  useEffect(() => {
+    if (autoBreakEnabled && formData.startTime && formData.endTime) {
+      const hours = calculateShiftHours(formData.startTime, formData.endTime, 0);
+      const calculatedBreak = calculateBreakMinutes(hours, breakRules, defaultBreakMinutes);
+      setFormData(prev => ({ ...prev, breakMinutes: calculatedBreak }));
+    }
+  }, [formData.startTime, formData.endTime, autoBreakEnabled, breakRules, defaultBreakMinutes]);
+
+  const applyTemplate = (template: typeof templates[0]) => {
+    const newFormData = {
+      ...formData,
+      startTime: template.startTime,
+      endTime: template.endTime,
+      breakMinutes: template.breakMinutes,
+    };
+    
+    // If auto-break is enabled, recalculate based on shift duration
+    if (autoBreakEnabled) {
+      const hours = calculateShiftHours(template.startTime, template.endTime, 0);
+      const calculatedBreak = calculateBreakMinutes(hours, breakRules, defaultBreakMinutes);
+      newFormData.breakMinutes = calculatedBreak;
+    }
+    
+    setFormData(newFormData);
+  };
 
   // Reset form data when shift prop changes or dialog opens
   useEffect(() => {
@@ -113,6 +191,8 @@ export function ShiftForm({
         position: shift?.position || "",
         notes: shift?.notes || "",
       });
+      setApplyToMultipleDays(false);
+      setSelectedDays([]);
     }
   }, [shift, open, rosterStartDate, defaultDate, defaultUserId]);
 
@@ -121,29 +201,74 @@ export function ShiftForm({
     setIsLoading(true);
 
     try {
-      const shiftData: ShiftInput = {
-        userId: formData.userId,
-        date: formData.date,
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        breakMinutes: formData.breakMinutes,
-        position: formData.position || undefined,
-        notes: formData.notes || undefined,
-      };
-
-      let result;
       if (isEditing && shift) {
-        result = await updateShift(shift.id, shiftData);
-      } else {
-        result = await addShift(rosterId, shiftData);
-      }
+        // Update existing shift
+        const shiftData: ShiftInput = {
+          userId: formData.userId,
+          date: formData.date,
+          startTime: formData.startTime,
+          endTime: formData.endTime,
+          breakMinutes: formData.breakMinutes,
+          position: formData.position || undefined,
+          notes: formData.notes || undefined,
+        };
+        const result = await updateShift(shift.id, shiftData);
+        if (result.success) {
+          toast.success("Shift updated");
+          onOpenChange(false);
+          onSuccess?.();
+        } else {
+          toast.error(result.error || "Failed to save shift");
+        }
+      } else if (applyToMultipleDays && selectedDays.length > 0) {
+        // Bulk create shifts for multiple days
+        const datesToCreate = rosterDays.filter((day) =>
+          selectedDays.includes(day.getDay())
+        );
 
-      if (result.success) {
-        toast.success(isEditing ? "Shift updated" : "Shift added");
-        onOpenChange(false);
-        onSuccess?.();
+        if (datesToCreate.length === 0) {
+          toast.error("No matching days found in the roster period");
+          setIsLoading(false);
+          return;
+        }
+
+        const shifts: ShiftInput[] = datesToCreate.map((date) => ({
+          userId: formData.userId,
+          date,
+          startTime: formData.startTime,
+          endTime: formData.endTime,
+          breakMinutes: formData.breakMinutes,
+          position: formData.position || undefined,
+          notes: formData.notes || undefined,
+        }));
+
+        const result = await bulkAddShifts(rosterId, shifts);
+        if (result.success) {
+          toast.success(`${result.count} shifts added across ${datesToCreate.length} days`);
+          onOpenChange(false);
+          onSuccess?.();
+        } else {
+          toast.error(result.error || "Failed to add shifts");
+        }
       } else {
-        toast.error(result.error || "Failed to save shift");
+        // Single shift creation
+        const shiftData: ShiftInput = {
+          userId: formData.userId,
+          date: formData.date,
+          startTime: formData.startTime,
+          endTime: formData.endTime,
+          breakMinutes: formData.breakMinutes,
+          position: formData.position || undefined,
+          notes: formData.notes || undefined,
+        };
+        const result = await addShift(rosterId, shiftData);
+        if (result.success) {
+          toast.success("Shift added");
+          onOpenChange(false);
+          onSuccess?.();
+        } else {
+          toast.error(result.error || "Failed to save shift");
+        }
       }
     } catch (error) {
       console.error("Error saving shift:", error);
@@ -180,37 +305,126 @@ export function ShiftForm({
               />
             </div>
 
-            {/* Date */}
-            <div className="space-y-2">
-              <Label>Date</Label>
-              <Popover>
-                <PopoverTrigger asChild>
+            {/* Date / Multi-day selection */}
+            {!isEditing && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="multiDay"
+                  checked={applyToMultipleDays}
+                  onCheckedChange={(checked) => setApplyToMultipleDays(checked === true)}
+                />
+                <Label htmlFor="multiDay" className="text-sm font-normal cursor-pointer">
+                  <Copy className="h-3.5 w-3.5 inline mr-1" />
+                  Apply to multiple days
+                </Label>
+              </div>
+            )}
+
+            {applyToMultipleDays && !isEditing ? (
+              <div className="space-y-2">
+                <Label>Select Days</Label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5, 6, 0].map((dayIndex) => (
+                    <Button
+                      key={dayIndex}
+                      type="button"
+                      variant={selectedDays.includes(dayIndex) ? "default" : "outline"}
+                      size="sm"
+                      className="h-9 w-11 p-0 text-xs"
+                      onClick={() => toggleDay(dayIndex)}
+                    >
+                      {dayNames[dayIndex]}
+                    </Button>
+                  ))}
+                </div>
+                {selectedDays.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Will create {rosterDays.filter((d) => selectedDays.includes(d.getDay())).length} shifts
+                    ({selectedDays.map((d) => dayNames[d]).join(", ")})
+                  </p>
+                )}
+                <div className="flex gap-2">
                   <Button
+                    type="button"
                     variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !formData.date && "text-muted-foreground"
-                    )}
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setSelectedDays([1, 2, 3, 4, 5])}
                   >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {formData.date ? format(formData.date, "PPP") : "Pick a date"}
+                    Weekdays
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={formData.date}
-                    onSelect={(date) =>
-                      date && setFormData({ ...formData, date })
-                    }
-                    disabled={(date) =>
-                      date < rosterStartDate || date > rosterEndDate
-                    }
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setSelectedDays([0, 6])}
+                  >
+                    Weekends
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setSelectedDays([0, 1, 2, 3, 4, 5, 6])}
+                  >
+                    All Days
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !formData.date && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {formData.date ? format(formData.date, "PPP") : "Pick a date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={formData.date}
+                      onSelect={(date) =>
+                        date && setFormData({ ...formData, date })
+                      }
+                      disabled={(date) =>
+                        date < rosterStartDate || date > rosterEndDate
+                      }
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
+
+            {/* Time Templates */}
+            {!isEditing && (
+              <div className="space-y-2">
+                <Label>Quick Templates</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {templates.map((template) => (
+                    <Button
+                      key={template.name}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => applyTemplate(template)}
+                      className="text-xs h-8"
+                    >
+                      {template.name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Time */}
             <div className="grid grid-cols-2 gap-4">
@@ -339,9 +553,13 @@ export function ShiftForm({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading}>
+            <Button type="submit" disabled={isLoading || (applyToMultipleDays && !isEditing && selectedDays.length === 0)}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isEditing ? "Update Shift" : "Add Shift"}
+              {isEditing
+                ? "Update Shift"
+                : applyToMultipleDays && selectedDays.length > 0
+                  ? `Add ${rosterDays.filter((d) => selectedDays.includes(d.getDay())).length} Shifts`
+                  : "Add Shift"}
             </Button>
           </DialogFooter>
         </form>

@@ -501,3 +501,201 @@ export function getEmailTemplate(
       };
   }
 }
+
+/**
+ * Get email template for user invitation
+ *
+ * @param params - Invitation details
+ * @returns Email template with subject and HTML content
+ */
+export function getInvitationEmailTemplate(params: {
+  inviterName: string;
+  venueName: string | null;
+  roleName: string;
+  inviteLink: string;
+  expirationDays: number;
+}): EmailTemplate {
+  const { inviterName, venueName, roleName, inviteLink, expirationDays } = params;
+  
+  // SECURITY: Escape all user-generated content
+  const safeInviterName = escapeHtml(inviterName);
+  const safeVenueName = venueName ? escapeHtml(venueName) : null;
+  const safeRoleName = escapeHtml(roleName);
+  
+  const venueText = safeVenueName ? `at <strong>${safeVenueName}</strong>` : '';
+  
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>You're Invited to Join Staff Portal</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+          }
+          .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: #ffffff;
+          }
+          .header {
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+          }
+          .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+          }
+          .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+          }
+          .content {
+            padding: 40px 30px;
+          }
+          .content h2 {
+            color: #1f2937;
+            font-size: 22px;
+            margin-top: 0;
+            margin-bottom: 20px;
+          }
+          .content p {
+            color: #4b5563;
+            margin: 16px 0;
+          }
+          .invite-details {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 24px;
+            margin: 24px 0;
+          }
+          .invite-details .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e5e7eb;
+          }
+          .invite-details .detail-row:last-child {
+            border-bottom: none;
+          }
+          .invite-details .label {
+            color: #6b7280;
+          }
+          .invite-details .value {
+            font-weight: 600;
+            color: #1f2937;
+          }
+          .button {
+            display: inline-block;
+            padding: 16px 32px;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            color: white !important;
+            text-decoration: none;
+            border-radius: 8px;
+            margin: 24px 0;
+            font-weight: 600;
+            font-size: 16px;
+          }
+          .button:hover {
+            opacity: 0.9;
+          }
+          .footer {
+            background: #f9fafb;
+            padding: 24px 30px;
+            text-align: center;
+            border-top: 1px solid #e5e7eb;
+          }
+          .footer p {
+            color: #6b7280;
+            font-size: 14px;
+            margin: 8px 0;
+          }
+          .warning {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 16px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+          }
+          .warning p {
+            margin: 0;
+            color: #92400e;
+          }
+          @media only screen and (max-width: 600px) {
+            .content {
+              padding: 30px 20px;
+            }
+            .button {
+              display: block;
+              text-align: center;
+            }
+            .invite-details .detail-row {
+              flex-direction: column;
+              gap: 4px;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🎉 You're Invited!</h1>
+            <p>Join the Staff Portal team</p>
+          </div>
+          <div class="content">
+            <h2>Hello!</h2>
+            <p><strong>${safeInviterName}</strong> has invited you to join the Staff Portal ${venueText}.</p>
+            
+            <div class="invite-details">
+              <div class="detail-row">
+                <span class="label">Invited by:</span>
+                <span class="value">${safeInviterName}</span>
+              </div>
+              ${safeVenueName ? `
+              <div class="detail-row">
+                <span class="label">Venue:</span>
+                <span class="value">${safeVenueName}</span>
+              </div>
+              ` : ''}
+              <div class="detail-row">
+                <span class="label">Role:</span>
+                <span class="value">${safeRoleName}</span>
+              </div>
+            </div>
+            
+            <p>Staff Portal helps you manage your schedule, communicate with your team, and stay on top of your work.</p>
+            
+            <div style="text-align: center;">
+              <a href="${inviteLink}" class="button">Accept Invitation</a>
+            </div>
+            
+            <div class="warning">
+              <p><strong>⏰ Time-sensitive:</strong> This invitation will expire in ${expirationDays} days. Please accept it before then to set up your account.</p>
+            </div>
+            
+            <p style="color: #6b7280; font-size: 14px;">If you didn't expect this invitation, you can safely ignore this email.</p>
+          </div>
+          <div class="footer">
+            <p>This is an automated message from Staff Portal.</p>
+            <p>Please do not reply to this email.</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+  
+  return {
+    subject: `🎉 You're invited to join Staff Portal${safeVenueName ? ` - ${safeVenueName}` : ''}`,
+    htmlContent,
+  };
+}

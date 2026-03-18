@@ -89,8 +89,8 @@ export function ChannelCreationWizard({
   // Step 1: Basic Info
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [type, setType] = useState("GENERAL");
-  const [icon, setIcon] = useState("hash");
+  const [type, setType] = useState("ALL_STAFF");
+  const [icon, setIcon] = useState("");
   const [color, setColor] = useState("#6366f1");
 
   // Step 2: Member Selection
@@ -112,8 +112,8 @@ export function ChannelCreationWizard({
       setCurrentStep(1);
       setName("");
       setDescription("");
-      setType("GENERAL");
-      setIcon("hash");
+      setType("ALL_STAFF");
+      setIcon("");
       setColor("#6366f1");
       setSelectionType("all");
       setSelectedRoleIds([]);
@@ -296,11 +296,9 @@ export function ChannelCreationWizard({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="GENERAL">General</SelectItem>
-                    <SelectItem value="ANNOUNCEMENT">Announcement</SelectItem>
-                    <SelectItem value="DISCUSSION">Discussion</SelectItem>
-                    <SelectItem value="TEAM">Team</SelectItem>
-                    <SelectItem value="PROJECT">Project</SelectItem>
+                    <SelectItem value="ALL_STAFF">All Staff</SelectItem>
+                    <SelectItem value="MANAGERS">Managers Only</SelectItem>
+                    <SelectItem value="CUSTOM">Custom</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

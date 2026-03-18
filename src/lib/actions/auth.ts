@@ -246,6 +246,7 @@ export async function signup(formData: SignupInput) {
 
   return {
     success: true,
+    userId: newUser.id,
     message: "Account created! Please check your email to verify your account.",
   };
 }

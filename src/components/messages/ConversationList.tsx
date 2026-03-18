@@ -1,17 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { formatDistanceToNow } from "date-fns";
-import { Plus, Search, Users, User } from "lucide-react";
+import { formatDistanceToNow, isToday, isYesterday } from "date-fns";
+import { Plus, Search, Users, User, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { getFullName } from "@/lib/utils/profile";
 import { getConversations } from "@/lib/actions/conversations";
 import { useConversationListRealtime } from "@/hooks/useConversationListRealtime";
+import { UserAvatar } from "@/components/ui/user-avatar";
 
 interface Conversation {
   id: string;
@@ -115,11 +115,22 @@ export function ConversationList({
     return otherParticipant ? getFullName(otherParticipant.user) : "Unknown";
   };
 
-  const getConversationIcon = (conversation: Conversation) => {
-    if (conversation.type === "GROUP") {
-      return <Users className="h-5 w-5" />;
+  const getOtherParticipant = (conversation: Conversation) => {
+    return conversation.participants.find(
+      (p) => p.user.id !== currentUserId
+    )?.user;
+  };
+
+  const formatTime = (date: Date | null) => {
+    if (!date) return "";
+    const d = new Date(date);
+    if (isToday(d)) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
-    return <User className="h-5 w-5" />;
+    if (isYesterday(d)) {
+      return "Yesterday";
+    }
+    return formatDistanceToNow(d, { addSuffix: false });
   };
 
   const handleConversationClick = (conversationId: string) => {
@@ -127,13 +138,17 @@ export function ConversationList({
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <div className="border-b p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Messages</h2>
-          <Button size="sm" onClick={onNewConversation}>
-            <Plus className="h-4 w-4" />
+      <div className="border-b px-4 py-4">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-xl font-bold">Messages</h2>
+          <Button
+            size="sm"
+            onClick={onNewConversation}
+            className="h-9 w-9 rounded-xl p-0"
+          >
+            <Plus className="h-5 w-5" />
           </Button>
         </div>
 
@@ -141,10 +156,10 @@ export function ConversationList({
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search conversations..."
+            placeholder="Search messages..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
+            className="h-10 rounded-xl border-muted bg-muted/50 pl-9 focus-visible:bg-background"
           />
         </div>
       </div>
@@ -152,18 +167,26 @@ export function ConversationList({
       {/* Conversations List */}
       <ScrollArea className="flex-1">
         {loading ? (
-          <div className="space-y-2 p-2">
-            {[...Array(5)].map((_, i) => (
+          <div className="space-y-1 p-2">
+            {[...Array(6)].map((_, i) => (
               <div
                 key={i}
-                className="h-20 animate-pulse rounded-lg bg-muted"
-              />
+                className="flex items-center gap-3 rounded-xl p-3"
+              >
+                <div className="h-12 w-12 flex-shrink-0 animate-pulse rounded-full bg-muted" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+                  <div className="h-3 w-full animate-pulse rounded bg-muted" />
+                </div>
+              </div>
             ))}
           </div>
         ) : filteredConversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-8 text-center">
-            <Users className="mb-2 h-12 w-12 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+              <MessageSquare className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <p className="mb-1 text-sm font-medium text-muted-foreground">
               {searchQuery
                 ? "No conversations found"
                 : "No conversations yet"}
@@ -173,50 +196,84 @@ export function ConversationList({
                 variant="link"
                 size="sm"
                 onClick={onNewConversation}
-                className="mt-2"
+                className="mt-1"
               >
                 Start a conversation
               </Button>
             )}
           </div>
         ) : (
-          <div className="space-y-1 p-2">
+          <div className="space-y-0.5 p-2">
             {filteredConversations.map((conversation) => {
               const isSelected = selectedConversationId === conversation.id;
               const lastMessage = conversation.messages[0];
+              const otherParticipant = getOtherParticipant(conversation);
+              const isGroup = conversation.type === "GROUP";
+              const hasUnread = conversation.unreadCount > 0;
 
               return (
                 <button
                   key={conversation.id}
                   onClick={() => handleConversationClick(conversation.id)}
                   className={cn(
-                    "w-full rounded-lg p-3 text-left transition-colors hover:bg-accent",
-                    isSelected && "bg-accent"
+                    "group relative w-full rounded-xl p-3 text-left transition-all",
+                    isSelected
+                      ? "bg-primary/10"
+                      : "hover:bg-muted/60",
+                    hasUnread && !isSelected && "bg-muted/30"
                   )}
                 >
-                  <div className="flex items-start gap-3">
+                  {/* Unread indicator */}
+                  {hasUnread && (
+                    <div className="absolute left-1 top-1/2 h-8 w-1 -translate-y-1/2 rounded-full bg-primary" />
+                  )}
+
+                  <div className="flex items-center gap-3">
                     {/* Avatar */}
-                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      {getConversationIcon(conversation)}
+                    <div className="relative flex-shrink-0">
+                      {isGroup ? (
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-primary/40">
+                          <Users className="h-6 w-6 text-primary" />
+                        </div>
+                      ) : otherParticipant ? (
+                        <UserAvatar
+                          imageUrl={otherParticipant.profileImage}
+                          firstName={otherParticipant.firstName}
+                          lastName={otherParticipant.lastName}
+                          email={otherParticipant.email}
+                          size="lg"
+                        />
+                      ) : (
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                          <User className="h-6 w-6 text-muted-foreground" />
+                        </div>
+                      )}
+                      
+                      {/* Online indicator (placeholder - would need actual online status) */}
+                      {!isGroup && (
+                        <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-emerald-500" />
+                      )}
                     </div>
 
                     {/* Content */}
                     <div className="min-w-0 flex-1">
-                      <div className="mb-1 flex items-center justify-between gap-2">
+                      <div className="mb-0.5 flex items-center justify-between gap-2">
                         <span
                           className={cn(
-                            "truncate text-sm font-medium",
-                            conversation.unreadCount > 0 && "font-bold"
+                            "truncate text-sm",
+                            hasUnread ? "font-bold text-foreground" : "font-medium text-foreground"
                           )}
                         >
                           {getConversationTitle(conversation)}
                         </span>
                         {conversation.lastMessageAt && (
-                          <span className="flex-shrink-0 text-xs text-muted-foreground">
-                            {formatDistanceToNow(
-                              new Date(conversation.lastMessageAt),
-                              { addSuffix: false }
+                          <span
+                            className={cn(
+                              "flex-shrink-0 text-xs",
+                              hasUnread ? "font-medium text-primary" : "text-muted-foreground"
                             )}
+                          >
+                            {formatTime(conversation.lastMessageAt)}
                           </span>
                         )}
                       </div>
@@ -224,21 +281,27 @@ export function ConversationList({
                       <div className="flex items-center justify-between gap-2">
                         <p
                           className={cn(
-                            "truncate text-xs text-muted-foreground",
-                            conversation.unreadCount > 0 && "font-medium"
+                            "truncate text-sm",
+                            hasUnread
+                              ? "font-medium text-foreground"
+                              : "text-muted-foreground"
                           )}
                         >
-                          {lastMessage
-                            ? `${lastMessage.sender.id === currentUserId ? "You: " : ""}${conversation.lastMessage || lastMessage.content}`
-                            : "No messages yet"}
+                          {lastMessage ? (
+                            <>
+                              <span className="text-muted-foreground">
+                                {lastMessage.sender.id === currentUserId ? "You: " : ""}
+                              </span>
+                              {conversation.lastMessage || lastMessage.content}
+                            </>
+                          ) : (
+                            <span className="italic text-muted-foreground">No messages yet</span>
+                          )}
                         </p>
-                        {conversation.unreadCount > 0 && (
-                          <Badge
-                            variant="default"
-                            className="h-5 min-w-5 flex-shrink-0 rounded-full px-1.5 text-xs"
-                          >
-                            {conversation.unreadCount}
-                          </Badge>
+                        {hasUnread && (
+                          <div className="flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground">
+                            {conversation.unreadCount > 9 ? "9+" : conversation.unreadCount}
+                          </div>
                         )}
                       </div>
                     </div>

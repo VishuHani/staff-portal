@@ -76,7 +76,12 @@ export type PermissionResource =
   | "media"
   | "dashboard"
   | "profile"
-  | "admin";
+  | "admin"
+  // Invitation Resources
+  | "invites"
+  | "onboarding"
+  // Document Management Resources
+  | "documents";
 
 /**
  * Permission Actions - Operations that can be performed on resources
@@ -167,7 +172,9 @@ export type PermissionAction =
   | "manage_ai"
   // Copy/Duplicate
   | "copy"
-  | "duplicate";
+  | "duplicate"
+  // Invitation Actions
+  | "resend";
 
 export interface Permission {
   resource: PermissionResource;

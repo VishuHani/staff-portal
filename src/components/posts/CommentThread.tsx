@@ -265,7 +265,7 @@ export function CommentThread({
           <div className="rounded-lg border bg-muted/50 p-3">
             <div className="mb-2 flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
-                Replying to <strong>{comment.user.email}</strong>
+                Replying to <strong>{userName}</strong>
               </span>
               <Button
                 variant="ghost"

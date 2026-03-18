@@ -291,7 +291,7 @@ export function ChannelsPageClient({
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       <span className="text-2xl">
-                        {channel.icon || <Hash className="h-5 w-5" />}
+                        {channel.icon && channel.icon !== "hash" ? channel.icon : <Hash className="h-5 w-5" />}
                       </span>
                       <div className="flex-1 min-w-0">
                         <CardTitle className="text-base truncate">
@@ -331,7 +331,7 @@ export function ChannelsPageClient({
                       size="sm"
                       className="flex-1"
                     >
-                      <Link href={`/admin/channels/${channel.id}`}>
+                      <Link href={`/manage/channels/${channel.id}`}>
                         <Settings className="mr-1 h-3 w-3" />
                         Manage
                       </Link>
@@ -369,7 +369,7 @@ export function ChannelsPageClient({
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-2xl">
-                        {channel.icon || <Hash className="h-5 w-5" />}
+                        {channel.icon && channel.icon !== "hash" ? channel.icon : <Hash className="h-5 w-5" />}
                       </span>
                       <div>
                         <CardTitle className="text-base">{channel.name}</CardTitle>

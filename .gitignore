@@ -42,3 +42,9 @@ next-env.d.ts
 
 /src/generated/prisma
 /logs/
+
+# Uploaded documents and PDFs
+/public/uploads/documents/
+
+# Old chat logs
+/old_chat/

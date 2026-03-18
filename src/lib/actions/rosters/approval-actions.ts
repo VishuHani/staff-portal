@@ -20,6 +20,10 @@ import {
   createUserChangeSummary,
   type ShiftForComparison,
 } from "@/lib/utils/shift-diff";
+import {
+  validateRosterForPublish,
+  type ValidationIssue,
+} from "@/lib/rosters/validation-service";
 
 // ============================================================================
 // TYPES
@@ -35,6 +39,17 @@ export interface ApprovalResult {
   notifiedCount?: number; // Number of staff members notified when publishing
   conflictCount?: number; // Number of shifts with conflicts
   hasConflicts?: boolean; // Whether roster has any conflicts
+  validation?: {
+    valid: boolean;
+    hasBlockingErrors: boolean;
+    issues: ValidationIssue[];
+    summary: {
+      total: number;
+      blocking: number;
+      warnings: number;
+      info: number;
+    };
+  };
 }
 
 export interface PendingApproval {
@@ -142,10 +157,17 @@ async function checkRosterAccess(
 /**
  * Finalize a draft roster - marks it as ready to publish
  * This is the manager's self-review step before publishing
+ *
+ * Now includes full validation before finalization:
+ * - Schema validation (required fields)
+ * - Temporal validation (time order, shift duration)
+ * - Business rule validation (max hours, consecutive days)
+ * - Conflict validation (overlaps, time-off, availability)
  */
 export async function finalizeRoster(
   rosterId: string,
-  notes?: string
+  notes?: string,
+  options?: { skipValidation?: boolean }
 ): Promise<ApprovalResult> {
   try {
     const user = await requireAuth();
@@ -191,6 +213,30 @@ export async function finalizeRoster(
       return { success: false, error: "Cannot finalize a roster with no assigned shifts" };
     }
 
+    // Run full validation unless skipped
+    const validationResult = options?.skipValidation
+      ? {
+          valid: true,
+          hasBlockingErrors: false,
+          issues: [],
+          summary: { total: 0, blocking: 0, warnings: 0, info: 0, byStage: {} as Record<string, number> }
+        }
+      : await validateRosterForPublish(rosterId);
+
+    // If there are blocking errors, prevent finalization
+    if (validationResult.hasBlockingErrors) {
+      return {
+        success: false,
+        error: "Cannot finalize roster due to validation errors. Please fix the issues and try again.",
+        validation: {
+          valid: validationResult.valid,
+          hasBlockingErrors: validationResult.hasBlockingErrors,
+          issues: validationResult.issues,
+          summary: validationResult.summary,
+        },
+      };
+    }
+
     // Warn about conflicts but allow finalization
     const hasConflicts = roster.shifts.some((s) => s.hasConflict);
     const conflictCount = roster.shifts.filter((s) => s.hasConflict).length;
@@ -225,6 +271,10 @@ export async function finalizeRoster(
             previousStatus,
             newStatus: RosterStatus.APPROVED,
             shiftsSnapshot,
+            validationSummary: {
+              totalIssues: validationResult.summary.total,
+              warnings: validationResult.summary.warnings,
+            },
           })),
           performedBy: user.id,
         },
@@ -238,11 +288,17 @@ export async function finalizeRoster(
     revalidatePath("/manage/rosters");
     revalidatePath("/system/rosters");
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       roster: { id: updatedRoster.id, status: updatedRoster.status },
       hasConflicts,
       conflictCount,
+      validation: {
+        valid: validationResult.valid,
+        hasBlockingErrors: validationResult.hasBlockingErrors,
+        issues: validationResult.issues,
+        summary: validationResult.summary,
+      },
     };
   } catch (error) {
     console.error("Error finalizing roster:", error);

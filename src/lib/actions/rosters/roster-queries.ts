@@ -331,7 +331,18 @@ export async function getMyShifts(dateRange?: DateRange) {
 
     const shifts = await prisma.rosterShift.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        date: true,
+        startTime: true,
+        endTime: true,
+        breakMinutes: true,
+        position: true,
+        notes: true,
+        hasConflict: true,
+        conflictType: true,
+        acknowledgedAt: true,
+        acknowledgmentNote: true,
         roster: {
           select: {
             id: true,
@@ -350,8 +361,210 @@ export async function getMyShifts(dateRange?: DateRange) {
   }
 }
 
+// Type for shifts returned by getMyShifts
+export type MyShift = Awaited<ReturnType<typeof getMyShifts>>["shifts"][number];
+
+// Get detailed conflict information for a specific shift
+export async function getShiftConflictDetails(shiftId: string) {
+  try {
+    const user = await requireAuth();
+
+    const shift = await prisma.rosterShift.findUnique({
+      where: { id: shiftId },
+      select: {
+        id: true,
+        date: true,
+        startTime: true,
+        endTime: true,
+        hasConflict: true,
+        conflictType: true,
+        userId: true,
+        roster: {
+          select: {
+            id: true,
+            name: true,
+            venue: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!shift) {
+      return { success: false, error: "Shift not found", details: null };
+    }
+
+    // Verify the user owns this shift
+    if (shift.userId !== user.id) {
+      return { success: false, error: "You don't have permission to view this shift", details: null };
+    }
+
+    // If no conflict, return basic info
+    if (!shift.hasConflict) {
+      return { success: true, details: { ...shift, conflictingShifts: [], timeOffInfo: null } };
+    }
+
+    // Fetch detailed conflict information based on conflict type
+    const conflictDetails: {
+      conflictingShifts: Array<{
+        id: string;
+        date: Date;
+        startTime: string;
+        endTime: string;
+        rosterName: string;
+        venueName: string;
+      }>;
+      timeOffInfo: {
+        id: string;
+        type: string;
+        startDate: Date;
+        endDate: Date;
+        status: string;
+      } | null;
+    } = {
+      conflictingShifts: [],
+      timeOffInfo: null,
+    };
+
+    // Parse conflict type to understand what we're dealing with
+    const conflictTypes = shift.conflictType?.split(",") || [];
+
+    // Check for TIME_OFF conflict
+    if (conflictTypes.includes("TIME_OFF")) {
+      const timeOff = await prisma.timeOffRequest.findFirst({
+        where: {
+          userId: user.id,
+          startDate: { lte: shift.date },
+          endDate: { gte: shift.date },
+          status: "APPROVED",
+        },
+        select: {
+          id: true,
+          type: true,
+          startDate: true,
+          endDate: true,
+          status: true,
+        },
+      });
+      conflictDetails.timeOffInfo = timeOff;
+    }
+
+    // Check for DOUBLE_BOOKED conflict
+    if (conflictTypes.includes("DOUBLE_BOOKED")) {
+      // Find other shifts on the same day that overlap
+      const sameDayShifts = await prisma.rosterShift.findMany({
+        where: {
+          userId: user.id,
+          date: shift.date,
+          id: { not: shiftId },
+          roster: { status: RosterStatus.PUBLISHED },
+        },
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          roster: {
+            select: {
+              id: true,
+              name: true,
+              venue: { select: { id: true, name: true } },
+            },
+          },
+        },
+      });
+
+      // Filter to only overlapping shifts
+      const shiftStart = shift.startTime;
+      const shiftEnd = shift.endTime;
+
+      for (const otherShift of sameDayShifts) {
+        // Check for time overlap
+        if (
+          (otherShift.startTime >= shiftStart && otherShift.startTime < shiftEnd) ||
+          (otherShift.endTime > shiftStart && otherShift.endTime <= shiftEnd) ||
+          (otherShift.startTime <= shiftStart && otherShift.endTime >= shiftEnd)
+        ) {
+          conflictDetails.conflictingShifts.push({
+            id: otherShift.id,
+            date: otherShift.date,
+            startTime: otherShift.startTime,
+            endTime: otherShift.endTime,
+            rosterName: otherShift.roster.name,
+            venueName: otherShift.roster.venue.name,
+          });
+        }
+      }
+    }
+
+    // Check for CROSS_VENUE_CONFLICT
+    if (conflictTypes.includes("CROSS_VENUE_CONFLICT")) {
+      // Find shifts at other venues that overlap
+      const crossVenueShifts = await prisma.rosterShift.findMany({
+        where: {
+          userId: user.id,
+          date: shift.date,
+          id: { not: shiftId },
+          roster: {
+            status: RosterStatus.PUBLISHED,
+            venueId: { not: shift.roster.venue.id },
+          },
+        },
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          roster: {
+            select: {
+              id: true,
+              name: true,
+              venue: { select: { id: true, name: true } },
+            },
+          },
+        },
+      });
+
+      const shiftStart = shift.startTime;
+      const shiftEnd = shift.endTime;
+
+      for (const otherShift of crossVenueShifts) {
+        // Check for time overlap
+        if (
+          (otherShift.startTime >= shiftStart && otherShift.startTime < shiftEnd) ||
+          (otherShift.endTime > shiftStart && otherShift.endTime <= shiftEnd) ||
+          (otherShift.startTime <= shiftStart && otherShift.endTime >= shiftEnd)
+        ) {
+          // Avoid duplicates
+          if (!conflictDetails.conflictingShifts.find(s => s.id === otherShift.id)) {
+            conflictDetails.conflictingShifts.push({
+              id: otherShift.id,
+              date: otherShift.date,
+              startTime: otherShift.startTime,
+              endTime: otherShift.endTime,
+              rosterName: otherShift.roster.name,
+              venueName: otherShift.roster.venue.name,
+            });
+          }
+        }
+      }
+    }
+
+    return { success: true, details: { ...shift, ...conflictDetails } };
+  } catch (error) {
+    console.error("Error fetching shift conflict details:", error);
+    return { success: false, error: "Failed to fetch conflict details", details: null };
+  }
+}
+
+
 // Get staff members available for a venue (for shift assignment)
-export async function getVenueStaff(venueId: string) {
+export async function getVenueStaff(venueId: string, options?: {
+  /** Filter by availability on a specific date */
+  filterDate?: Date;
+  /** Filter by availability during a specific time range (HH:mm format) */
+  filterStartTime?: string;
+  filterEndTime?: string;
+}) {
   try {
     const user = await requireAuth();
 
@@ -391,9 +604,61 @@ export async function getVenueStaff(venueId: string) {
         weekdayRate: true,
         saturdayRate: true,
         sundayRate: true,
+        superEnabled: true,
+        customSuperRate: true,
+        availability: true,
       },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
     });
+
+    // If filtering by date/time, check availability
+    if (options?.filterDate) {
+      const dayOfWeek = options.filterDate.getDay();
+      
+      return {
+        success: true,
+        staff: staff.map((s) => {
+          const dayAvailability = s.availability.find(a => a.dayOfWeek === dayOfWeek);
+          
+          // Check if staff is available on this day
+          let isAvailableForShift = true;
+          let availabilityReason = "";
+          
+          if (!dayAvailability || !dayAvailability.isAvailable) {
+            isAvailableForShift = false;
+            availabilityReason = "Not available on this day";
+          } else if (!dayAvailability.isAllDay && options.filterStartTime && options.filterEndTime) {
+            // Check time range
+            const [startH, startM] = options.filterStartTime.split(":").map(Number);
+            const [endH, endM] = options.filterEndTime.split(":").map(Number);
+            const [availStartH, availStartM] = (dayAvailability.startTime || "00:00").split(":").map(Number);
+            const [availEndH, availEndM] = (dayAvailability.endTime || "23:59").split(":").map(Number);
+            
+            const shiftStart = startH * 60 + startM;
+            const shiftEnd = endH * 60 + endM;
+            const availStart = availStartH * 60 + availStartM;
+            const availEnd = availEndH * 60 + availEndM;
+            
+            if (shiftStart < availStart || shiftEnd > availEnd) {
+              isAvailableForShift = false;
+              availabilityReason = `Only available ${dayAvailability.startTime} - ${dayAvailability.endTime}`;
+            }
+          }
+          
+          return {
+            ...s,
+            isAvailableForShift,
+            availabilityReason,
+            dayAvailability: dayAvailability ? {
+              isAvailable: dayAvailability.isAvailable,
+              isAllDay: dayAvailability.isAllDay,
+              startTime: dayAvailability.startTime,
+              endTime: dayAvailability.endTime,
+            } : null,
+          };
+        }),
+      };
+    }
 
     return { success: true, staff };
   } catch (error) {

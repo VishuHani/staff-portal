@@ -407,7 +407,7 @@ export function getVenueBadgeColor(
  * Get all channel IDs accessible to a user based on their venue assignments
  *
  * ADMIN BYPASS: If the user is an admin, returns ALL channel IDs (global access).
- * Otherwise, returns only channels assigned to the user's venues.
+ * Otherwise, returns channels assigned to the user's venues AND public channels.
  *
  * @param userId - User ID to get accessible channels for
  * @returns Array of channel IDs accessible to the user
@@ -464,12 +464,24 @@ export async function getAccessibleChannelIds(userId: string): Promise<string[]>
     return allChannels.map((c) => c.id);
   }
 
-  // Non-admin: filter by user's venues
-  // Extract venue IDs from the fetched data
+  // Non-admin: Get channels from venue assignments OR public channels
   const venueIds = currentUser.venues.map((v) => v.venueId);
 
+  // Get public channels (visible to all non-admin users)
+  const publicChannels = await prisma.channel.findMany({
+    where: {
+      isPublic: true,
+      archived: false,
+    },
+    select: {
+      id: true,
+    },
+  });
+  const publicChannelIds = publicChannels.map((c) => c.id);
+
+  // If user has no venues, only return public channels
   if (venueIds.length === 0) {
-    return [];
+    return publicChannelIds;
   }
 
   // Get channels that are assigned to any of the user's venues
@@ -490,10 +502,10 @@ export async function getAccessibleChannelIds(userId: string): Promise<string[]>
   });
 
   // Filter out archived channels and return unique channel IDs
-  const channelIds = channelVenues
+  const venueChannelIds = channelVenues
     .filter((cv) => !cv.channel.archived)
     .map((cv) => cv.channelId);
 
-  // Return unique channel IDs
-  return [...new Set(channelIds)];
+  // Combine venue channels with public channels
+  return [...new Set([...venueChannelIds, ...publicChannelIds])];
 }

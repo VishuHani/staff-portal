@@ -24,6 +24,8 @@ export const createMessageSchema = z.object({
   // Self-destruct options
   expireType: expireTypeSchema,
   expireDurationMs: z.number().int().positive().optional(), // Duration in milliseconds for TIMED expiration
+  // Reply functionality
+  replyToId: z.string().cuid("Invalid message ID").optional().nullable(),
 });
 
 export const updateMessageSchema = z.object({

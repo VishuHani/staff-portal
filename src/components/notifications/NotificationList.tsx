@@ -56,13 +56,13 @@ export function NotificationList({
 
     setIsLoading(true);
     try {
-      const result = await getAllNotifications({
-        userId,
-        unreadOnly: filter === "unread",
-        type: typeFilter === "ALL" ? undefined : typeFilter,
-        cursor: cursor || undefined,
-        limit: 20,
-      });
+        const result = await getAllNotifications({
+          userId,
+          unreadOnly: filter === "unread",
+          type: typeFilter === "ALL" ? undefined : (typeFilter as any),
+          cursor: cursor || undefined,
+          limit: 20,
+        });
 
       if (result.error) {
         toast.error(result.error);
@@ -115,7 +115,7 @@ export function NotificationList({
         const result = await getAllNotifications({
           userId,
           unreadOnly: filter === "unread",
-          type: typeFilter === "ALL" ? undefined : typeFilter,
+          type: typeFilter === "ALL" ? undefined : (typeFilter as any),
           limit: 20,
         });
 
@@ -251,6 +251,7 @@ export function NotificationList({
               <SelectItem value="USER_CREATED">Welcome</SelectItem>
               <SelectItem value="USER_UPDATED">Account Updated</SelectItem>
               <SelectItem value="ROLE_CHANGED">Role Changed</SelectItem>
+              <SelectItem value="USER_INVITATION">User Invitation</SelectItem>
 
               {/* System notifications */}
               <SelectItem value="SYSTEM_ANNOUNCEMENT">System Announcement</SelectItem>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Hash, Archive, Loader2 } from "lucide-react";
+import { Hash, Archive, Loader2, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,6 +16,7 @@ interface Channel {
   icon: string | null;
   color: string | null;
   archived: boolean;
+  isPublic: boolean; // NEW: Public channel flag
   _count: {
     posts: number;
   };
@@ -173,6 +174,17 @@ export function ChannelList({
                     className="ml-auto"
                   >
                     {channel.unreadCount}
+                  </Badge>
+                )}
+                {/* Public channel indicator */}
+                {channel.isPublic && (
+                  <Badge
+                    variant="outline"
+                    className="ml-1 border-blue-300 bg-blue-50 text-blue-700"
+                    title="Public channel - visible to all users"
+                  >
+                    <Globe className="h-3 w-3 mr-1" />
+                    Public
                   </Badge>
                 )}
               </button>

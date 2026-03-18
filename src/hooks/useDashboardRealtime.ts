@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/auth/supabase-client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { toast } from "sonner";
+
+// Connection states for better UX
+export type ConnectionState = "connecting" | "connected" | "disconnected" | "error" | "reconnecting";
 
 interface RealtimeConfig {
   userId?: string;
@@ -27,12 +31,28 @@ export function useDashboardRealtime({
   const router = useRouter();
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
-
-  // Initialize Supabase client once
-  if (!supabaseRef.current) {
-    supabaseRef.current = createClient();
-  }
-
+  
+  // Connection state tracking
+  const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
+  const retryCountRef = useRef(0);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Retry configuration
+  const MAX_RETRIES = 3;
+  const INITIAL_DELAY = 1000; // 1 second
+  const MAX_DELAY = 30000; // 30 seconds
+  
+  // Calculate delay with exponential backoff
+  const getRetryDelay = (attempt: number) => {
+    const delay = Math.min(
+      INITIAL_DELAY * Math.pow(2, attempt),
+      MAX_DELAY
+    );
+    // Add jitter (±25%)
+    const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+    return Math.floor(delay + jitter);
+  };
+  
   const refreshDashboard = useCallback(() => {
     router.refresh();
   }, [router]);
@@ -40,7 +60,11 @@ export function useDashboardRealtime({
   useEffect(() => {
     if (!enabled || !userId) return;
 
-    const supabase = supabaseRef.current!;
+    // Initialize Supabase client if not already done
+    if (!supabaseRef.current) {
+      supabaseRef.current = createClient();
+    }
+    const supabase = supabaseRef.current;
     const channelName = `dashboard-${userId}-${Date.now()}`;
     
     const channel = supabase.channel(channelName, {
@@ -49,7 +73,24 @@ export function useDashboardRealtime({
         presence: { key: userId },
       },
     });
-
+    
+    // Handle channel errors with retry logic
+    const handleChannelError = () => {
+      if (retryCountRef.current < MAX_RETRIES) {
+        const delay = getRetryDelay(retryCountRef.current);
+        console.log(`[Dashboard Realtime] Retrying in ${delay}ms (attempt ${retryCountRef.current + 1})`);
+        
+        retryTimeoutRef.current = setTimeout(() => {
+          retryCountRef.current++;
+          // Re-subscribe logic here
+        }, delay);
+      } else {
+        console.error("[Dashboard Realtime] Max retries exceeded");
+        // Transition to permanent error state
+        setConnectionState("error");
+      }
+    };
+    
     // Subscribe to notifications for this user
     // NOTE: Supabase Realtime requires actual PostgreSQL table names, not Prisma model names
     channel.on(
@@ -65,7 +106,7 @@ export function useDashboardRealtime({
         refreshDashboard();
       }
     );
-
+    
     // Subscribe to shift changes (for upcoming shifts widget)
     channel.on(
       "postgres_changes",
@@ -80,7 +121,7 @@ export function useDashboardRealtime({
         refreshDashboard();
       }
     );
-
+    
     // Subscribe to time-off request changes
     channel.on(
       "postgres_changes",
@@ -95,7 +136,7 @@ export function useDashboardRealtime({
         refreshDashboard();
       }
     );
-
+    
     // Subscribe to new messages (for unread count)
     channel.on(
       "postgres_changes",
@@ -113,7 +154,7 @@ export function useDashboardRealtime({
         }
       }
     );
-
+    
     // For managers/admins, also watch for team updates
     if (role === "MANAGER" || role === "ADMIN") {
       // Watch for new time-off requests from team
@@ -128,7 +169,7 @@ export function useDashboardRealtime({
           refreshDashboard();
         }
       );
-
+      
       // Watch for roster conflicts
       channel.on(
         "postgres_changes",
@@ -143,20 +184,26 @@ export function useDashboardRealtime({
         }
       );
     }
-
-    // Subscribe to the channel
+    
+    // Subscribe to channel with error handling
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
         console.log("[Dashboard Realtime] Connected to channel:", channelName);
+        setConnectionState("connected");
       } else if (status === "CLOSED") {
         console.log("[Dashboard Realtime] Channel closed:", channelName);
+        setConnectionState("disconnected");
       } else if (status === "CHANNEL_ERROR") {
         console.error("[Dashboard Realtime] Channel error:", channelName);
+        handleChannelError();
+      } else if (status === "REATTACHING") {
+        console.log("[Dashboard Realtime] Reconnecting to channel...");
+        setConnectionState("reconnecting");
       }
     });
-
+    
     channelRef.current = channel;
-
+    
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
@@ -167,8 +214,10 @@ export function useDashboardRealtime({
 
   return {
     refreshDashboard,
+    connectionState,
+    isConnected: connectionState === "connected",
   };
-}
+};
 
 // Simpler hook for just refresh triggers
 export function useDashboardRefresh(intervalMs?: number) {

@@ -308,6 +308,13 @@ export async function getProfile() {
       emergencyContactRelation: true,
       employmentType: true,
       employmentStartDate: true,
+      // Superannuation fields
+      superEnabled: true,
+      customSuperRate: true,
+      superFundName: true,
+      superFundMemberNumber: true,
+      superFundUSI: true,
+      superFundABN: true,
       role: {
         select: { name: true },
       },
@@ -641,5 +648,110 @@ export async function deleteUserCertification(certificationId: string) {
   } catch (error: unknown) {
     console.error("Error deleting certification:", error);
     return { error: "Failed to delete certification" };
+  }
+}
+
+// ============================================================================
+// SUPERANNUATION SETTINGS
+// ============================================================================
+
+/**
+ * Get user's own superannuation settings
+ */
+export async function getMySuperSettings() {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  try {
+    const userData = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        superEnabled: true,
+        customSuperRate: true,
+        superFundName: true,
+        superFundMemberNumber: true,
+        superFundUSI: true,
+        superFundABN: true,
+      },
+    });
+
+    if (!userData) {
+      return { error: "User not found" };
+    }
+
+    return { success: true, data: userData };
+  } catch (error: unknown) {
+    console.error("Error fetching super settings:", error);
+    return { error: "Failed to fetch superannuation settings" };
+  }
+}
+
+/**
+ * Update user's own superannuation settings
+ */
+export async function updateMySuperSettings(data: {
+  superEnabled: boolean | null;
+  customSuperRate: number | null;
+  superFundName: string | null;
+  superFundMemberNumber: string | null;
+  superFundUSI: string | null;
+  superFundABN: string | null;
+}) {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  try {
+    // Get current user data for audit log
+    const currentUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        superEnabled: true,
+        customSuperRate: true,
+        superFundName: true,
+        superFundMemberNumber: true,
+        superFundUSI: true,
+        superFundABN: true,
+      },
+    });
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        superEnabled: data.superEnabled,
+        customSuperRate: data.customSuperRate,
+        superFundName: data.superFundName,
+        superFundMemberNumber: data.superFundMemberNumber,
+        superFundUSI: data.superFundUSI,
+        superFundABN: data.superFundABN,
+      },
+    });
+
+    // Audit log
+    const auditContext = await getAuditContext();
+    await createAuditLog({
+      userId: user.id,
+      actionType: "PROFILE_UPDATED",
+      resourceType: "User",
+      resourceId: user.id,
+      oldValue: JSON.stringify(currentUser),
+      newValue: JSON.stringify(data),
+      ipAddress: auditContext.ipAddress,
+    });
+
+    revalidatePath("/my/profile");
+    return { success: true, data: updatedUser };
+  } catch (error: unknown) {
+    console.error("Error updating super settings:", error);
+    return { error: "Failed to update superannuation settings" };
   }
 }

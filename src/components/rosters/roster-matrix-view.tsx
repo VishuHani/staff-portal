@@ -48,6 +48,9 @@ import {
   MoreVertical,
   Pencil,
   Trash2,
+  CheckCircle,
+  XCircle,
+  CalendarOff,
 } from "lucide-react";
 import { deleteShift } from "@/lib/actions/rosters";
 import { toast } from "sonner";
@@ -100,12 +103,59 @@ interface PositionColor {
   color: string;
 }
 
+interface RosterParticipant {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+  profileImage: string | null;
+  role?: { name: string };
+}
+
+// Availability status for a staff member on a specific day
+interface AvailabilityStatus {
+  available: boolean;
+  startTime?: string;
+  endTime?: string;
+  notes?: string;
+}
+
+// Time-off entry for a staff member
+interface TimeOffEntry {
+  id: string;
+  startDate: Date;
+  endDate: Date;
+  type: string;
+  status: string;
+}
+
+interface VenuePayConfig {
+  superRate: number | null;
+  superEnabled: boolean;
+  defaultWeekdayRate: number | null;
+  defaultSaturdayRate: number | null;
+  defaultSundayRate: number | null;
+  defaultPublicHolidayRate: number | null;
+}
+
 interface RosterMatrixViewProps {
   shifts: Shift[];
   weekStart: Date;
   editable?: boolean;
   positionColors?: PositionColor[];
   staffPayRates?: Record<string, StaffPayRates>;
+  rosterParticipants?: RosterParticipant[];
+  // Phase 3B: Availability overlay
+  staffAvailability?: Record<string, Record<string, AvailabilityStatus>>; // userId -> dateKey -> status
+  // Phase 3C: Time-off integration
+  staffTimeOff?: Record<string, TimeOffEntry[]>; // userId -> time-off entries
+  // Phase 6: Permission-based pay display
+  canViewPayRates?: boolean; // Only ADMIN/MANAGER can see pay rates
+  // Phase 9: Superannuation support
+  venuePayConfig?: VenuePayConfig | null;
+  // Cost calculation enhancements
+  dailyTotals?: Map<string, { hours: number; cost: number }>;
+  staffTotals?: Map<string, { hours: number; cost: number }>;
   onEditShift?: (shift: Shift) => void;
   onAddShift?: (date: Date, userId?: string) => void;
   onMoveShift?: (shiftId: string, newDate: Date, newUserId: string | null) => void;
@@ -254,6 +304,13 @@ export function RosterMatrixView({
   editable = false,
   positionColors = [],
   staffPayRates = {},
+  rosterParticipants = [],
+  staffAvailability = {},
+  staffTimeOff = {},
+  canViewPayRates = false,
+  venuePayConfig,
+  dailyTotals: externalDailyTotals,
+  staffTotals: externalStaffTotals,
   onEditShift,
   onAddShift,
   onMoveShift,
@@ -322,11 +379,29 @@ export function RosterMatrixView({
     return Array.from({ length: 7 }, (_, i) => addDays(start, i));
   }, [weekStart]);
 
-  // Extract unique staff members
+  // Extract unique staff members from roster participants and shifts
   const staffList = useMemo(() => {
     const staffMap = new Map<string, StaffInfo>();
     const unassignedSet = new Set<string>();
 
+    // First, add roster participants (staff explicitly added to roster)
+    rosterParticipants.forEach((participant) => {
+      staffMap.set(participant.id, {
+        id: participant.id,
+        name:
+          `${participant.firstName || ""} ${participant.lastName || ""}`.trim() ||
+          participant.email,
+        email: participant.email,
+        profileImage: participant.profileImage,
+        firstName: participant.firstName,
+        lastName: participant.lastName,
+        isUnassigned: false,
+        originalName: null,
+        role: participant.role?.name || null,
+      });
+    });
+
+    // Then, add/update from shifts (to capture position info and unmatched entries)
     shifts.forEach((shift) => {
       if (shift.user) {
         const key = shift.user.id;
@@ -370,7 +445,7 @@ export function RosterMatrixView({
       }
       return a.name.localeCompare(b.name);
     });
-  }, [shifts]);
+  }, [shifts, rosterParticipants]);
 
   // Group shifts by staff and date
   const shiftGrid = useMemo(() => {
@@ -468,8 +543,11 @@ export function RosterMatrixView({
       0
     );
 
+    // Only calculate pay if user has permission to view pay rates
     let totalPay: number | null = null;
-    if (staffPayRates[staffId]) {
+    let totalSuper: number | null = null;
+    
+    if (canViewPayRates && staffPayRates[staffId]) {
       const result = calculateTotalPay(
         staffShifts.map((s) => ({
           date: new Date(s.date),
@@ -480,18 +558,116 @@ export function RosterMatrixView({
         staffPayRates[staffId]
       );
       totalPay = result.total;
+      
+      // Calculate super for this staff member
+      // Default superEnabled to true if not explicitly set to false
+      const isSuperEnabled = venuePayConfig?.superEnabled !== false;
+      if (totalPay !== null && isSuperEnabled) {
+        const staffSuperEnabled = (staffPayRates[staffId] as any).superEnabled !== false;
+        if (staffSuperEnabled) {
+          const effectiveSuperRate = (staffPayRates[staffId] as any).customSuperRate ?? venuePayConfig?.superRate ?? 0.115;
+          totalSuper = totalPay * effectiveSuperRate;
+        }
+      }
     }
 
-    return { hours: totalHours, pay: totalPay };
+    return { hours: totalHours, pay: totalPay, super: totalSuper };
   };
 
-  if (shifts.length === 0) {
+  // Phase 3B: Check if staff is available on a specific date
+  const getAvailabilityStatus = (staffId: string, dateKey: string): AvailabilityStatus | null => {
+    if (!staffAvailability[staffId]) return null;
+    return staffAvailability[staffId][dateKey] || null;
+  };
+
+  // Phase 3C: Check if staff has time-off on a specific date
+  const getTimeOffStatus = (staffId: string, date: Date): TimeOffEntry | null => {
+    if (!staffTimeOff[staffId]) return null;
+    const entries = staffTimeOff[staffId];
+    for (const entry of entries) {
+      const start = new Date(entry.startDate);
+      const end = new Date(entry.endDate);
+      if (date >= start && date <= end && entry.status === "APPROVED") {
+        return entry;
+      }
+    }
+    return null;
+  };
+
+  // Calculate daily totals with super breakdown
+  const getDailyTotalsWithSuper = (dateKey: string) => {
+    const dayShifts = shifts.filter((s) => {
+      const shiftDateKey = format(new Date(s.date), "yyyy-MM-dd");
+      const hasValidTime = s.startTime && s.endTime &&
+        s.startTime !== "-" && s.endTime !== "-" &&
+        s.startTime.includes(":") && s.endTime.includes(":");
+      return shiftDateKey === dateKey && hasValidTime;
+    });
+
+    const totalHours = dayShifts.reduce(
+      (sum, s) => sum + calculateShiftHours(s.startTime, s.endTime, s.breakMinutes),
+      0
+    );
+
+    let totalPay = 0;
+    let totalSuper = 0;
+
+    if (canViewPayRates) {
+      dayShifts.forEach((shift) => {
+        const staffId = shift.user?.id;
+        if (staffId && staffPayRates[staffId]) {
+          const result = calculateTotalPay(
+            [{
+              date: new Date(shift.date),
+              startTime: shift.startTime,
+              endTime: shift.endTime,
+              breakMinutes: shift.breakMinutes,
+            }],
+            staffPayRates[staffId]
+          );
+          const shiftPay = result.total ?? 0;
+          totalPay += shiftPay;
+
+          // Calculate super for this shift
+          // Default superEnabled to true if not explicitly set to false
+          const isSuperEnabled = venuePayConfig?.superEnabled !== false;
+          if (isSuperEnabled) {
+            const staffSuperEnabled = (staffPayRates[staffId] as any).superEnabled !== false;
+            if (staffSuperEnabled) {
+              const effectiveSuperRate = (staffPayRates[staffId] as any).customSuperRate ?? venuePayConfig?.superRate ?? 0.115;
+              totalSuper += shiftPay * effectiveSuperRate;
+            }
+          }
+        }
+      });
+    }
+
+    return { hours: totalHours, pay: totalPay, super: totalSuper };
+  };
+
+  // Show empty state if there are no shifts AND no roster participants
+  if (shifts.length === 0 && rosterParticipants.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        <User className="h-12 w-12 mx-auto mb-4 opacity-50" />
-        <p>No shifts added yet</p>
+      <div className="text-center py-16 text-muted-foreground">
+        <User className="h-16 w-16 mx-auto mb-6 opacity-50" />
+        <p className="text-lg font-medium mb-2">No shifts added yet</p>
         {editable && (
-          <p className="text-sm mt-1">Click &quot;Add Shift&quot; to get started</p>
+          <>
+            <p className="text-sm mb-8 max-w-md mx-auto">
+              Create your first shift to get started with this roster. You can add shifts manually or use templates.
+            </p>
+            <Button
+              size="lg"
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={() => onAddShift?.(weekDays[0])}
+            >
+              <Plus className="h-5 w-5 mr-2" />
+              Add Shift
+            </Button>
+          </>
+        )}
+        {!editable && (
+          <p className="text-sm mt-4">This roster is currently empty</p>
         )}
       </div>
     );
@@ -515,8 +691,8 @@ export function RosterMatrixView({
         <div className="overflow-x-auto border rounded-lg bg-background">
           <div className="min-w-[900px]">
             {/* Header row */}
-            <div className="grid grid-cols-[220px_repeat(7,1fr)] border-b bg-white">
-              <div className="p-3 font-medium text-xs text-blue-600 uppercase tracking-wide border-r">
+            <div className="grid grid-cols-[220px_repeat(7,1fr)] border-b bg-gradient-to-r from-slate-50 to-slate-100">
+              <div className="p-4 font-semibold text-xs text-slate-600 uppercase tracking-wider border-r bg-slate-100">
                 Employee
               </div>
               {weekDays.map((day) => {
@@ -525,18 +701,19 @@ export function RosterMatrixView({
                   <div
                     key={day.toISOString()}
                     className={cn(
-                      "p-3 text-center border-r last:border-r-0",
-                      isToday && "bg-blue-50"
+                      "p-4 text-center border-r last:border-r-0",
+                      isToday && "bg-blue-100"
                     )}
                   >
-                    <div className="font-medium text-xs text-muted-foreground">
-                      {format(day, "EEE").toUpperCase()}
+                    <div className="font-medium text-xs text-slate-500 uppercase tracking-wide">
+                      {format(day, "EEE")}
                     </div>
                     <div
                       className={cn(
-                        "text-lg font-semibold mt-0.5",
-                        isToday &&
-                          "bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center mx-auto"
+                        "text-xl font-bold mt-1",
+                        isToday
+                          ? "bg-blue-600 text-white rounded-full w-9 h-9 flex items-center justify-center mx-auto"
+                          : "text-slate-700"
                       )}
                     >
                       {format(day, "d")}
@@ -587,9 +764,21 @@ export function RosterMatrixView({
                           {staff.role}
                         </p>
                       )}
-                      <p className="text-xs text-gray-500 mt-1">
-                        {formatHours(totals.hours)}  {totals.pay !== null && formatCurrency(totals.pay)}
-                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs font-medium text-gray-600 bg-gray-100 rounded px-1.5 py-0.5">
+                          {formatHours(totals.hours)}
+                        </span>
+                        {totals.pay !== null && (
+                          <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 rounded px-1.5 py-0.5">
+                            {formatCurrency(totals.pay)}
+                            {totals.super !== null && (
+                              <span className="text-blue-500 ml-1">
+                                +{formatCurrency(totals.super)}
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -604,23 +793,78 @@ export function RosterMatrixView({
                     // Filter out shifts without valid timing for display
                     const validShifts = dayShifts.filter(isValidShift);
 
+                    // Phase 3B & 3C: Check availability and time-off
+                    const availabilityStatus = !staff.isUnassigned ? getAvailabilityStatus(staff.id, dateKey) : null;
+                    const timeOffStatus = !staff.isUnassigned ? getTimeOffStatus(staff.id, day) : null;
+                    const hasAvailabilityInfo = availabilityStatus !== null;
+                    const isAvailable = availabilityStatus?.available ?? true; // Default to available if no data
+                    const hasTimeOff = timeOffStatus !== null;
+
                     return (
                       <DroppableCell
                         key={dateKey}
                         id={cellId}
                         enabled={mounted}
                         className={cn(
-                          "bg-gray-50 p-2 border-r last:border-r-0 min-h-[120px]",
-                          isToday && "bg-blue-50",
+                          "bg-slate-50/50 p-2 border-r last:border-r-0 min-h-[120px] relative",
+                          isToday && "bg-blue-50/70",
                           editable &&
                             validShifts.length === 0 &&
-                            "cursor-pointer hover:bg-gray-100",
-                          hasConflicts && "bg-red-50"
+                            "cursor-pointer hover:bg-slate-100",
+                          hasConflicts && "bg-red-50/70",
+                          // Phase 3B: Availability coloring
+                          hasAvailabilityInfo && !isAvailable && validShifts.length === 0 && "bg-red-50/50",
+                          // Phase 3C: Time-off coloring
+                          hasTimeOff && "bg-orange-50/70"
                         )}
                         onClick={() =>
                           validShifts.length === 0 && handleCellClick(day, staff)
                         }
                       >
+                        {/* Phase 3B & 3C: Availability/Time-off indicator */}
+                        {(hasAvailabilityInfo || hasTimeOff) && validShifts.length === 0 && (
+                          <div className="absolute top-1 right-1">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className={cn(
+                                  "w-5 h-5 rounded-full flex items-center justify-center",
+                                  hasTimeOff ? "bg-orange-200" : isAvailable ? "bg-green-200" : "bg-red-200"
+                                )}>
+                                  {hasTimeOff ? (
+                                    <CalendarOff className="h-3 w-3 text-orange-700" />
+                                  ) : isAvailable ? (
+                                    <CheckCircle className="h-3 w-3 text-green-700" />
+                                  ) : (
+                                    <XCircle className="h-3 w-3 text-red-700" />
+                                  )}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {hasTimeOff ? (
+                                  <div>
+                                    <p className="font-medium">Time-Off: {timeOffStatus?.type}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {format(new Date(timeOffStatus!.startDate), "MMM d")} - {format(new Date(timeOffStatus!.endDate), "MMM d")}
+                                    </p>
+                                  </div>
+                                ) : availabilityStatus ? (
+                                  <div>
+                                    <p className="font-medium">{isAvailable ? "Available" : "Not Available"}</p>
+                                    {availabilityStatus.startTime && availabilityStatus.endTime && (
+                                      <p className="text-xs text-muted-foreground">
+                                        {availabilityStatus.startTime} - {availabilityStatus.endTime}
+                                      </p>
+                                    )}
+                                    {availabilityStatus.notes && (
+                                      <p className="text-xs text-muted-foreground">{availabilityStatus.notes}</p>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        )}
+
                         {(() => {
 
                           if (validShifts.length === 0 && editable) {
@@ -651,6 +895,9 @@ export function RosterMatrixView({
                                       positionColors
                                     )}
                                     editable={editable}
+                                    showPay={canViewPayRates}
+                                    staffPayRates={shift.user?.id ? staffPayRates[shift.user.id] : undefined}
+                                    venuePayConfig={venuePayConfig}
                                     onEdit={() => onEditShift?.(shift)}
                                     onDelete={() => {
                                       setShiftToDelete(shift.id);
@@ -668,6 +915,40 @@ export function RosterMatrixView({
                 </div>
               );
             })}
+
+            {/* Footer row - Daily Totals */}
+            {canViewPayRates && (
+              <div className="grid grid-cols-[220px_repeat(7,1fr)] border-t-2 border-slate-300 bg-gradient-to-r from-slate-50 to-slate-100">
+                <div className="p-4 font-semibold text-xs text-slate-700 uppercase tracking-wider border-r bg-slate-100 flex items-center">
+                  <span>Daily Totals</span>
+                </div>
+                {weekDays.map((day, index) => {
+                  const dateKey = format(day, "yyyy-MM-dd");
+                  const dayTotal = getDailyTotalsWithSuper(dateKey);
+                  return (
+                    <div
+                      key={dateKey}
+                      className={cn(
+                        "p-4 text-center border-r last:border-r-0",
+                        "bg-gradient-to-b from-white to-slate-50"
+                      )}
+                    >
+                      <div className="text-base font-bold text-slate-800 mb-1">
+                        {formatHours(dayTotal.hours)}
+                      </div>
+                      <div className="text-sm font-semibold text-emerald-600 bg-emerald-50 rounded-md py-0.5 px-2 inline-block">
+                        {formatCurrency(dayTotal.pay)}
+                        {dayTotal.super > 0 && (
+                          <span className="text-blue-500 ml-1 text-xs">
+                            +{formatCurrency(dayTotal.super)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -721,6 +1002,9 @@ export function RosterMatrixView({
                   shift={activeShift}
                   positionColor={getPositionColor(activeShift.position, positionColors)}
                   editable={false}
+                  showPay={canViewPayRates}
+                  staffPayRates={activeShift.user?.id ? staffPayRates[activeShift.user.id] : undefined}
+                  venuePayConfig={venuePayConfig}
                   onEdit={() => {}}
                   onDelete={() => {}}
                 />
@@ -741,6 +1025,9 @@ interface ShiftCardProps {
   editable: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  showPay?: boolean;
+  staffPayRates?: StaffPayRates;
+  venuePayConfig?: VenuePayConfig | null;
 }
 
 function ShiftCard({
@@ -749,12 +1036,45 @@ function ShiftCard({
   editable,
   onEdit,
   onDelete,
+  showPay = false,
+  staffPayRates,
+  venuePayConfig,
 }: ShiftCardProps) {
   const hours = calculateShiftHours(
     shift.startTime,
     shift.endTime,
     shift.breakMinutes
   );
+
+  // Calculate shift pay if rates are available
+  const shiftPay = useMemo(() => {
+    if (!showPay || !staffPayRates) return null;
+    const result = calculateTotalPay(
+      [{
+        date: new Date(shift.date),
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        breakMinutes: shift.breakMinutes,
+      }],
+      staffPayRates
+    );
+    return result.total;
+  }, [showPay, staffPayRates, shift.date, shift.startTime, shift.endTime, shift.breakMinutes]);
+
+  // Calculate super amount for this shift
+  const shiftSuper = useMemo(() => {
+    // Default superEnabled to true if not explicitly set to false
+    const isSuperEnabled = venuePayConfig?.superEnabled !== false;
+    if (!showPay || !staffPayRates || shiftPay === null || !isSuperEnabled) return null;
+    // Get staff-specific super settings from staffPayRates if available
+    const staffSuperEnabled = (staffPayRates as any).superEnabled !== false;
+    if (!staffSuperEnabled) return null;
+    
+    // Use staff custom rate or venue default rate
+    const effectiveSuperRate = (staffPayRates as any).customSuperRate ?? venuePayConfig?.superRate ?? 0.115;
+    
+    return shiftPay * effectiveSuperRate;
+  }, [showPay, staffPayRates, shiftPay, venuePayConfig]);
 
   // Generate a lighter tint of the position color for the background
   const getBgColor = (color: string) => {
@@ -771,7 +1091,7 @@ function ShiftCard({
   return (
     <div
       className={cn(
-        "rounded-lg p-3 mb-2 cursor-pointer hover:shadow-md transition-all border-l-4",
+        "rounded-lg p-3 mb-2 cursor-pointer hover:shadow-md transition-all border-l-4 shadow-sm",
         shift.hasConflict ? "border-l-red-500 bg-red-50" : ""
       )}
       style={{
@@ -848,16 +1168,26 @@ function ShiftCard({
         </span>
       )}
 
-      {/* Row 3: Hours + Break */}
-      <div className="flex gap-3 text-xs text-gray-600 mt-2">
-        <span className="flex items-center gap-1">
+      {/* Row 3: Hours + Break + Pay */}
+      <div className="flex flex-wrap gap-2 text-xs text-gray-600 mt-2">
+        <span className="flex items-center gap-1 bg-white/60 rounded px-1.5 py-0.5">
           <Clock className="h-3 w-3" />
           {formatHours(hours)}
         </span>
         {shift.breakMinutes > 0 && (
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1 bg-white/60 rounded px-1.5 py-0.5">
             <Coffee className="h-3 w-3" />
             {shift.breakMinutes}m
+          </span>
+        )}
+        {shiftPay !== null && (
+          <span className="flex items-center gap-1 font-semibold text-emerald-600 bg-emerald-100/80 rounded px-1.5 py-0.5 ml-auto">
+            {formatCurrency(shiftPay)}
+            {shiftSuper !== null && (
+              <span className="text-blue-500 text-[10px] font-normal">
+                +{formatCurrency(shiftSuper)} super
+              </span>
+            )}
           </span>
         )}
       </div>

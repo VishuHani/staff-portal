@@ -84,6 +84,9 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   profile: "Profile",
   admin: "Admin Functions",
   rosters: "Rosters",
+  invites: "Invites",
+  onboarding: "Onboarding",
+  documents: "Documents",
 };
 
 // Icons for each resource category
@@ -113,6 +116,9 @@ const RESOURCE_ICONS: Record<PermissionResource, string> = {
   profile: "👤",
   admin: "👑",
   rosters: "📆",
+  invites: "✉️",
+  onboarding: "🚀",
+  documents: "📄",
 };
 
 export function VenuePermissionsDialog({

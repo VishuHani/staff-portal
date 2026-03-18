@@ -22,6 +22,12 @@ import {
   Hash,
   CalendarDays,
   Sparkles,
+  UserPlus,
+  FileStack,
+  FolderOpen,
+  ClipboardList,
+  Send,
+  DollarSign,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -66,6 +72,11 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       icon: Clock,
     },
     {
+      title: "My Documents",
+      href: "/my/documents",
+      icon: FileStack,
+    },
+    {
       title: "Posts",
       href: "/posts",
       icon: MessageSquare,
@@ -82,7 +93,7 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
   const teamItems: NavItem[] = [
     {
       title: "Rosters",
-      href: "/manage/rosters-v3",
+      href: "/manage/rosters",
       icon: CalendarDays,
       roles: ["ADMIN", "MANAGER"],
     },
@@ -99,9 +110,27 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       roles: ["ADMIN", "MANAGER"],
     },
     {
+      title: "Documents",
+      href: "/manage/documents",
+      icon: FolderOpen,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
+      title: "Send Documents",
+      href: "/manage/documents/send",
+      icon: Send,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
       title: "Reports & Analytics",
       href: userRole === "ADMIN" ? "/system/reports" : "/manage/reports",
       icon: BarChart3,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
+      title: "Email Campaigns",
+      href: userRole === "ADMIN" ? "/system/emails" : "/manage/emails",
+      icon: Mail,
       roles: ["ADMIN", "MANAGER"],
     },
     {
@@ -114,6 +143,18 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       title: "Team Members",
       href: "/manage/users",
       icon: Users,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
+      title: "Invite Users",
+      href: "/manage/invites",
+      icon: UserPlus,
+      roles: ["ADMIN", "MANAGER"],
+    },
+    {
+      title: "Venue Pay Settings",
+      href: "/manage/venues",
+      icon: DollarSign,
       roles: ["ADMIN", "MANAGER"],
     },
   ];
@@ -130,6 +171,24 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       title: "Venue Management",
       href: "/system/venues",
       icon: Store,
+      roles: ["ADMIN"],
+    },
+    {
+      title: "Document Management",
+      href: "/system/documents",
+      icon: ClipboardList,
+      roles: ["ADMIN"],
+    },
+    {
+      title: "User Invitations",
+      href: "/system/invites",
+      icon: UserPlus,
+      roles: ["ADMIN"],
+    },
+    {
+      title: "Email Builder",
+      href: "/system/emails/builder",
+      icon: Sparkles,
       roles: ["ADMIN"],
     },
     {
@@ -176,17 +235,31 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
     }
     // Handle /manage/reports and /system/reports separately
     if (href === "/manage/reports") {
-      return pathname.startsWith("/manage/reports");
+      return pathname.startsWith("/manage/reports") && !pathname.startsWith("/manage/reports/send");
     }
     if (href === "/system/reports") {
-      return pathname.startsWith("/system/reports");
+      return pathname.startsWith("/system/reports") && !pathname.startsWith("/system/reports/send");
     }
     // Handle /manage/rosters and /system/rosters separately
     if (href === "/manage/rosters") {
-      return pathname.startsWith("/manage/rosters");
+      return pathname.startsWith("/manage/rosters") && !pathname.startsWith("/manage/rosters/send");
     }
     if (href === "/system/rosters") {
-      return pathname.startsWith("/system/rosters");
+      return pathname.startsWith("/system/rosters") && !pathname.startsWith("/system/rosters/send");
+    }
+    // Handle /manage/documents and /manage/documents/send separately
+    if (href === "/manage/documents") {
+      return pathname.startsWith("/manage/documents") && !pathname.startsWith("/manage/documents/send");
+    }
+    if (href === "/manage/documents/send") {
+      return pathname.startsWith("/manage/documents/send");
+    }
+    // Handle /system/emails and /manage/emails separately
+    if (href === "/system/emails") {
+      return pathname.startsWith("/system/emails");
+    }
+    if (href === "/manage/emails") {
+      return pathname.startsWith("/manage/emails");
     }
     return pathname.startsWith(href);
   };

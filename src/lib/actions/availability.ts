@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
 import { getSharedVenueUsers } from "@/lib/utils/venue";
+import { RosterStatus } from "@prisma/client";
 import {
   updateAvailabilitySchema,
   bulkUpdateAvailabilitySchema,
@@ -599,4 +600,175 @@ export async function getAvailabilityStats() {
     console.error("Error fetching availability stats:", error);
     return { error: "Failed to fetch availability statistics" };
   }
+}
+
+/**
+ * Check if a shift time falls within the user's availability for that day
+ * Returns true if there's a conflict (shift is outside availability window)
+ */
+function checkShiftAgainstAvailability(
+  shiftStartTime: string,
+  shiftEndTime: string,
+  availabilityStart: string | null,
+  availabilityEnd: string | null,
+  isAvailable: boolean,
+  isAllDay: boolean
+): boolean {
+  // If user is not available on this day at all, it's a conflict
+  if (!isAvailable) {
+    return true;
+  }
+
+  // If all day available, no conflict
+  if (isAllDay) {
+    return false;
+  }
+
+  // If no specific times set but marked available, consider it available all day
+  if (!availabilityStart || !availabilityEnd) {
+    return false;
+  }
+
+  // Check if shift times fall within availability window
+  const shiftStart = timeToMinutes(shiftStartTime);
+  const shiftEnd = timeToMinutes(shiftEndTime);
+  const availStart = timeToMinutes(availabilityStart);
+  const availEnd = timeToMinutes(availabilityEnd);
+
+  // Conflict if shift starts before availability or ends after availability
+  return shiftStart < availStart || shiftEnd > availEnd;
+}
+
+/**
+ * Recheck conflicts for a user's shifts when their availability changes
+ * This is called after availability is updated to flag/unflag conflicts
+ */
+async function recheckShiftConflictsForUser(
+  userId: string,
+  affectedDayOfWeek?: number
+) {
+  try {
+    // Get user's availability
+    const availability = await prisma.availability.findMany({
+      where: {
+        userId,
+        ...(affectedDayOfWeek !== undefined && { dayOfWeek: affectedDayOfWeek }),
+      },
+    });
+
+    // Get all published shifts for this user
+    const shifts = await prisma.rosterShift.findMany({
+      where: {
+        userId,
+        roster: { status: RosterStatus.PUBLISHED },
+      },
+      include: {
+        roster: { select: { id: true } },
+      },
+    });
+
+    // Check each shift against availability
+    for (const shift of shifts) {
+      const shiftDayOfWeek = new Date(shift.date).getDay();
+      const dayAvailability = availability.find(a => a.dayOfWeek === shiftDayOfWeek);
+
+      if (!dayAvailability) {
+        continue;
+      }
+
+      const hasAvailabilityConflict = checkShiftAgainstAvailability(
+        shift.startTime,
+        shift.endTime,
+        dayAvailability.startTime,
+        dayAvailability.endTime,
+        dayAvailability.isAvailable,
+        dayAvailability.isAllDay
+      );
+
+      // Check for other conflicts (time off, double booking)
+      // Time off check
+      const timeOffConflict = await prisma.timeOffRequest.findFirst({
+        where: {
+          userId,
+          status: "APPROVED",
+          startDate: { lte: shift.date },
+          endDate: { gte: shift.date },
+        },
+      });
+
+      // Double booking check
+      const overlappingShifts = await prisma.rosterShift.findMany({
+        where: {
+          userId,
+          date: shift.date,
+          id: { not: shift.id },
+          roster: { status: RosterStatus.PUBLISHED },
+          OR: [
+            {
+              startTime: { gte: shift.startTime, lt: shift.endTime },
+            },
+            {
+              endTime: { gt: shift.startTime, lte: shift.endTime },
+            },
+            {
+              startTime: { lte: shift.startTime },
+              endTime: { gte: shift.endTime },
+            },
+          ],
+        },
+      });
+
+      // Build conflict type string
+      const conflictTypes: string[] = [];
+      if (hasAvailabilityConflict) conflictTypes.push("AVAILABILITY");
+      if (timeOffConflict) conflictTypes.push("TIME_OFF");
+      if (overlappingShifts.length > 0) conflictTypes.push("DOUBLE_BOOKED");
+
+      // Update shift conflict status
+      await prisma.rosterShift.update({
+        where: { id: shift.id },
+        data: {
+          hasConflict: conflictTypes.length > 0,
+          conflictType: conflictTypes.length > 0 ? conflictTypes.join(",") : null,
+        },
+      });
+    }
+  } catch (error) {
+    console.error("Error rechecking shift conflicts:", error);
+    // Don't throw - this is a background operation
+  }
+}
+
+/**
+ * Update availability for a single day with conflict recheck
+ */
+export async function updateAvailabilityWithConflictCheck(data: UpdateAvailabilityInput) {
+  const user = await requireAuth();
+
+  const result = await updateAvailability(data);
+
+  // If update was successful, recheck conflicts
+  if (result.success) {
+    await recheckShiftConflictsForUser(user.id, data.dayOfWeek);
+    revalidatePath("/my/rosters");
+  }
+
+  return result;
+}
+
+/**
+ * Bulk update availability with conflict recheck
+ */
+export async function bulkUpdateAvailabilityWithConflictCheck(data: BulkUpdateAvailabilityInput) {
+  const user = await requireAuth();
+
+  const result = await bulkUpdateAvailability(data);
+
+  // If update was successful, recheck all conflicts
+  if (result.success) {
+    await recheckShiftConflictsForUser(user.id);
+    revalidatePath("/my/rosters");
+  }
+
+  return result;
 }

@@ -112,10 +112,10 @@ export function PostFeed({ channelId, currentUserId, canManage }: PostFeedProps)
     return (
       <div className="flex h-[400px] flex-col items-center justify-center gap-2 text-center">
         <p className="text-sm font-medium">No posts yet</p>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground max-w-xs">
           {channelId
             ? "Be the first to post in this channel!"
-            : "Create a post to get started"}
+            : "No posts in your channels yet. Posts from your venues and public channels will appear here."}
         </p>
       </div>
     );

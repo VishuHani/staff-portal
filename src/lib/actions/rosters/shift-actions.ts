@@ -6,6 +6,11 @@ import { revalidatePath } from "next/cache";
 import { RosterStatus } from "@prisma/client";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import { getAuditContext } from "@/lib/utils/audit-helpers";
+import {
+  validateShiftBeforeAdd,
+  validateBulkShifts,
+  type ValidationIssue,
+} from "@/lib/rosters/validation-service";
 
 // Types
 export interface ShiftInput {
@@ -19,8 +24,41 @@ export interface ShiftInput {
   originalName?: string; // For unmatched entries
 }
 
+// Extended result type with validation info
+export interface ShiftResult {
+  success: boolean;
+  shift?: {
+    id: string;
+    userId: string | null;
+    date: Date;
+    startTime: string;
+    endTime: string;
+    breakMinutes: number | null;
+    position: string | null;
+    hasConflict: boolean;
+    conflictType: string | null;
+    user?: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    } | null;
+  };
+  error?: string;
+  validation?: {
+    valid: boolean;
+    issues: ValidationIssue[];
+    hasWarnings: boolean;
+    hasBlocking: boolean;
+  };
+}
+
 // Add a single shift to a roster
-export async function addShift(rosterId: string, data: ShiftInput) {
+export async function addShift(
+  rosterId: string,
+  data: ShiftInput,
+  options?: { skipValidation?: boolean }
+): Promise<ShiftResult> {
   try {
     const user = await requireAuth();
 
@@ -54,15 +92,23 @@ export async function addShift(rosterId: string, data: ShiftInput) {
       }
     }
 
-    // Check for conflicts if user is assigned
-    let hasConflict = false;
-    let conflictType: string | null = null;
+    // Run validation unless skipped
+    const validationResult = options?.skipValidation
+      ? { valid: true, issues: [] }
+      : await validateShiftBeforeAdd(rosterId, data);
 
-    if (data.userId) {
-      const conflict = await checkShiftConflicts(data.userId, data.date, data.startTime, data.endTime, rosterId);
-      hasConflict = conflict.hasConflict;
-      conflictType = conflict.conflictType;
+    // Determine conflict status from validation issues
+    const blockingIssues = validationResult.issues.filter(i => i.severity === "blocking");
+    const warningIssues = validationResult.issues.filter(i => i.severity === "warning");
+    
+    // Extract conflict type from validation issues
+    let conflictType: string | null = null;
+    const conflictIssue = validationResult.issues.find(i => i.stage === "conflict");
+    if (conflictIssue) {
+      conflictType = conflictIssue.code;
     }
+
+    const hasConflict = validationResult.issues.some(i => i.stage === "conflict");
 
     const shift = await prisma.rosterShift.create({
       data: {
@@ -105,7 +151,16 @@ export async function addShift(rosterId: string, data: ShiftInput) {
 
     revalidatePath(`/manage/rosters/${rosterId}`);
 
-    return { success: true, shift };
+    return {
+      success: true,
+      shift,
+      validation: {
+        valid: validationResult.valid,
+        issues: validationResult.issues,
+        hasWarnings: warningIssues.length > 0,
+        hasBlocking: blockingIssues.length > 0,
+      },
+    };
   } catch (error) {
     console.error("Error adding shift:", error);
     return { success: false, error: "Failed to add shift" };
@@ -113,7 +168,11 @@ export async function addShift(rosterId: string, data: ShiftInput) {
 }
 
 // Update an existing shift
-export async function updateShift(shiftId: string, data: Partial<ShiftInput>) {
+export async function updateShift(
+  shiftId: string,
+  data: Partial<ShiftInput>,
+  options?: { skipValidation?: boolean }
+): Promise<ShiftResult> {
   try {
     const user = await requireAuth();
 
@@ -148,23 +207,41 @@ export async function updateShift(shiftId: string, data: Partial<ShiftInput>) {
       }
     }
 
-    // Check for conflicts if user is being assigned/changed
-    let hasConflict = existingShift.hasConflict;
-    let conflictType = existingShift.conflictType;
-
+    // Build the updated shift data for validation
     const newUserId = data.userId !== undefined ? data.userId : existingShift.userId;
     const newDate = data.date ?? existingShift.date;
     const newStartTime = data.startTime ?? existingShift.startTime;
     const newEndTime = data.endTime ?? existingShift.endTime;
 
-    if (newUserId) {
-      const conflict = await checkShiftConflicts(newUserId, newDate, newStartTime, newEndTime, existingShift.rosterId, shiftId);
-      hasConflict = conflict.hasConflict;
-      conflictType = conflict.conflictType;
-    } else {
-      hasConflict = false;
-      conflictType = null;
+    // Run validation unless skipped
+    let validationResult = { valid: true, issues: [] as ValidationIssue[] };
+    if (!options?.skipValidation && newUserId) {
+      validationResult = await validateShiftBeforeAdd(
+        existingShift.rosterId,
+        {
+          userId: newUserId,
+          date: newDate,
+          startTime: newStartTime,
+          endTime: newEndTime,
+          breakMinutes: data.breakMinutes ?? existingShift.breakMinutes ?? undefined,
+          position: data.position ?? existingShift.position ?? undefined,
+        },
+        shiftId // Exclude current shift from conflict check
+      );
     }
+
+    // Determine conflict status from validation issues
+    const blockingIssues = validationResult.issues.filter(i => i.severity === "blocking");
+    const warningIssues = validationResult.issues.filter(i => i.severity === "warning");
+    
+    // Extract conflict type from validation issues
+    let conflictType: string | null = null;
+    const conflictIssue = validationResult.issues.find(i => i.stage === "conflict");
+    if (conflictIssue) {
+      conflictType = conflictIssue.code;
+    }
+
+    const hasConflict = validationResult.issues.some(i => i.stage === "conflict");
 
     const shift = await prisma.rosterShift.update({
       where: { id: shiftId },
@@ -207,7 +284,16 @@ export async function updateShift(shiftId: string, data: Partial<ShiftInput>) {
 
     revalidatePath(`/manage/rosters/${existingShift.rosterId}`);
 
-    return { success: true, shift };
+    return {
+      success: true,
+      shift,
+      validation: {
+        valid: validationResult.valid,
+        issues: validationResult.issues,
+        hasWarnings: warningIssues.length > 0,
+        hasBlocking: blockingIssues.length > 0,
+      },
+    };
   } catch (error) {
     console.error("Error updating shift:", error);
     return { success: false, error: "Failed to update shift" };
@@ -280,8 +366,26 @@ export async function deleteShift(shiftId: string) {
   }
 }
 
+// Bulk add shifts result type
+export interface BulkShiftResult {
+  success: boolean;
+  count?: number;
+  error?: string;
+  validation?: {
+    valid: boolean;
+    issuesByShift: Map<number, ValidationIssue[]>;
+    allIssues: ValidationIssue[];
+    hasWarnings: boolean;
+    hasBlocking: boolean;
+  };
+}
+
 // Bulk add shifts to a roster
-export async function bulkAddShifts(rosterId: string, shifts: ShiftInput[]) {
+export async function bulkAddShifts(
+  rosterId: string,
+  shifts: ShiftInput[],
+  options?: { skipValidation?: boolean }
+): Promise<BulkShiftResult> {
   try {
     const user = await requireAuth();
 
@@ -314,13 +418,26 @@ export async function bulkAddShifts(rosterId: string, shifts: ShiftInput[]) {
       }
     }
 
+    // Run validation unless skipped
+    const validationResult = options?.skipValidation
+      ? { valid: true, issuesByShift: new Map<number, ValidationIssue[]>(), allIssues: [] as ValidationIssue[] }
+      : await validateBulkShifts(rosterId, shifts);
+
     // Process each shift and check for conflicts
     const shiftsToCreate = await Promise.all(
-      shifts.map(async (shift) => {
+      shifts.map(async (shift, index) => {
+        // Get validation issues for this shift
+        const shiftIssues = validationResult.issuesByShift.get(index) || [];
+        const conflictIssue = shiftIssues.find(i => i.stage === "conflict");
+        
         let hasConflict = false;
         let conflictType: string | null = null;
 
-        if (shift.userId) {
+        if (conflictIssue) {
+          hasConflict = true;
+          conflictType = conflictIssue.code;
+        } else if (shift.userId) {
+          // Fallback to legacy conflict check if validation didn't catch it
           const conflict = await checkShiftConflicts(shift.userId, shift.date, shift.startTime, shift.endTime, rosterId);
           hasConflict = conflict.hasConflict;
           conflictType = conflict.conflictType;
@@ -348,7 +465,20 @@ export async function bulkAddShifts(rosterId: string, shifts: ShiftInput[]) {
 
     revalidatePath(`/manage/rosters/${rosterId}`);
 
-    return { success: true, count: result.count };
+    const blockingIssues = validationResult.allIssues.filter(i => i.severity === "blocking");
+    const warningIssues = validationResult.allIssues.filter(i => i.severity === "warning");
+
+    return {
+      success: true,
+      count: result.count,
+      validation: {
+        valid: validationResult.valid,
+        issuesByShift: validationResult.issuesByShift,
+        allIssues: validationResult.allIssues,
+        hasWarnings: warningIssues.length > 0,
+        hasBlocking: blockingIssues.length > 0,
+      },
+    };
   } catch (error) {
     console.error("Error bulk adding shifts:", error);
     return { success: false, error: "Failed to add shifts" };

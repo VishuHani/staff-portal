@@ -100,10 +100,32 @@ export async function proxy(request: NextRequest) {
   }
 
   // Redirect to dashboard if accessing auth pages while logged in
+  // But first check if the user exists in the database (avoid redirect loop with stale sessions)
   if (isAuthPath && user) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
+    try {
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { id: true },
+      });
+
+      if (!dbUser) {
+        // User exists in Supabase but not in database - clear stale session
+        console.log("Stale session detected on auth page, clearing cookies");
+        supabaseResponse.cookies.delete("sb-access-token");
+        supabaseResponse.cookies.delete("sb-refresh-token");
+        // Return the auth page so user can login fresh
+        return supabaseResponse;
+      }
+
+      // User exists in both, redirect to dashboard
+      const url = request.nextUrl.clone();
+      url.pathname = "/dashboard";
+      return NextResponse.redirect(url);
+    } catch (error) {
+      console.error("Error checking user on auth page:", error);
+      // On error, allow the auth page to render
+      return supabaseResponse;
+    }
   }
 
   // Check profile completion for authenticated users accessing protected routes
@@ -114,8 +136,21 @@ export async function proxy(request: NextRequest) {
         select: { profileCompletedAt: true },
       });
 
+      // If user doesn't exist in database (e.g., after db reset), clear session and redirect to login
+      if (!dbUser) {
+        console.log("User exists in Supabase but not in database - session may be stale");
+        const url = request.nextUrl.clone();
+        url.pathname = "/login";
+        url.searchParams.set("error", "session_invalid");
+        url.searchParams.set("redirectTo", request.nextUrl.pathname);
+        // Clear the stale session cookies
+        supabaseResponse.cookies.delete("sb-access-token");
+        supabaseResponse.cookies.delete("sb-refresh-token");
+        return NextResponse.redirect(url);
+      }
+
       // If profile is not complete, redirect to onboarding
-      if (dbUser && !dbUser.profileCompletedAt) {
+      if (!dbUser.profileCompletedAt) {
         const url = request.nextUrl.clone();
         url.pathname = "/onboarding/complete-profile";
         url.searchParams.set("redirectTo", request.nextUrl.pathname);

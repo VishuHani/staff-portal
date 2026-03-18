@@ -123,7 +123,7 @@ export async function getMessages(
     }
 
     // Get messages that haven't expired or been deleted
-    const messages = await prisma.message.findMany({
+     const messages = await prisma.message.findMany({
       where: {
         conversationId,
         deletedAt: null,
@@ -150,6 +150,24 @@ export async function getMessages(
             role: {
               select: {
                 name: true,
+              },
+            },
+          },
+        },
+        replyTo: {
+          include: {
+            sender: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profileImage: true,
+                role: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -227,7 +245,7 @@ export async function sendMessage(data: CreateMessageInput & {
     };
   }
 
-  const { conversationId, content, mediaUrls, expireType, expireDurationMs } = validatedFields.data;
+    const { conversationId, content, mediaUrls, expireType, expireDurationMs, replyToId } = validatedFields.data;
 
   // Validate message length
   if (content.length > MAX_MESSAGE_LENGTH) {
@@ -291,6 +309,7 @@ export async function sendMessage(data: CreateMessageInput & {
         deliveryStatus: TRACK_DELIVERY_STATUS ? "SENT" : undefined,
         expiresAt,
         expireType: expireType || null,
+        replyToId: replyToId || null,
       },
       include: {
         sender: {
@@ -303,6 +322,24 @@ export async function sendMessage(data: CreateMessageInput & {
             role: {
               select: {
                 name: true,
+              },
+            },
+          },
+        },
+        replyTo: {
+          include: {
+            sender: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                profileImage: true,
+                role: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -388,8 +425,6 @@ export async function sendMessage(data: CreateMessageInput & {
         );
       }
     }
-
-    revalidatePath("/messages");
 
     // Return decrypted message
     return {
@@ -502,8 +537,6 @@ export async function updateMessage(data: UpdateMessageInput) {
       },
     });
 
-    revalidatePath("/messages");
-
     return {
       success: true,
       message: {
@@ -553,8 +586,6 @@ export async function deleteMessage(data: DeleteMessageInput) {
         deletedBy: user.id,
       },
     });
-
-    revalidatePath("/messages");
 
     return { success: true };
   } catch (error) {
@@ -714,8 +745,6 @@ export async function markConversationAsRead(data: MarkAsReadInput) {
         },
       });
     }
-
-    revalidatePath("/messages");
 
     return { success: true };
   } catch (error) {
@@ -963,8 +992,6 @@ export async function toggleReaction(data: ToggleReactionInput) {
         emoji
       );
     }
-
-    revalidatePath("/messages");
 
     return { success: true };
   } catch (error) {

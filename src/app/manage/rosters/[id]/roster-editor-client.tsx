@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -22,8 +22,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { RosterStatusBadge, RosterMatrixView, ShiftForm, ApprovalWorkflow, ApprovalHistory, ConflictSummary, VersionHistory, ReuploadDialog, RosterActionsMenu, VersionChainPanel, StaffAvatarStack, DateRangePicker, FilterPanel, type ShiftConflict } from "@/components/rosters";
-import { formatCurrency, formatHours, calculateShiftHours, calculateTotalPay } from "@/lib/utils/pay-calculator";
+import { RosterStatusBadge, RosterMatrixView, ShiftForm, ApprovalWorkflow, ApprovalHistory, ConflictSummary, VersionHistory, ReuploadDialog, RosterActionsMenu, VersionChainPanel, StaffAvatarStack, DateRangePicker, FilterPanel, PublishConfirmationDialog, AddPeopleDialog, type ShiftConflict } from "@/components/rosters";
+import { formatCurrency, formatHours, calculateShiftHours, calculateTotalPay, getDayType } from "@/lib/utils/pay-calculator";
 import { RosterStatus } from "@prisma/client";
 import { format } from "date-fns";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -36,8 +36,12 @@ import {
   ChevronDown,
   Check,
   Send,
+  Download,
+  FileSpreadsheet,
+  Printer,
+  UserPlus,
 } from "lucide-react";
-import { deleteRoster, archiveRoster, recheckRosterConflicts, getRosterVersionChain, updateShift, getAdjacentRoster } from "@/lib/actions/rosters";
+import { deleteRoster, archiveRoster, recheckRosterConflicts, getRosterVersionChain, updateShift, getAdjacentRoster, finalizeRoster, publishRoster } from "@/lib/actions/rosters";
 import { toast } from "sonner";
 
 interface Shift {
@@ -120,6 +124,34 @@ interface StaffPayRates {
   weekdayRate: unknown;
   saturdayRate: unknown;
   sundayRate: unknown;
+  superEnabled?: boolean | null;
+  customSuperRate?: number | null;
+}
+
+// Venue pay config for super calculations
+interface VenuePayConfig {
+  superRate: number | null;
+  superEnabled: boolean;
+  defaultWeekdayRate: number | null;
+  defaultSaturdayRate: number | null;
+  defaultSundayRate: number | null;
+  defaultPublicHolidayRate: number | null;
+}
+
+// Availability status for a staff member on a specific date
+interface AvailabilityStatus {
+  available: boolean;
+  startTime?: string;
+  endTime?: string;
+}
+
+// Time-off entry for a staff member
+interface TimeOffEntry {
+  id: string;
+  startDate: Date;
+  endDate: Date;
+  type: string;
+  status: string;
 }
 
 interface RosterEditorClientProps {
@@ -132,6 +164,12 @@ interface RosterEditorClientProps {
   positionColors?: PositionColor[];
   positions?: Position[];
   staffPayRates?: Record<string, StaffPayRates>;
+  // Venue pay config for super calculations
+  venuePayConfig?: VenuePayConfig | null;
+  // Phase 3B: Availability overlay
+  staffAvailability?: Record<string, Record<string, AvailabilityStatus>>;
+  // Phase 3C: Time-off integration
+  staffTimeOff?: Record<string, TimeOffEntry[]>;
 }
 
 // Version Switcher component for navigating between versions
@@ -253,9 +291,18 @@ export function RosterEditorClient({
   positionColors = [],
   positions = [],
   staffPayRates = {},
+  venuePayConfig = null,
+  staffAvailability = {},
+  staffTimeOff = {},
 }: RosterEditorClientProps) {
   const router = useRouter();
   const [roster, setRoster] = useState(initialRoster);
+  
+  // Sync roster state when props change (after router.refresh() or navigation)
+  useEffect(() => {
+    setRoster(initialRoster);
+  }, [initialRoster]);
+  
   const [isDeleting, setIsDeleting] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -264,6 +311,10 @@ export function RosterEditorClient({
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [newShiftDefaults, setNewShiftDefaults] = useState<{ date?: Date; userId?: string }>({});
   const [showReuploadDialog, setShowReuploadDialog] = useState(false);
+  const [showPublishConfirmDialog, setShowPublishConfirmDialog] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
+  const [rosterParticipantIds, setRosterParticipantIds] = useState<string[]>(() => staff.map((member) => member.id));
   const [filters, setFilters] = useState<{ staffIds: string[]; positions: string[] }>({
     staffIds: [],
     positions: [],
@@ -279,6 +330,8 @@ export function RosterEditorClient({
   const unassignedCount = roster.shifts.filter((s) => !s.userId).length;
   const isCreator = userId === roster.createdByUser.id;
   const isAdmin = userRole === "ADMIN";
+  const isManager = userRole === "MANAGER";
+  const canViewPayRates = isAdmin || isManager;
 
   // Get unique staff assigned to shifts for avatar stack
   const assignedStaff = Array.from(
@@ -289,20 +342,80 @@ export function RosterEditorClient({
     ).values()
   );
 
-  // Calculate total hours and cost
-  const totalHours = roster.shifts.reduce(
-    (sum, s) => sum + calculateShiftHours(s.startTime, s.endTime, s.breakMinutes),
-    0
-  );
-
-  const totalCost = roster.shifts.reduce((sum, shift) => {
-    if (!shift.user?.id || !staffPayRates[shift.user.id]) return sum;
-    const result = calculateTotalPay(
-      [{ date: new Date(shift.date), startTime: shift.startTime, endTime: shift.endTime, breakMinutes: shift.breakMinutes }],
-      staffPayRates[shift.user.id]
+  // Calculate total hours and cost with useMemo for real-time updates
+  const { totalHours, totalCost, totalSuper, dailyTotals, staffTotals } = useMemo(() => {
+    const hours = roster.shifts.reduce(
+      (sum, s) => sum + calculateShiftHours(s.startTime, s.endTime, s.breakMinutes),
+      0
     );
-    return sum + (result.total || 0);
-  }, 0);
+
+    let cost = 0;
+    let superAmount = 0;
+
+    roster.shifts.forEach((shift) => {
+      if (!shift.user?.id || !staffPayRates[shift.user.id]) return;
+      const result = calculateTotalPay(
+        [{ date: new Date(shift.date), startTime: shift.startTime, endTime: shift.endTime, breakMinutes: shift.breakMinutes }],
+        staffPayRates[shift.user.id]
+      );
+      const shiftPay = result.total || 0;
+      cost += shiftPay;
+
+      // Calculate super for this shift
+      // Default superEnabled to true if not explicitly set to false
+      const isSuperEnabled = venuePayConfig?.superEnabled !== false;
+      if (isSuperEnabled) {
+        const staffSuperEnabled = staffPayRates[shift.user.id].superEnabled !== false;
+        if (staffSuperEnabled) {
+          const effectiveSuperRate = staffPayRates[shift.user.id].customSuperRate ?? venuePayConfig?.superRate ?? 0.115;
+          superAmount += shiftPay * effectiveSuperRate;
+        }
+      }
+    });
+
+    // Calculate per-day totals
+    const dayMap = new Map<string, { hours: number; cost: number }>();
+    roster.shifts.forEach((shift) => {
+      const dateKey = format(new Date(shift.date), "yyyy-MM-dd");
+      const shiftHours = calculateShiftHours(shift.startTime, shift.endTime, shift.breakMinutes);
+      let shiftCost = 0;
+      if (shift.user?.id && staffPayRates[shift.user.id]) {
+        const result = calculateTotalPay(
+          [{ date: new Date(shift.date), startTime: shift.startTime, endTime: shift.endTime, breakMinutes: shift.breakMinutes }],
+          staffPayRates[shift.user.id]
+        );
+        shiftCost = result.total || 0;
+      }
+      const existing = dayMap.get(dateKey) || { hours: 0, cost: 0 };
+      dayMap.set(dateKey, {
+        hours: existing.hours + shiftHours,
+        cost: existing.cost + shiftCost,
+      });
+    });
+
+    // Calculate per-staff totals
+    const staffMap = new Map<string, { hours: number; cost: number }>();
+    roster.shifts.forEach((shift) => {
+      const staffId = shift.user?.id;
+      if (!staffId) return;
+      const shiftHours = calculateShiftHours(shift.startTime, shift.endTime, shift.breakMinutes);
+      let shiftCost = 0;
+      if (staffPayRates[staffId]) {
+        const result = calculateTotalPay(
+          [{ date: new Date(shift.date), startTime: shift.startTime, endTime: shift.endTime, breakMinutes: shift.breakMinutes }],
+          staffPayRates[staffId]
+        );
+        shiftCost = result.total || 0;
+      }
+      const existing = staffMap.get(staffId) || { hours: 0, cost: 0 };
+      staffMap.set(staffId, {
+        hours: existing.hours + shiftHours,
+        cost: existing.cost + shiftCost,
+      });
+    });
+
+    return { totalHours: hours, totalCost: cost, totalSuper: superAmount, dailyTotals: dayMap, staffTotals: staffMap };
+  }, [roster.shifts, staffPayRates, venuePayConfig]);
 
   // Filter shifts based on active filters
   const filteredShifts = roster.shifts.filter((shift) => {
@@ -452,6 +565,90 @@ export function RosterEditorClient({
     }
   };
 
+  // Handle quick publish from header button
+  const handleHeaderPublish = async () => {
+    if (isDraft) {
+      // For draft rosters, need to finalize first then publish
+      if (assignedCount === 0) {
+        toast.error("Add at least one assigned shift before publishing");
+        return;
+      }
+      setShowPublishConfirmDialog(true);
+    } else if (isApproved) {
+      // Already finalized, just publish
+      setShowPublishConfirmDialog(true);
+    }
+  };
+
+  const handleConfirmPublish = async () => {
+    setIsPublishing(true);
+    try {
+      // If draft, finalize first
+      if (isDraft || isPendingReview) {
+        const finalizeResult = await finalizeRoster(roster.id);
+        if (!finalizeResult.success) {
+          toast.error(finalizeResult.error || "Failed to finalize roster");
+          setIsPublishing(false);
+          return;
+        }
+      }
+      // Then publish
+      const result = await publishRoster(roster.id);
+      if (result.success) {
+        toast.success(`Roster published! ${result.notifiedCount} staff members notified.`);
+        setShowPublishConfirmDialog(false);
+        handleStatusChange(RosterStatus.PUBLISHED);
+        router.refresh();
+      } else {
+        toast.error(result.error || "Failed to publish roster");
+      }
+    } catch (error) {
+      console.error("Error publishing roster:", error);
+      toast.error("An error occurred while publishing");
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  // Handle export to CSV
+  const handleExportCSV = () => {
+    const shifts = roster.shifts;
+    if (shifts.length === 0) {
+      toast.error("No shifts to export");
+      return;
+    }
+
+    // Build CSV header
+    const headers = ["Staff Name", "Email", "Date", "Day", "Start Time", "End Time", "Break (min)", "Position", "Notes"];
+    const rows = shifts.map((s) => [
+      s.user ? `${s.user.firstName || ""} ${s.user.lastName || ""}`.trim() || s.user.email : s.originalName || "Unassigned",
+      s.user?.email || "",
+      format(new Date(s.date), "yyyy-MM-dd"),
+      format(new Date(s.date), "EEEE"),
+      s.startTime,
+      s.endTime,
+      String(s.breakMinutes),
+      s.position || "",
+      s.notes || "",
+    ]);
+
+    const csv = [
+      headers.join(","),
+      ...rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")),
+    ].join("\n");
+
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${roster.name.replace(/[^a-zA-Z0-9]/g, "_")}_${format(new Date(roster.startDate), "yyyy-MM-dd")}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    toast.success("Roster exported to CSV");
+  };
+
   // Prepare conflicts for ConflictSummary component
   const shiftConflicts: ShiftConflict[] = roster.shifts
     .filter((s) => s.hasConflict)
@@ -542,10 +739,44 @@ export function RosterEditorClient({
               variant="button"
             />
           )}
-          {canPublish && isDraft && (
-            <Button className="bg-blue-600 hover:bg-blue-700 text-white">
-              <Send className="h-4 w-4 mr-2" />
-              Publish Roster
+          {/* Export Button */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Download className="h-4 w-4 mr-2" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleExportCSV}>
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Export to CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.print()}>
+                <Printer className="h-4 w-4 mr-2" />
+                Print Roster
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {canEdit && isDraft && (
+            <Button variant="outline" size="sm" onClick={() => setShowAddPeopleDialog(true)}>
+              <UserPlus className="h-4 w-4 mr-2" />
+              Add People
+            </Button>
+          )}
+          {/* Publish Button - works for draft and approved rosters */}
+          {canPublish && (isDraft || isApproved) && (
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={handleHeaderPublish}
+              disabled={isPublishing}
+            >
+              {isPublishing ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4 mr-2" />
+              )}
+              {isDraft ? "Finalize & Publish" : "Publish Roster"}
             </Button>
           )}
         </div>
@@ -556,6 +787,11 @@ export function RosterEditorClient({
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Total Cost</span>
           <span className="text-xl font-bold">{formatCurrency(totalCost)}</span>
+          {totalSuper > 0 && (
+            <span className="text-sm text-blue-600 font-medium">
+              +{formatCurrency(totalSuper)} super
+            </span>
+          )}
           <Badge className="bg-green-100 text-green-700 border-green-200">
             On Budget
           </Badge>
@@ -589,7 +825,14 @@ export function RosterEditorClient({
         weekStart={new Date(roster.startDate)}
         editable={isDraft && canEdit}
         positionColors={positionColors}
-        staffPayRates={staffPayRates as Record<string, { weekdayRate: unknown; saturdayRate: unknown; sundayRate: unknown }>}
+        staffPayRates={staffPayRates as Record<string, { weekdayRate: unknown; saturdayRate: unknown; sundayRate: unknown; superEnabled?: boolean | null; customSuperRate?: number | null }>}
+        rosterParticipants={staff.filter((member) => rosterParticipantIds.includes(member.id))}
+        staffAvailability={staffAvailability}
+        staffTimeOff={staffTimeOff}
+        canViewPayRates={canViewPayRates}
+        venuePayConfig={venuePayConfig}
+        dailyTotals={dailyTotals}
+        staffTotals={staffTotals}
         onEditShift={handleEditShift}
         onAddShift={(date, userId) => {
           setEditingShift(null);
@@ -736,6 +979,29 @@ export function RosterEditorClient({
         rosterId={roster.id}
         venueId={roster.venue.id}
         onSuccess={() => router.refresh()}
+      />
+
+      {/* Publish Confirmation Dialog (from header button) */}
+      <PublishConfirmationDialog
+        open={showPublishConfirmDialog}
+        onOpenChange={setShowPublishConfirmDialog}
+        rosterName={roster.name}
+        venueName={roster.venue.name}
+        startDate={new Date(roster.startDate)}
+        endDate={new Date(roster.endDate)}
+        shiftCount={roster.shifts.length}
+        assignedStaffCount={assignedCount}
+        isNewVersion={roster.versionNumber > 1}
+        isPending={isPublishing}
+        onConfirm={handleConfirmPublish}
+      />
+
+      <AddPeopleDialog
+        open={showAddPeopleDialog}
+        onOpenChange={setShowAddPeopleDialog}
+        staff={staff}
+        selectedStaffIds={rosterParticipantIds}
+        onConfirm={(staffIds) => setRosterParticipantIds(staffIds)}
       />
     </div>
   );

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, MoreVertical, Palette, Pencil, Trash2, Users } from "lucide-react";
+import { Building2, DollarSign, MoreVertical, Palette, Pencil, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import {
   Card,
@@ -193,12 +193,18 @@ export function VenueTable({ venues, onEdit, onRefresh }: VenueTableProps) {
                           Edit Venue
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => router.push(`/system/venues/${venue.id}/positions`)}
-                        >
-                          <Palette className="mr-2 h-4 w-4" />
-                          Manage Positions
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleToggleActive(venue)}>
+                           onClick={() => router.push(`/system/venues/${venue.id}/positions`)}
+                         >
+                           <Palette className="mr-2 h-4 w-4" />
+                           Manage Positions
+                         </DropdownMenuItem>
+                         <DropdownMenuItem
+                           onClick={() => router.push(`/manage/venues/${venue.id}/pay-settings`)}
+                         >
+                           <DollarSign className="mr-2 h-4 w-4" />
+                           Pay Settings
+                         </DropdownMenuItem>
+                         <DropdownMenuItem onClick={() => handleToggleActive(venue)}>
                           {venue.active ? "Deactivate" : "Activate"}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />

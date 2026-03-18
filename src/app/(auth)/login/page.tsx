@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -24,12 +24,27 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") || "/dashboard";
   const authError = searchParams.get("error");
-  const [error, setError] = useState<string>(
-    authError === "auth_service_unavailable"
-      ? "Authentication service is temporarily unavailable. Please try again later."
-      : ""
-  );
+  const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(false);
+
+  // Handle session_invalid error - sign out and clear stale session
+  useEffect(() => {
+    if (authError === "session_invalid") {
+      // Sign out from Supabase to clear the stale session
+      import("@supabase/ssr").then(({ createBrowserClient }) => {
+        const supabase = createBrowserClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+        supabase.auth.signOut().then(() => {
+          // Clear URL params and show message
+          router.replace("/login");
+        });
+      });
+    } else if (authError === "auth_service_unavailable") {
+      setError("Authentication service is temporarily unavailable. Please try again later.");
+    }
+  }, [authError, router]);
 
   const {
     register,

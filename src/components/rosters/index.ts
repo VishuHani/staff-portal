@@ -37,3 +37,5 @@ export { PublishConfirmationDialog } from "./publish-confirmation-dialog";
 export { StaffAvatarStack } from "./staff-avatar-stack";
 export { DateRangePicker } from "./date-range-picker";
 export { FilterPanel } from "./filter-panel";
+export { AddPeopleDialog } from "./add-people-dialog";
+export { WeeklyCostSummary } from "./weekly-cost-summary";

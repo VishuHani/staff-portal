@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import { MessageSquare } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConversationList } from "./ConversationList";
 import { MessageThread } from "./MessageThread";
 import { NewConversationDialog } from "./NewConversationDialog";
@@ -22,7 +21,7 @@ interface MessagesPageClientProps {
   users: User[];
 }
 
-export function MessagesPageClient({
+export const MessagesPageClient = memo(function MessagesPageClient({
   conversationId,
   currentUserId,
   currentUserEmail,
@@ -35,69 +34,59 @@ export function MessagesPageClient({
 
   return (
     <>
-      <div className="flex h-[calc(100vh-4rem)] gap-4">
+      <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-muted/30">
         {/* Mobile: Show either list or thread */}
         <div className="flex w-full lg:hidden">
           {mobileView === "list" || !conversationId ? (
-            <Card className="w-full">
-              <CardContent className="h-[calc(100vh-4rem)] p-0">
-                <ConversationList
-                  currentUserId={currentUserId}
-                  onNewConversation={() => setNewConversationOpen(true)}
-                />
-              </CardContent>
-            </Card>
+            <div className="w-full bg-background">
+              <ConversationList
+                currentUserId={currentUserId}
+                onNewConversation={() => setNewConversationOpen(true)}
+              />
+            </div>
           ) : (
-            <Card className="w-full">
-              <CardContent className="h-[calc(100vh-4rem)] p-0">
-                <MessageThread
-                  conversationId={conversationId}
-                  currentUserId={currentUserId}
-                  currentUserEmail={currentUserEmail}
-                  onBack={() => setMobileView("list")}
-                />
-              </CardContent>
-            </Card>
+            <div className="w-full bg-background">
+              <MessageThread
+                conversationId={conversationId}
+                currentUserId={currentUserId}
+                currentUserEmail={currentUserEmail}
+                onBack={() => setMobileView("list")}
+              />
+            </div>
           )}
         </div>
 
         {/* Desktop: Show both sidebar and content */}
-        <div className="hidden w-full lg:flex lg:gap-4">
+        <div className="hidden w-full lg:flex">
           {/* Sidebar - Conversation List */}
-          <aside className="w-80 flex-shrink-0">
-            <Card className="h-full">
-              <CardContent className="h-[calc(100vh-4rem)] p-0">
-                <ConversationList
-                  currentUserId={currentUserId}
-                  onNewConversation={() => setNewConversationOpen(true)}
-                />
-              </CardContent>
-            </Card>
+          <aside className="w-80 flex-shrink-0 overflow-hidden rounded-l-2xl bg-background shadow-sm">
+            <ConversationList
+              currentUserId={currentUserId}
+              onNewConversation={() => setNewConversationOpen(true)}
+            />
           </aside>
 
           {/* Main Content - Message Thread */}
-          <main className="flex-1">
-            <Card className="h-full">
-              <CardContent className="h-[calc(100vh-4rem)] p-0">
-                {conversationId ? (
-                  <MessageThread
-                    conversationId={conversationId}
-                    currentUserId={currentUserId}
-                    currentUserEmail={currentUserEmail}
-                  />
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center p-8 text-center">
-                    <MessageSquare className="mb-4 h-16 w-16 text-muted-foreground" />
-                    <h3 className="mb-2 text-lg font-semibold">
-                      Select a conversation
-                    </h3>
-                    <p className="text-sm text-muted-foreground">
-                      Choose a conversation from the list to start messaging
-                    </p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+          <main className="relative flex-1 overflow-hidden rounded-r-2xl bg-background shadow-sm">
+            {conversationId ? (
+              <MessageThread
+                conversationId={conversationId}
+                currentUserId={currentUserId}
+                currentUserEmail={currentUserEmail}
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center p-8 text-center">
+                <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary/10 to-primary/20">
+                  <MessageSquare className="h-10 w-10 text-primary/60" />
+                </div>
+                <h3 className="mb-2 text-xl font-semibold">
+                  Select a conversation
+                </h3>
+                <p className="max-w-xs text-sm text-muted-foreground">
+                  Choose a conversation from the list to start messaging, or create a new one
+                </p>
+              </div>
+            )}
           </main>
         </div>
       </div>
@@ -111,4 +100,4 @@ export function MessagesPageClient({
       />
     </>
   );
-}
+});

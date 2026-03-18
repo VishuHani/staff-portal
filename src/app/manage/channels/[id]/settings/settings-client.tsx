@@ -221,7 +221,7 @@ export function ChannelSettingsClient({
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button asChild variant="ghost" size="icon">
-          <Link href={`/admin/channels/${channel.id}`}>
+          <Link href={`/manage/channels/${channel.id}`}>
             <ArrowLeft className="h-5 w-5" />
           </Link>
         </Button>
@@ -491,7 +491,7 @@ export function ChannelSettingsClient({
 
         <div className="flex gap-2">
           <Button asChild variant="outline" disabled={saving || archiving}>
-            <Link href={`/admin/channels/${channel.id}`}>Cancel</Link>
+            <Link href={`/manage/channels/${channel.id}`}>Cancel</Link>
           </Button>
           <Button
             onClick={handleSave}

@@ -29,6 +29,7 @@ import {
   isConfidenceAcceptable,
   shouldRetry,
 } from "./extraction-prompts";
+import { matchStaffName, type MatchingConfig } from "@/lib/rosters/staff-matching-engine";
 
 // ============================================================================
 // TYPES
@@ -293,66 +294,34 @@ export async function getExtractionContextV3(venueId: string): Promise<Extractio
 }
 
 /**
- * Match extracted staff names to database users
+ * Match extracted staff names to database users using the deterministic matching engine
  */
 export function matchStaffToUsers(
   shifts: ExtractedShift[],
-  venueStaff: ExtractionContext["venueStaff"]
-): Array<ExtractedShift & { matchedUserId: string | null; matchConfidence: number }> {
+  venueStaff: ExtractionContext["venueStaff"],
+  config?: { autoMatchThreshold?: number; useAliases?: boolean }
+): Array<ExtractedShift & { 
+  matchedUserId: string | null; 
+  matchConfidence: number;
+  matchStrategy?: string;
+  matchReason?: string;
+  matchAlternatives?: Array<{ userId: string; confidence: number; staffName: string }>;
+  requiresConfirmation?: boolean;
+}> {
   return shifts.map((shift) => {
-    const normalizedName = shift.staff_name.toLowerCase().trim();
+    const matchResult = matchStaffName(shift.staff_name, venueStaff, {
+      autoMatchThreshold: config?.autoMatchThreshold ?? 85,
+      useAliases: config?.useAliases ?? true,
+    });
     
-    // Try exact match first
-    const exactMatch = venueStaff.find((staff) => {
-      const fullName = `${staff.firstName || ""} ${staff.lastName || ""}`.toLowerCase().trim();
-      return fullName === normalizedName;
-    });
-
-    if (exactMatch) {
-      return {
-        ...shift,
-        matchedUserId: exactMatch.id,
-        matchConfidence: 100,
-      };
-    }
-
-    // Try first name match
-    const firstName = normalizedName.split(/\s+/)[0];
-    const firstNameMatch = venueStaff.find((staff) => {
-      return staff.firstName?.toLowerCase().trim() === firstName;
-    });
-
-    if (firstNameMatch) {
-      return {
-        ...shift,
-        matchedUserId: firstNameMatch.id,
-        matchConfidence: 80,
-      };
-    }
-
-    // Try fuzzy match
-    let bestMatch: { user: (typeof venueStaff)[0]; score: number } | null = null;
-    for (const staff of venueStaff) {
-      const fullName = `${staff.firstName || ""} ${staff.lastName || ""}`.toLowerCase().trim();
-      const score = calculateSimilarity(normalizedName, fullName);
-      if (score > 0.7 && (!bestMatch || score > bestMatch.score)) {
-        bestMatch = { user: staff, score };
-      }
-    }
-
-    if (bestMatch) {
-      return {
-        ...shift,
-        matchedUserId: bestMatch.user.id,
-        matchConfidence: Math.round(bestMatch.score * 100),
-      };
-    }
-
-    // No match
     return {
       ...shift,
-      matchedUserId: null,
-      matchConfidence: 0,
+      matchedUserId: matchResult.matchedUserId,
+      matchConfidence: matchResult.confidence,
+      matchStrategy: matchResult.strategy,
+      matchReason: matchResult.matchReason,
+      matchAlternatives: matchResult.alternatives,
+      requiresConfirmation: matchResult.requiresConfirmation,
     };
   });
 }

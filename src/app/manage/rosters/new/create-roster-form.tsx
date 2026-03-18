@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,9 +21,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { format, addDays, startOfWeek, endOfWeek } from "date-fns";
-import { CalendarIcon, Loader2, ArrowLeft } from "lucide-react";
+import { CalendarIcon, Loader2, ArrowLeft, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { createRoster } from "@/lib/actions/rosters";
+import { createRoster, copyRoster, getRosters } from "@/lib/actions/rosters";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -33,6 +33,14 @@ interface Venue {
   code: string;
 }
 
+interface PastRoster {
+  id: string;
+  name: string;
+  startDate: Date;
+  endDate: Date;
+  _count: { shifts: number };
+}
+
 interface CreateRosterFormProps {
   venues: Venue[];
 }
@@ -40,6 +48,8 @@ interface CreateRosterFormProps {
 export function CreateRosterForm({ venues }: CreateRosterFormProps) {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [pastRosters, setPastRosters] = useState<PastRoster[]>([]);
+  const [loadingPastRosters, setLoadingPastRosters] = useState(false);
 
   // Default to next week
   const defaultStartDate = startOfWeek(addDays(new Date(), 7), { weekStartsOn: 1 });
@@ -51,7 +61,41 @@ export function CreateRosterForm({ venues }: CreateRosterFormProps) {
     venueId: venues.length === 1 ? venues[0].id : "",
     startDate: defaultStartDate,
     endDate: defaultEndDate,
+    copyFromRosterId: "",
   });
+
+  // Load past rosters when venue changes
+  useEffect(() => {
+    if (formData.venueId) {
+      loadPastRosters(formData.venueId);
+    } else {
+      setPastRosters([]);
+    }
+  }, [formData.venueId]);
+
+  const loadPastRosters = async (venueId: string) => {
+    setLoadingPastRosters(true);
+    try {
+      const result = await getRosters({
+        venueId,
+        status: "PUBLISHED",
+        endDate: new Date(), // Only past rosters
+        includeSuperseded: true,
+      });
+      
+      if (result.success) {
+        setPastRosters(result.rosters as PastRoster[]);
+      } else {
+        console.error("Failed to load past rosters:", result.error);
+        setPastRosters([]);
+      }
+    } catch (error) {
+      console.error("Error loading past rosters:", error);
+      setPastRosters([]);
+    } finally {
+      setLoadingPastRosters(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,22 +113,39 @@ export function CreateRosterForm({ venues }: CreateRosterFormProps) {
     setIsLoading(true);
 
     try {
-      const result = await createRoster({
-        name: formData.name.trim(),
-        description: formData.description.trim() || undefined,
-        venueId: formData.venueId,
-        startDate: formData.startDate,
-        endDate: formData.endDate,
-      });
+      if (formData.copyFromRosterId) {
+        // Copy from existing roster
+        const result = await copyRoster(formData.copyFromRosterId, {
+          targetWeekStart: formData.startDate,
+          name: formData.name.trim(),
+          createNewVersion: false,
+        });
 
-      if (result.success && result.roster) {
-        toast.success("Roster created successfully");
-        router.push(`/manage/rosters/${result.roster.id}`);
+        if (result.success && result.rosterId) {
+          toast.success("Roster copied successfully");
+          router.push(`/manage/rosters/${result.rosterId}`);
+        } else {
+          toast.error(result.error || "Failed to copy roster");
+        }
       } else {
-        toast.error(result.error || "Failed to create roster");
+        // Create new empty roster
+        const result = await createRoster({
+          name: formData.name.trim(),
+          description: formData.description.trim() || undefined,
+          venueId: formData.venueId,
+          startDate: formData.startDate,
+          endDate: formData.endDate,
+        });
+
+        if (result.success && result.roster) {
+          toast.success("Roster created successfully");
+          router.push(`/manage/rosters/${result.roster.id}`);
+        } else {
+          toast.error(result.error || "Failed to create roster");
+        }
       }
     } catch (error) {
-      console.error("Error creating roster:", error);
+      console.error("Error creating/copying roster:", error);
       toast.error("An error occurred");
     } finally {
       setIsLoading(false);
@@ -170,6 +231,45 @@ export function CreateRosterForm({ venues }: CreateRosterFormProps) {
               rows={2}
             />
           </div>
+
+          {/* Copy from Past Roster */}
+          {pastRosters.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="copyFromRoster">Copy from Past Roster (Optional)</Label>
+              <Select
+                value={formData.copyFromRosterId}
+                onValueChange={(value) =>
+                  setFormData({ ...formData, copyFromRosterId: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a past roster to copy" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Create empty roster</SelectItem>
+                  {pastRosters.map((roster) => (
+                    <SelectItem key={roster.id} value={roster.id}>
+                      <div className="flex items-center justify-between w-full">
+                        <span>{roster.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {format(new Date(roster.startDate), "MMM d")} - {format(new Date(roster.endDate), "MMM d")}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {roster._count.shifts} shifts
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {formData.copyFromRosterId && (
+                <div className="text-sm text-blue-600 bg-blue-50 p-2 rounded-md flex items-center gap-2">
+                  <Copy className="h-4 w-4" />
+                  <span>Roster will be copied with all shifts to the selected date range</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Date Range */}
           <div className="grid grid-cols-2 gap-4">
