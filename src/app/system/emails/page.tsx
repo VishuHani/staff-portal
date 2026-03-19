@@ -3,6 +3,7 @@ import { isAdmin } from "@/lib/rbac/access";
 import { redirect } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { EmailsPageClient } from "./emails-page-client";
+import { prisma } from "@/lib/prisma";
 
 export const metadata = {
   title: "Email Campaigns | System Admin",
@@ -15,7 +16,6 @@ export default async function EmailsPage() {
 
   if (!isUserAdmin) {
     // Check if user is a venue manager
-    const { prisma } = await import("@/lib/prisma");
     const userVenues = await prisma.userVenue.findMany({
       where: { userId: user.id },
       select: { venueId: true },
@@ -26,9 +26,17 @@ export default async function EmailsPage() {
     }
   }
 
+  const venues = isUserAdmin
+    ? await prisma.venue.findMany({
+        where: { active: true },
+        select: { id: true, name: true, code: true },
+        orderBy: { name: "asc" },
+      })
+    : [];
+
   return (
     <DashboardLayout user={user}>
-      <EmailsPageClient isAdmin={isUserAdmin} />
+      <EmailsPageClient isAdmin={isUserAdmin} venues={venues} />
     </DashboardLayout>
   );
 }

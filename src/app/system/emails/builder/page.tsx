@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
+import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { EmailBuilderClient } from "./email-builder-client";
 
 export default async function EmailBuilderPage() {
@@ -19,8 +22,12 @@ export default async function EmailBuilderPage() {
     redirect("/login");
   }
 
+  if (!(await canAccessEmailModule(user.id, "create"))) {
+    redirect("/dashboard?error=access_denied");
+  }
+
   // Get emails (templates and regular emails)
-  const whereClause: any = {};
+  const whereClause: Prisma.EmailWhereInput = {};
 
   // Non-admins can only see emails for their venue or system emails
   if (user.role.name !== "ADMIN") {
@@ -56,11 +63,13 @@ export default async function EmailBuilderPage() {
   }
 
   return (
-    <EmailBuilderClient
-      emails={emails}
-      venues={venues}
-      isAdmin={user.role.name === "ADMIN"}
-      userVenueId={user.venueId}
-    />
+    <DashboardLayout user={user}>
+      <EmailBuilderClient
+        emails={emails}
+        venues={venues}
+        isAdmin={user.role.name === "ADMIN"}
+        userVenueId={user.venueId}
+      />
+    </DashboardLayout>
   );
 }

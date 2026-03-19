@@ -26,10 +26,22 @@ function getOpenAIClient(): OpenAI | null {
 
 export interface GenerateEmailInput {
   prompt: string;
-  tone?: "professional" | "friendly" | "urgent" | "celebratory" | "informational";
+  tone?:
+    | "professional"
+    | "friendly"
+    | "casual"
+    | "formal"
+    | "urgent"
+    | "celebratory"
+    | "informational";
   targetAudience?: string;
   includeCallToAction?: boolean;
   previousContent?: string;
+  visualStyle?: "modern" | "minimal" | "bold" | "playful" | "luxury";
+  layoutStyle?: "newsletter" | "announcement" | "story" | "promotion";
+  goal?: string;
+  brandColors?: string;
+  creativityLevel?: number; // 0..100
 }
 
 export interface GeneratedEmail {
@@ -56,31 +68,46 @@ export async function generateEmail(input: GenerateEmailInput): Promise<{
 
     const tone = input.tone || "professional";
     const targetAudience = input.targetAudience || "staff members";
+    const visualStyle = input.visualStyle || "modern";
+    const layoutStyle = input.layoutStyle || "announcement";
+    const goal = input.goal?.trim() || "Inform, engage, and drive clear action";
+    const brandColors = input.brandColors?.trim() || "Primary #2563eb, neutral whites/grays";
+    const creativityLevel = Math.min(100, Math.max(0, input.creativityLevel ?? 72));
+    const temperature = 0.45 + (creativityLevel / 100) * 0.5;
 
-    const systemPrompt = `You are an expert email copywriter for a staff management portal. 
-Generate professional emails that are clear, concise, and effective.
+    const systemPrompt = `You are a top-tier email creative director and HTML email engineer.
+Create high-impact, visually distinctive, conversion-focused emails for a staff management portal.
 
-Rules:
-1. Always generate valid HTML with inline styles for email compatibility
-2. Include a compelling subject line
-3. Use the specified tone: ${tone}
-4. Target audience: ${targetAudience}
-5. Keep emails concise but complete
-6. Include appropriate greeting and sign-off
-7. ${input.includeCallToAction ? "Include a clear call-to-action" : "Keep informational without strong call-to-action"}
+Creative direction:
+- Tone: ${tone}
+- Target audience: ${targetAudience}
+- Visual style: ${visualStyle}
+- Layout style: ${layoutStyle}
+- Campaign goal: ${goal}
+- Brand colors: ${brandColors}
+- Creativity level: ${creativityLevel}/100
 
-Email HTML should:
-- Use table-based layout for compatibility
-- Have inline CSS styles
-- Be mobile-responsive
-- Use web-safe fonts
-- Have a maximum width of 600px
+Output requirements:
+1. Return ONLY valid JSON with: subject, htmlContent, textContent.
+2. htmlContent must be complete email HTML and production-ready.
+3. Use email-safe layout (table-friendly) plus modern polish.
+4. Must look great on desktop and mobile:
+   - Add responsive behavior for <=600px width.
+   - Ensure readable typography and spacing on mobile.
+5. Build strong visual hierarchy:
+   - Hero/title section
+   - Core message section
+   - ${input.includeCallToAction ? "Prominent CTA section" : "Informational section without hard CTA"}
+   - Supporting details section
+   - Footer with unsubscribe placeholder {{unsubscribe_url}}
+6. Keep copy concise, specific, and engaging.
+7. Avoid generic boilerplate language.
 
-Return JSON with:
+JSON schema:
 {
-  "subject": "Email subject line",
-  "htmlContent": "<html>...</html>",
-  "textContent": "Plain text version"
+  "subject": "Compelling subject line",
+  "htmlContent": "<!DOCTYPE html>...</html>",
+  "textContent": "Plain text fallback"
 }`;
 
     const userPrompt = input.previousContent
@@ -94,7 +121,7 @@ Return JSON with:
         { role: "user", content: userPrompt },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.7,
+      temperature,
       max_tokens: 2000,
     });
 
@@ -124,7 +151,10 @@ Return JSON with:
         tokensUsed: completion.usage?.total_tokens,
         tone: input.tone,
         targetAudience: input.targetAudience,
-        emailType: classification.type as any,
+        emailType:
+          classification.type === "MARKETING"
+            ? "MARKETING"
+            : "TRANSACTIONAL",
         createdBy: user.id,
       },
     });

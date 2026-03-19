@@ -15,9 +15,16 @@ import {
   getEmailCampaigns,
   deleteEmailCampaign,
   cancelEmailCampaign,
+  requestCampaignApproval,
   sendEmailCampaign,
 } from "@/lib/actions/email-campaigns";
-import type { EmailCampaign, CampaignStatus, EmailType } from "@/types/email-campaign";
+import { listFolderTree, type EmailFolderNode } from "@/lib/actions/email-workspace/folders";
+import type {
+  EmailCampaign,
+  CampaignStatus,
+  CampaignApprovalStatus,
+  EmailType,
+} from "@/types/email-campaign";
 import {
   Plus,
   Search,
@@ -70,6 +77,30 @@ const emailTypeColors: Record<EmailType, string> = {
   MARKETING: "bg-pink-100 text-pink-800",
 };
 
+const approvalStatusColors: Record<CampaignApprovalStatus, string> = {
+  NOT_REQUIRED: "bg-slate-100 text-slate-700",
+  PENDING: "bg-amber-100 text-amber-800",
+  APPROVED: "bg-green-100 text-green-800",
+  REJECTED: "bg-red-100 text-red-800",
+};
+
+function flattenFolderOptions(
+  nodes: EmailFolderNode[],
+  depth: number = 0
+): Array<{ id: string; label: string }> {
+  const rows: Array<{ id: string; label: string }> = [];
+
+  for (const node of nodes) {
+    rows.push({
+      id: node.id,
+      label: `${"-- ".repeat(depth)}${node.name}`,
+    });
+    rows.push(...flattenFolderOptions(node.children, depth + 1));
+  }
+
+  return rows;
+}
+
 export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps) {
   const router = useRouter();
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
@@ -78,18 +109,37 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [venueFilter, setVenueFilter] = useState<string>("all");
+  const [folderFilter, setFolderFilter] = useState<string>("all");
+  const [folderOptions, setFolderOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<EmailCampaign | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     loadCampaigns();
-  }, [statusFilter, typeFilter, venueFilter]);
+  }, [statusFilter, typeFilter, venueFilter, folderFilter]);
+
+  useEffect(() => {
+    void loadFolders();
+  }, []);
+
+  const loadFolders = async () => {
+    try {
+      const response = await listFolderTree({ module: "campaigns" });
+      if (!response.success || !response.tree) {
+        return;
+      }
+
+      setFolderOptions(flattenFolderOptions(response.tree));
+    } catch (error) {
+      console.error("Error loading campaign folders:", error);
+    }
+  };
 
   const loadCampaigns = async () => {
     setLoading(true);
     try {
-      const filters: any = {};
+      const filters: Record<string, unknown> = {};
       if (statusFilter !== "all") {
         filters.status = statusFilter as CampaignStatus;
       }
@@ -99,13 +149,20 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
       if (venueFilter !== "all") {
         filters.venueId = venueFilter;
       }
+      if (folderFilter !== "all" && folderFilter !== "none") {
+        filters.folderId = folderFilter;
+      }
       if (search) {
         filters.search = search;
       }
 
       const result = await getEmailCampaigns(filters);
       if (result.success && result.campaigns) {
-        setCampaigns(result.campaigns);
+        const mappedCampaigns =
+          folderFilter === "none"
+            ? result.campaigns.filter((campaign) => !campaign.folderId)
+            : result.campaigns;
+        setCampaigns(mappedCampaigns);
       } else {
         toast.error(result.error || "Failed to load campaigns");
       }
@@ -179,6 +236,24 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
     }
   };
 
+  const handleRequestApproval = async (campaign: EmailCampaign) => {
+    setActionLoading(campaign.id);
+    try {
+      const result = await requestCampaignApproval(campaign.id);
+      if (result.success) {
+        toast.success("Campaign submitted for approval");
+        await loadCampaigns();
+      } else {
+        toast.error(result.error || "Failed to request approval");
+      }
+    } catch (error) {
+      console.error("Error requesting campaign approval:", error);
+      toast.error("Failed to request approval");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const getStatusBadge = (status: CampaignStatus) => (
     <Badge className={statusColors[status]} variant="outline">
       {status.replace("_", " ")}
@@ -188,6 +263,12 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
   const getTypeBadge = (type: EmailType) => (
     <Badge className={emailTypeColors[type]} variant="outline">
       {type}
+    </Badge>
+  );
+
+  const getApprovalBadge = (status: CampaignApprovalStatus) => (
+    <Badge className={approvalStatusColors[status]} variant="outline">
+      {status === "NOT_REQUIRED" ? "Not Required" : status}
     </Badge>
   );
 
@@ -213,7 +294,7 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
             Create and send email campaigns to your venue staff
           </p>
         </div>
-        <Link href="/manage/emails/new">
+        <Link href="/emails/campaigns/new">
           <Button>
             <Plus className="mr-2 h-4 w-4" />
             New Campaign
@@ -313,6 +394,20 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                   <SelectItem value="MARKETING">Marketing</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={folderFilter} onValueChange={setFolderFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Folder" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Folders</SelectItem>
+                  <SelectItem value="none">No Folder</SelectItem>
+                  {folderOptions.map((folder) => (
+                    <SelectItem key={folder.id} value={folder.id}>
+                      {folder.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button variant="outline" onClick={loadCampaigns}>
                 Search
               </Button>
@@ -335,7 +430,7 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
               <p className="text-muted-foreground mb-4">
                 Get started by creating your first email campaign
               </p>
-              <Link href="/manage/emails/new">
+              <Link href="/emails/campaigns/new">
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
                   Create Campaign
@@ -350,6 +445,7 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                   <TableHead>Subject</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Approval</TableHead>
                   <TableHead>Recipients</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -364,6 +460,7 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                     </TableCell>
                     <TableCell>{getTypeBadge(campaign.emailType)}</TableCell>
                     <TableCell>{getStatusBadge(campaign.status)}</TableCell>
+                    <TableCell>{getApprovalBadge(campaign.approvalStatus)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <Users className="h-4 w-4 text-muted-foreground" />
@@ -388,7 +485,7 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                           <DropdownMenuLabel>Actions</DropdownMenuLabel>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem asChild>
-                            <Link href={`/manage/emails/${campaign.id}`}>
+                            <Link href={`/emails/campaigns/${campaign.id}`}>
                               <Eye className="mr-2 h-4 w-4" />
                               View Details
                             </Link>
@@ -396,15 +493,24 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                           {campaign.status === "DRAFT" && (
                             <>
                               <DropdownMenuItem asChild>
-                                <Link href={`/manage/emails/${campaign.id}/edit`}>
+                                <Link href={`/emails/campaigns/${campaign.id}`}>
                                   <Edit className="mr-2 h-4 w-4" />
                                   Edit
                                 </Link>
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleSendNow(campaign)}>
-                                <Send className="mr-2 h-4 w-4" />
-                                Send Now
-                              </DropdownMenuItem>
+                              {(campaign.approvalStatus === "NOT_REQUIRED" ||
+                                campaign.approvalStatus === "APPROVED") && (
+                                <DropdownMenuItem onClick={() => handleSendNow(campaign)}>
+                                  <Send className="mr-2 h-4 w-4" />
+                                  Send Now
+                                </DropdownMenuItem>
+                              )}
+                              {campaign.approvalStatus === "REJECTED" && (
+                                <DropdownMenuItem onClick={() => handleRequestApproval(campaign)}>
+                                  <Clock className="mr-2 h-4 w-4" />
+                                  Request Approval
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 className="text-red-600"
                                 onClick={() => {
@@ -440,7 +546,7 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
           <DialogHeader>
             <DialogTitle>Delete Campaign</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{selectedCampaign?.name}"? This action cannot be undone.
+              Are you sure you want to delete &quot;{selectedCampaign?.name}&quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -95,6 +95,13 @@ model User {
   emailTemplates           EmailTemplate[]
   emails                   Email[]                   // Emails created by this user
   emailSegments            EmailSegment[]            // Segments created by this user
+  emailFolders             EmailFolder[]             @relation("EmailFolderOwner")
+  emailAssets              EmailAsset[]              @relation("EmailAssetOwner")
+  audienceLists            AudienceList[]            @relation("AudienceListOwner")
+  emailReportDefinitions   EmailReportDefinition[]   @relation("EmailReportDefinitionOwner")
+  audienceSnapshots        AudienceMemberSnapshot[]
+  campaignApprovalsRequested EmailCampaignApproval[] @relation("EmailCampaignApprovalRequester")
+  campaignApprovalsGranted EmailCampaignApproval[]   @relation("EmailCampaignApprovalApprover")
 
   @@index([email])
   @@index([roleId])
@@ -251,6 +258,11 @@ model Venue {
   emailTemplates         EmailTemplate[]
   emails                 Email[]
   emailSegments          EmailSegment[]
+  emailFolders           EmailFolder[]
+  emailAssets            EmailAsset[]
+  audienceLists          AudienceList[]
+  emailReportDefinitions EmailReportDefinition[]
+  emailApprovalPolicy    EmailApprovalPolicy?
 
   @@map("venues")
 }
@@ -1540,6 +1552,143 @@ enum BulkTargetType {
 // EMAIL SYSTEM - BUILDER & CAMPAIGNS
 // ============================================================================
 
+/// Shared folder tree for email workspace modules
+model EmailFolder {
+  id          String               @id @default(cuid())
+  module      EmailWorkspaceModule
+  name        String
+  parentId    String?
+  path        String               @default("/")
+  scope       EmailContentScope    @default(PRIVATE)
+  venueId     String?
+  ownerId     String
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  parent      EmailFolder?         @relation("EmailFolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    EmailFolder[]        @relation("EmailFolderTree")
+  venue       Venue?               @relation(fields: [venueId], references: [id])
+  owner       User                 @relation("EmailFolderOwner", fields: [ownerId], references: [id])
+  emails      Email[]
+  campaigns   EmailCampaign[]
+  assets      EmailAsset[]
+  audiences   AudienceList[]
+  reports     EmailReportDefinition[]
+
+  @@index([module])
+  @@index([parentId])
+  @@index([scope])
+  @@index([venueId])
+  @@index([ownerId])
+  @@map("email_folders")
+}
+
+/// Asset library for email media (images, gifs, videos, files)
+model EmailAsset {
+  id          String            @id @default(cuid())
+  folderId    String?
+  name        String
+  mimeType    String
+  kind        EmailAssetKind
+  storageUrl  String
+  storagePath String
+  sizeBytes   Int
+  width       Int?
+  height      Int?
+  durationSec Int?
+  thumbnailUrl String?
+  altText     String?
+  metadataJson Json?
+  tags        String[]          @default([])
+  scope       EmailContentScope @default(PRIVATE)
+  venueId     String?
+  ownerId     String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  folder      EmailFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  venue       Venue?            @relation(fields: [venueId], references: [id])
+  owner       User              @relation("EmailAssetOwner", fields: [ownerId], references: [id])
+
+  @@index([folderId])
+  @@index([kind])
+  @@index([scope])
+  @@index([venueId])
+  @@index([ownerId])
+  @@map("email_assets")
+}
+
+/// Audience list definitions used for reusable campaign targeting
+model AudienceList {
+  id          String            @id @default(cuid())
+  folderId    String?
+  name        String
+  description String?
+  queryType   AudienceQueryType @default(FILTER)
+  sqlText     String?           @db.Text
+  filterJson  Json?
+  lastRunAt   DateTime?
+  lastCount   Int               @default(0)
+  scope       EmailContentScope @default(PRIVATE)
+  venueId     String?
+  ownerId     String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  folder      EmailFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  venue       Venue?            @relation(fields: [venueId], references: [id])
+  owner       User              @relation("AudienceListOwner", fields: [ownerId], references: [id])
+  runs        AudienceRun[]
+  campaigns   CampaignAudienceLink[]
+
+  @@index([folderId])
+  @@index([queryType])
+  @@index([scope])
+  @@index([venueId])
+  @@index([ownerId])
+  @@map("audience_lists")
+}
+
+/// Execution record for audience list runs
+model AudienceRun {
+  id            String          @id @default(cuid())
+  audienceListId String
+  status        EmailJobRunStatus @default(PENDING)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  rowCount      Int             @default(0)
+  sqlNormalized String?         @db.Text
+  validationLog Json?
+  error         String?
+  createdAt     DateTime        @default(now())
+
+  audienceList  AudienceList    @relation(fields: [audienceListId], references: [id], onDelete: Cascade)
+  members       AudienceMemberSnapshot[]
+
+  @@index([audienceListId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("audience_runs")
+}
+
+/// Snapshot of members resolved by an audience run
+model AudienceMemberSnapshot {
+  id            String      @id @default(cuid())
+  audienceRunId String
+  userId        String?
+  email         String
+  metadataJson  Json?
+  createdAt     DateTime    @default(now())
+
+  audienceRun   AudienceRun @relation(fields: [audienceRunId], references: [id], onDelete: Cascade)
+  user          User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([audienceRunId])
+  @@index([userId])
+  @@index([email])
+  @@map("audience_member_snapshots")
+}
+
 /// Email content - can be a template or a one-off email
 /// This is the core of the Email Builder Studio
 model Email {
@@ -1572,12 +1721,14 @@ model Email {
   // Ownership
   isSystem        Boolean       @default(false)  // System templates can't be deleted
   isDefault       Boolean       @default(false)  // Default template for a category
+  folderId        String?
   venueId         String?       // Null = available to all venues
   createdBy       String
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   
   // Relations
+  folder          EmailFolder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
   venue           Venue?        @relation(fields: [venueId], references: [id])
   creator         User          @relation(fields: [createdBy], references: [id])
   campaigns       EmailCampaign[]  // Campaigns that use this email
@@ -1585,6 +1736,7 @@ model Email {
   
   @@index([isTemplate])
   @@index([category])
+  @@index([folderId])
   @@index([venueId])
   @@index([isSystem])
   @@index([createdBy])
@@ -1627,6 +1779,7 @@ model EmailSegment {
 model EmailCampaign {
   id              String        @id @default(cuid())
   name            String        // Campaign name for reference
+  folderId        String?
   
   // Link to email content (from Email Builder Studio)
   emailId         String
@@ -1656,6 +1809,11 @@ model EmailCampaign {
   
   // Status & Scheduling
   status          CampaignStatus @default(DRAFT)
+  approvalStatus  CampaignApprovalStatus @default(NOT_REQUIRED)
+  isRecurring     Boolean       @default(false)
+  recurrenceRuleJson Json?
+  nextRunAt       DateTime?
+  lastRunAt       DateTime?
   scheduledAt     DateTime?
   sentAt          DateTime?
   startedSendingAt DateTime?
@@ -1668,18 +1826,52 @@ model EmailCampaign {
   updatedAt       DateTime      @updatedAt
   
   // Relations
+  folder          EmailFolder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
   creator         User          @relation("EmailCampaignCreator", fields: [createdBy], references: [id])
   venue           Venue?        @relation(fields: [venueId], references: [id])
   recipients      EmailRecipient[]
+  runs            EmailCampaignRun[]
   analytics       EmailCampaignAnalytics?
+  audienceLists   CampaignAudienceLink[]
+  approvals       EmailCampaignApproval[]
   
   @@index([status])
+  @@index([approvalStatus])
+  @@index([folderId])
   @@index([emailId])
   @@index([venueId])
   @@index([createdBy])
+  @@index([nextRunAt])
   @@index([scheduledAt])
   @@index([segmentId])
   @@map("email_campaigns")
+}
+
+/// Execution record for campaign sends (manual and scheduled/recurring runs)
+model EmailCampaignRun {
+  id             String             @id @default(cuid())
+  campaignId     String
+  idempotencyKey String             @unique
+  triggerSource  CampaignRunTrigger @default(SCHEDULED)
+  status         EmailJobRunStatus  @default(PENDING)
+  scheduledFor   DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  recipientCount Int                @default(0)
+  sentCount      Int                @default(0)
+  failedCount    Int                @default(0)
+  error          String?
+  metadataJson   Json?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  campaign       EmailCampaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([status])
+  @@index([scheduledFor])
+  @@index([createdAt])
+  @@map("email_campaign_runs")
 }
 
 /// Individual recipient tracking for each campaign
@@ -1771,6 +1963,112 @@ model EmailCampaignAnalytics {
   campaign        EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   
   @@map("email_campaign_analytics")
+}
+
+/// Many-to-many mapping between campaigns and reusable audience lists
+model CampaignAudienceLink {
+  id                 String       @id @default(cuid())
+  campaignId         String
+  audienceListId     String
+  filterOverrideJson Json?
+  createdAt          DateTime     @default(now())
+
+  campaign           EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  audienceList       AudienceList  @relation(fields: [audienceListId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, audienceListId])
+  @@index([campaignId])
+  @@index([audienceListId])
+  @@map("campaign_audience_links")
+}
+
+/// Venue-level policy for campaign approval requirements
+model EmailApprovalPolicy {
+  id                String    @id @default(cuid())
+  venueId           String    @unique
+  enabled           Boolean   @default(false)
+  requireForNonAdmin Boolean  @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  venue             Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+  @@map("email_approval_policies")
+}
+
+/// Approval records for campaign send authorization
+model EmailCampaignApproval {
+  id          String                 @id @default(cuid())
+  campaignId  String
+  requestedBy String
+  approvedBy  String?
+  status      CampaignApprovalStatus @default(PENDING)
+  notes       String?
+  requestedAt DateTime               @default(now())
+  approvedAt  DateTime?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  campaign    EmailCampaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  requester   User                   @relation("EmailCampaignApprovalRequester", fields: [requestedBy], references: [id])
+  approver    User?                  @relation("EmailCampaignApprovalApprover", fields: [approvedBy], references: [id])
+
+  @@index([campaignId])
+  @@index([requestedBy])
+  @@index([approvedBy])
+  @@index([status])
+  @@map("email_campaign_approvals")
+}
+
+/// Saved report definition for email reporting module
+model EmailReportDefinition {
+  id               String            @id @default(cuid())
+  folderId         String?
+  name             String
+  description      String?
+  reportType       String
+  configJson       Json
+  scope            EmailContentScope @default(PRIVATE)
+  venueId          String?
+  ownerId          String
+  isScheduled      Boolean           @default(false)
+  recurrenceRuleJson Json?
+  nextRunAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  folder           EmailFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  venue            Venue?            @relation(fields: [venueId], references: [id])
+  owner            User              @relation("EmailReportDefinitionOwner", fields: [ownerId], references: [id])
+  runs             EmailReportRun[]
+
+  @@index([folderId])
+  @@index([scope])
+  @@index([venueId])
+  @@index([ownerId])
+  @@index([nextRunAt])
+  @@map("email_report_definitions")
+}
+
+/// Execution record for report definition runs
+model EmailReportRun {
+  id               String           @id @default(cuid())
+  reportDefinitionId String
+  status           EmailJobRunStatus @default(PENDING)
+  startedAt        DateTime?
+  completedAt      DateTime?
+  resultJson       Json?
+  error            String?
+  deliveryConfigJson Json?
+  createdAt        DateTime         @default(now())
+
+  reportDefinition EmailReportDefinition @relation(fields: [reportDefinitionId], references: [id], onDelete: Cascade)
+
+  @@index([reportDefinitionId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("email_report_runs")
 }
 
 /// Reusable email templates (DEPRECATED - use Email model with isTemplate=true)
@@ -1941,4 +2239,51 @@ enum EmailRecipientStatus {
   COMPLAINED
   FAILED
   SKIPPED
+}
+
+enum EmailWorkspaceModule {
+  CREATE_EMAIL
+  ASSETS
+  AUDIENCE
+  CAMPAIGNS
+  REPORTS
+}
+
+enum EmailContentScope {
+  PRIVATE
+  TEAM
+  SYSTEM
+}
+
+enum EmailAssetKind {
+  IMAGE
+  GIF
+  VIDEO
+  FILE
+}
+
+enum AudienceQueryType {
+  SQL
+  FILTER
+  AI_FILTER
+}
+
+enum EmailJobRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum CampaignApprovalStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CampaignRunTrigger {
+  MANUAL
+  SCHEDULED
 }

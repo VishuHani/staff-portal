@@ -68,6 +68,13 @@ export type PermissionResource =
   // Intelligence Resources
   | "ai"
   | "reports"
+  // Email Workspace Resources
+  | "email_workspace"
+  | "email_create"
+  | "email_assets"
+  | "email_audience"
+  | "email_campaigns"
+  | "email_reports"
   // System Resources
   | "audit"
   | "notifications"
@@ -129,6 +136,7 @@ export type PermissionAction =
   | "submit"
   | "recall"
   | "finalize"
+  | "schedule"
   // Data Operations
   | "export"
   | "export_team"

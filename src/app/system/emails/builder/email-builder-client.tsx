@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { 
@@ -64,6 +64,7 @@ import {
   Building
 } from "lucide-react";
 import { deleteEmail, duplicateEmail, saveEmailAsTemplate } from "@/lib/actions/emails";
+import { listFolderTree, type EmailFolderNode } from "@/lib/actions/email-workspace/folders";
 import { toast } from "sonner";
 import type { EmailWithRelations } from "@/types/email-campaign";
 
@@ -72,6 +73,23 @@ interface EmailBuilderClientProps {
   venues: Array<{ id: string; name: string; code: string }>;
   isAdmin: boolean;
   userVenueId: string | null;
+}
+
+function flattenFolderOptions(
+  nodes: EmailFolderNode[],
+  depth: number = 0
+): Array<{ id: string; label: string }> {
+  const rows: Array<{ id: string; label: string }> = [];
+
+  for (const node of nodes) {
+    rows.push({
+      id: node.id,
+      label: `${"-- ".repeat(depth)}${node.name}`,
+    });
+    rows.push(...flattenFolderOptions(node.children, depth + 1));
+  }
+
+  return rows;
 }
 
 export function EmailBuilderClient({ 
@@ -86,6 +104,8 @@ export function EmailBuilderClient({
   const [typeFilter, setTypeFilter] = useState<"all" | "templates" | "emails">("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [venueFilter, setVenueFilter] = useState<string>("all");
+  const [folderFilter, setFolderFilter] = useState<string>("all");
+  const [folderOptions, setFolderOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; emailId: string | null }>({ 
     open: false, 
     emailId: null 
@@ -94,6 +114,29 @@ export function EmailBuilderClient({
     open: false,
     email: null,
   });
+
+  useEffect(() => {
+    let active = true;
+
+    const loadFolders = async () => {
+      try {
+        const response = await listFolderTree({ module: "create" });
+        if (!active || !response.success || !response.tree) {
+          return;
+        }
+
+        setFolderOptions(flattenFolderOptions(response.tree));
+      } catch (error) {
+        console.error("Error loading email folders:", error);
+      }
+    };
+
+    void loadFolders();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Get unique categories from emails
   const categories = useMemo(() => {
@@ -130,9 +173,15 @@ export function EmailBuilderClient({
         if (venueFilter !== "system" && email.venueId !== venueFilter) return false;
       }
 
+      // Folder filter
+      if (folderFilter !== "all") {
+        if (folderFilter === "none" && email.folderId) return false;
+        if (folderFilter !== "none" && email.folderId !== folderFilter) return false;
+      }
+
       return true;
     });
-  }, [emails, search, typeFilter, categoryFilter, venueFilter, isAdmin]);
+  }, [emails, search, typeFilter, categoryFilter, venueFilter, folderFilter, isAdmin]);
 
   // Separate templates and emails for display
   const templates = filteredEmails.filter(e => e.isTemplate);
@@ -321,7 +370,10 @@ export function EmailBuilderClient({
                 className="pl-9"
               />
             </div>
-            <Select value={typeFilter} onValueChange={(v: any) => setTypeFilter(v)}>
+            <Select
+              value={typeFilter}
+              onValueChange={(value: "all" | "templates" | "emails") => setTypeFilter(value)}
+            >
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
@@ -339,6 +391,20 @@ export function EmailBuilderClient({
                 <SelectItem value="all">All Categories</SelectItem>
                 {categories.map(cat => (
                   <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={folderFilter} onValueChange={setFolderFilter}>
+              <SelectTrigger className="w-[170px]">
+                <SelectValue placeholder="Folder" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Folders</SelectItem>
+                <SelectItem value="none">No Folder</SelectItem>
+                {folderOptions.map((folder) => (
+                  <SelectItem key={folder.id} value={folder.id}>
+                    {folder.label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>

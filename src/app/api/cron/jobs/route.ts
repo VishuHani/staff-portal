@@ -32,6 +32,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { jobQueue } from "@/lib/utils/job-queue";
+import { processEmailWorkspaceJobs } from "@/lib/jobs/email-workspace";
 import { env } from "@/lib/config";
 
 // Secret for authenticating cron requests
@@ -87,6 +88,9 @@ export async function GET(request: NextRequest) {
     // Process pending jobs (limit to 20 per run to avoid timeout)
     const result = await jobQueue.processPending(20);
 
+    // Process email workspace due schedules (campaigns + reports)
+    const emailWorkspace = await processEmailWorkspaceJobs();
+
     // Cleanup old completed/failed jobs
     const cleaned = jobQueue.cleanup(3600); // 1 hour
 
@@ -102,6 +106,7 @@ export async function GET(request: NextRequest) {
       processed: result.processed,
       failed: result.failed,
       cleaned,
+      emailWorkspace,
       stats: {
         before: statsBefore,
         after: statsAfter,

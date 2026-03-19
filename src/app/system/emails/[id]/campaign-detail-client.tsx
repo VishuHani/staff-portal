@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,12 +10,24 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   getEmailCampaign,
+  requestCampaignApproval,
+  reviewCampaignApproval,
   sendEmailCampaign,
   cancelEmailCampaign,
   sendTestEmail,
-  getCampaignAnalytics,
 } from "@/lib/actions/email-campaigns";
-import type { EmailCampaign, EmailRecipient, EmailCampaignAnalytics, CampaignStatus, EmailType } from "@/types/email-campaign";
+import {
+  listCampaignRuns,
+  type EmailCampaignRunSummary,
+} from "@/lib/actions/email-workspace/campaign-runs";
+import type {
+  EmailCampaignWithContent,
+  EmailRecipient,
+  EmailCampaignAnalytics,
+  CampaignStatus,
+  CampaignApprovalStatus,
+  EmailType,
+} from "@/types/email-campaign";
 import {
   ArrowLeft,
   Send,
@@ -26,16 +38,15 @@ import {
   Mail,
   Eye,
   MousePointer,
-  AlertCircle,
   Loader2,
-  Calendar,
   RefreshCw,
+  History,
 } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
 
 interface CampaignDetailClientProps {
-  campaign: EmailCampaign & {
+  campaign: EmailCampaignWithContent & {
     creator: { id: string; firstName: string | null; lastName: string | null; email: string } | null;
     venue: { id: string; name: string; code: string } | null;
     emailTemplate: { id: string; name: string; category: string | null } | null;
@@ -44,7 +55,7 @@ interface CampaignDetailClientProps {
   };
   isAdmin: boolean;
   venues: { id: string; name: string; code: string }[];
-  roles: { id: string; name: string; description: string | null }[];
+  campaignsHref?: string;
 }
 
 const statusColors: Record<CampaignStatus, string> = {
@@ -63,11 +74,26 @@ const emailTypeColors: Record<EmailType, string> = {
   MARKETING: "bg-pink-100 text-pink-800",
 };
 
+const approvalStatusColors: Record<CampaignApprovalStatus, string> = {
+  NOT_REQUIRED: "bg-slate-100 text-slate-700",
+  PENDING: "bg-amber-100 text-amber-800",
+  APPROVED: "bg-green-100 text-green-800",
+  REJECTED: "bg-red-100 text-red-800",
+};
+
+const runStatusColors: Record<EmailCampaignRunSummary["status"], string> = {
+  PENDING: "bg-slate-100 text-slate-700",
+  RUNNING: "bg-blue-100 text-blue-800",
+  COMPLETED: "bg-green-100 text-green-800",
+  FAILED: "bg-red-100 text-red-800",
+  CANCELLED: "bg-amber-100 text-amber-800",
+};
+
 export function CampaignDetailClient({
   campaign: initialCampaign,
   isAdmin,
   venues,
-  roles,
+  campaignsHref = "/emails/campaigns",
 }: CampaignDetailClientProps) {
   const router = useRouter();
   const [campaign, setCampaign] = useState(initialCampaign);
@@ -76,14 +102,57 @@ export function CampaignDetailClient({
   const [testEmail, setTestEmail] = useState("");
   const [testEmailLoading, setTestEmailLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
+  const [campaignRuns, setCampaignRuns] = useState<EmailCampaignRunSummary[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runsError, setRunsError] = useState<string | null>(null);
+  const [runsWarning, setRunsWarning] = useState<string | null>(null);
+
+  const loadCampaignRuns = async () => {
+    setRunsLoading(true);
+    setRunsError(null);
+    setRunsWarning(null);
+    try {
+      const response = await listCampaignRuns({
+        campaignId: campaign.id,
+        take: 20,
+      });
+
+      if (!response.success) {
+        setRunsError(response.error || "Failed to load campaign run history.");
+        setCampaignRuns([]);
+        return;
+      }
+
+      setCampaignRuns(response.runs || []);
+      setRunsWarning(response.warning || null);
+    } catch (error) {
+      console.error("Error loading campaign runs:", error);
+      setRunsError("Failed to load campaign run history.");
+      setCampaignRuns([]);
+    } finally {
+      setRunsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "runs") {
+      void loadCampaignRuns();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, campaign.id]);
 
   const refreshCampaign = async () => {
     setLoading(true);
     try {
       const result = await getEmailCampaign(campaign.id);
       if (result.success && result.campaign) {
-        setCampaign(result.campaign as any);
+        setCampaign(result.campaign as unknown as CampaignDetailClientProps["campaign"]);
+        setAnalytics(result.campaign.analytics || null);
       }
+      if (activeTab === "runs") {
+        await loadCampaignRuns();
+      }
+      router.refresh();
     } catch (error) {
       console.error("Error refreshing campaign:", error);
     } finally {
@@ -157,6 +226,45 @@ export function CampaignDetailClient({
     }
   };
 
+  const handleRequestApproval = async () => {
+    setLoading(true);
+    try {
+      const result = await requestCampaignApproval(campaign.id);
+      if (result.success) {
+        toast.success("Campaign submitted for approval");
+        await refreshCampaign();
+      } else {
+        toast.error(result.error || "Failed to request approval");
+      }
+    } catch (error) {
+      console.error("Error requesting approval:", error);
+      toast.error("Failed to request approval");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReviewApproval = async (decision: "APPROVE" | "REJECT") => {
+    setLoading(true);
+    try {
+      const result = await reviewCampaignApproval({
+        campaignId: campaign.id,
+        decision,
+      });
+      if (result.success) {
+        toast.success(decision === "APPROVE" ? "Campaign approved" : "Campaign rejected");
+        await refreshCampaign();
+      } else {
+        toast.error(result.error || "Failed to review approval");
+      }
+    } catch (error) {
+      console.error("Error reviewing approval:", error);
+      toast.error("Failed to review approval");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getStatusBadge = (status: CampaignStatus) => (
     <Badge className={statusColors[status]} variant="outline">
       {status.replace("_", " ")}
@@ -169,7 +277,15 @@ export function CampaignDetailClient({
     </Badge>
   );
 
-  const canSend = campaign.status === "DRAFT" || campaign.status === "SCHEDULED";
+  const getApprovalBadge = (status: CampaignApprovalStatus) => (
+    <Badge className={approvalStatusColors[status]} variant="outline">
+      {status === "NOT_REQUIRED" ? "Not Required" : status}
+    </Badge>
+  );
+
+  const canSend =
+    (campaign.status === "DRAFT" || campaign.status === "SCHEDULED") &&
+    (campaign.approvalStatus === "NOT_REQUIRED" || campaign.approvalStatus === "APPROVED");
   const canEdit = campaign.status === "DRAFT";
   const canCancel = campaign.status === "SCHEDULED" || campaign.status === "DRAFT";
 
@@ -178,7 +294,7 @@ export function CampaignDetailClient({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/system/emails">
+          <Link href={campaignsHref}>
             <Button variant="ghost" size="sm">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back
@@ -191,6 +307,7 @@ export function CampaignDetailClient({
         </div>
         <div className="flex items-center gap-2">
           {getStatusBadge(campaign.status)}
+          {getApprovalBadge(campaign.approvalStatus)}
           {getTypeBadge(campaign.emailType)}
         </div>
       </div>
@@ -251,6 +368,7 @@ export function CampaignDetailClient({
           <TabsTrigger value="content">Content</TabsTrigger>
           <TabsTrigger value="recipients">Recipients</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="runs">Runs</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -351,7 +469,7 @@ export function CampaignDetailClient({
               </CardHeader>
               <CardContent className="space-y-4">
                 {canEdit && (
-                  <Link href={`/system/emails/${campaign.id}/edit`} className="block">
+                  <Link href={`/emails/campaigns/${campaign.id}/edit`} className="block">
                     <Button className="w-full" variant="outline">
                       Edit Campaign
                     </Button>
@@ -371,6 +489,37 @@ export function CampaignDetailClient({
                     )}
                     Send Now
                   </Button>
+                )}
+
+                {campaign.status === "DRAFT" && campaign.approvalStatus === "REJECTED" && (
+                  <Button
+                    className="w-full"
+                    variant="outline"
+                    onClick={handleRequestApproval}
+                    disabled={loading}
+                  >
+                    <Clock className="mr-2 h-4 w-4" />
+                    Request Approval
+                  </Button>
+                )}
+
+                {campaign.approvalStatus === "PENDING" && isAdmin && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => handleReviewApproval("APPROVE")}
+                      disabled={loading}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => handleReviewApproval("REJECT")}
+                      disabled={loading}
+                    >
+                      Reject
+                    </Button>
+                  </div>
                 )}
 
                 {canCancel && (
@@ -549,6 +698,71 @@ export function CampaignDetailClient({
                   <p className="text-muted-foreground">
                     Analytics will be available after the campaign is sent
                   </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="runs" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Campaign Run History</CardTitle>
+              <CardDescription>
+                Execution records for scheduled or recurring campaign sends.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {runsWarning && (
+                <p className="text-sm text-amber-700">{runsWarning}</p>
+              )}
+              {runsError && <p className="text-sm text-red-600">{runsError}</p>}
+
+              {runsLoading ? (
+                <p className="text-sm text-muted-foreground">Loading campaign runs...</p>
+              ) : campaignRuns.length === 0 ? (
+                <div className="py-8 text-center">
+                  <History className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    No campaign runs have been recorded yet.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {campaignRuns.map((run) => (
+                    <div key={run.id} className="rounded-md border p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge className={runStatusColors[run.status]} variant="outline">
+                              {run.status}
+                            </Badge>
+                            <Badge variant="outline">{run.triggerSource}</Badge>
+                            {run.scheduledFor && (
+                              <span className="text-xs text-muted-foreground">
+                                scheduled {format(new Date(run.scheduledFor), "MMM d, yyyy h:mm a")}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            recipients {run.recipientCount}, sent {run.sentCount}, failed {run.failedCount}
+                          </p>
+                          {run.error && (
+                            <p className="text-xs text-red-600">{run.error}</p>
+                          )}
+                        </div>
+                        <div className="text-right text-xs text-muted-foreground">
+                          {run.startedAt && (
+                            <p>Started: {format(new Date(run.startedAt), "MMM d, h:mm a")}</p>
+                          )}
+                          {run.completedAt && (
+                            <p>Completed: {format(new Date(run.completedAt), "MMM d, h:mm a")}</p>
+                          )}
+                          <p>ID: {run.id.slice(0, 10)}...</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>

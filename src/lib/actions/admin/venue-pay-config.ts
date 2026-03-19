@@ -8,7 +8,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth/auth-server";
+import { auth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Decimal } from "@prisma/client/runtime/library";

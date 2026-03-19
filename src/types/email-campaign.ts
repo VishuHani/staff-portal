@@ -11,26 +11,32 @@ export type EmailType = "TRANSACTIONAL" | "MARKETING";
 export type CampaignStatus = 
   | "DRAFT" 
   | "SCHEDULED" 
-  | "QUEued" 
-  | "sending" 
-  | "sent" 
-  | "partially_sent" 
-  | "failed" 
-  | "cancelled";
+  | "QUEUED" 
+  | "SENDING" 
+  | "SENT" 
+  | "PARTIALLY_SENT" 
+  | "FAILED" 
+  | "CANCELLED";
+
+export type CampaignApprovalStatus =
+  | "NOT_REQUIRED"
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED";
 
 // Email recipient status enum - matches Prisma EmailRecipientStatus
 export type EmailRecipientStatus = 
-  | "pending" 
-  | "queued" 
-  | "sent" 
-  | "delivered" 
-  | "opened" 
-  | "clicked" 
-  | "bounced" 
-  | "unsubscribed" 
-  | "complained" 
-  | "failed" 
-  | "skipped";
+  | "PENDING" 
+  | "QUEUED" 
+  | "SENT" 
+  | "DELIVERED" 
+  | "OPENED" 
+  | "CLICKED" 
+  | "BOUNCED" 
+  | "UNSUBSCRIBED" 
+  | "COMPLAINED" 
+  | "FAILED" 
+  | "SKIPPED";
 
 // Runtime enum objects for use in code
 export const EmailType = {
@@ -47,6 +53,13 @@ export const CampaignStatus = {
   PARTIALLY_SENT: "PARTIALLY_SENT" as const,
   FAILED: "FAILED" as const,
   CANCELLED: "CANCELLED" as const,
+};
+
+export const CampaignApprovalStatus = {
+  NOT_REQUIRED: "NOT_REQUIRED" as const,
+  PENDING: "PENDING" as const,
+  APPROVED: "APPROVED" as const,
+  REJECTED: "REJECTED" as const,
 };
 
 export const EmailRecipientStatus = {
@@ -87,6 +100,7 @@ export interface Email {
   lastUsedAt?: Date | null;
   isSystem: boolean;
   isDefault: boolean;
+  folderId?: string | null;
   venueId?: string | null;
   createdBy: string;
   createdAt: Date;
@@ -149,6 +163,7 @@ export interface EmailSegmentWithRelations extends EmailSegment {
 export interface EmailCampaign {
   id: string;
   name: string;
+  folderId?: string | null;
   emailId: string;
   customSubject?: string | null;
   customHtml?: string | null;
@@ -166,6 +181,7 @@ export interface EmailCampaign {
   unsubscribedCount: number;
   complaintCount: number;
   status: CampaignStatus;
+  approvalStatus: CampaignApprovalStatus;
   scheduledAt?: Date | null;
   sentAt?: Date | null;
   startedSendingAt?: Date | null;
@@ -379,6 +395,7 @@ export interface CreateEmailInput {
   category?: string;
   isTemplate?: boolean;
   variables?: string[];
+  folderId?: string | null;
   venueId?: string;
 }
 
@@ -390,19 +407,22 @@ export interface UpdateEmailInput extends Partial<CreateEmailInput> {
 export interface CreateEmailCampaignInput {
   name: string;
   emailId: string;
-  customSubject?: string;
-  customHtml?: string;
+  folderId?: string | null;
+  customSubject?: string | null;
+  customHtml?: string | null;
   targetRoles?: string[];
   targetVenueIds?: string[];
   targetStatus?: string[];
   targetUserIds?: string[];
-  segmentId?: string;
-  scheduledAt?: Date;
+  segmentId?: string | null;
+  scheduledAt?: Date | null;
   venueId?: string;
 }
 
 export interface UpdateEmailCampaignInput extends Partial<CreateEmailCampaignInput> {
-  // Additional fields for updates if needed
+  customSubject?: string | null;
+  segmentId?: string | null;
+  scheduledAt?: Date | null;
 }
 
 export interface CreateEmailSegmentInput {
@@ -412,9 +432,7 @@ export interface CreateEmailSegmentInput {
   venueId?: string;
 }
 
-export interface UpdateEmailSegmentInput extends Partial<CreateEmailSegmentInput> {
-  // Additional fields for updates if needed
-}
+export type UpdateEmailSegmentInput = Partial<CreateEmailSegmentInput>;
 
 // ============================================================================
 // Filter Types
@@ -423,6 +441,7 @@ export interface UpdateEmailSegmentInput extends Partial<CreateEmailSegmentInput
 export interface EmailFilters {
   isTemplate?: boolean;
   category?: string;
+  folderId?: string;
   venueId?: string;
   isSystem?: boolean;
   createdBy?: string;
@@ -432,6 +451,7 @@ export interface EmailFilters {
 export interface EmailCampaignFilters {
   status?: CampaignStatus;
   emailType?: EmailType;
+  folderId?: string;
   venueId?: string;
   createdBy?: string;
   search?: string;

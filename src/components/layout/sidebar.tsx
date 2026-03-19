@@ -21,7 +21,6 @@ import {
   BarChart3,
   Hash,
   CalendarDays,
-  Sparkles,
   UserPlus,
   FileStack,
   FolderOpen,
@@ -87,6 +86,11 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       icon: Mail,
       badge: unreadMessageCount || undefined,
     },
+    {
+      title: "Emails",
+      href: "/emails",
+      icon: Mail,
+    },
   ];
 
   // Team management items (/manage/*) - MANAGER + ADMIN
@@ -125,12 +129,6 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       title: "Reports & Analytics",
       href: userRole === "ADMIN" ? "/system/reports" : "/manage/reports",
       icon: BarChart3,
-      roles: ["ADMIN", "MANAGER"],
-    },
-    {
-      title: "Email Campaigns",
-      href: userRole === "ADMIN" ? "/system/emails" : "/manage/emails",
-      icon: Mail,
       roles: ["ADMIN", "MANAGER"],
     },
     {
@@ -183,12 +181,6 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       title: "User Invitations",
       href: "/system/invites",
       icon: UserPlus,
-      roles: ["ADMIN"],
-    },
-    {
-      title: "Email Builder",
-      href: "/system/emails/builder",
-      icon: Sparkles,
       roles: ["ADMIN"],
     },
     {
@@ -254,12 +246,13 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
     if (href === "/manage/documents/send") {
       return pathname.startsWith("/manage/documents/send");
     }
-    // Handle /system/emails and /manage/emails separately
-    if (href === "/system/emails") {
-      return pathname.startsWith("/system/emails");
-    }
-    if (href === "/manage/emails") {
-      return pathname.startsWith("/manage/emails");
+    // Handle unified Emails navigation and legacy email routes
+    if (href === "/emails") {
+      return (
+        pathname.startsWith("/emails") ||
+        pathname.startsWith("/system/emails") ||
+        pathname.startsWith("/manage/emails")
+      );
     }
     return pathname.startsWith(href);
   };

@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
+import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { NewEmailClient } from "./new-email-client";
 
 export default async function NewEmailPage() {
@@ -19,8 +22,12 @@ export default async function NewEmailPage() {
     redirect("/login");
   }
 
+  if (!(await canAccessEmailModule(user.id, "create"))) {
+    redirect("/dashboard?error=access_denied");
+  }
+
   // Get templates for starting point
-  const whereClause: any = { isTemplate: true };
+  const whereClause: Prisma.EmailWhereInput = { isTemplate: true };
   if (user.role.name !== "ADMIN") {
     whereClause.OR = [
       { venueId: user.venueId },
@@ -51,11 +58,13 @@ export default async function NewEmailPage() {
   }
 
   return (
-    <NewEmailClient
-      templates={templates}
-      venues={venues}
-      isAdmin={user.role.name === "ADMIN"}
-      userVenueId={user.venueId}
-    />
+    <DashboardLayout user={user}>
+      <NewEmailClient
+        templates={templates}
+        venues={venues}
+        isAdmin={user.role.name === "ADMIN"}
+        userVenueId={user.venueId}
+      />
+    </DashboardLayout>
   );
 }

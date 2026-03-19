@@ -13,10 +13,11 @@ export default async function NewCampaignPage() {
   const user = await requireAuth();
   const isUserAdmin = await isAdmin(user.id);
 
+  let userVenues: Array<{ venueId: string }> = [];
   if (!isUserAdmin) {
     // Check if user is a venue manager
     const { prisma } = await import("@/lib/prisma");
-    const userVenues = await prisma.userVenue.findMany({
+    userVenues = await prisma.userVenue.findMany({
       where: { userId: user.id },
       select: { venueId: true },
     });
@@ -28,11 +29,20 @@ export default async function NewCampaignPage() {
 
   // Get venues for targeting
   const { prisma } = await import("@/lib/prisma");
-  const venues = await prisma.venue.findMany({
-    where: { active: true },
-    select: { id: true, name: true, code: true },
-    orderBy: { name: "asc" },
-  });
+  const venues = isUserAdmin
+    ? await prisma.venue.findMany({
+        where: { active: true },
+        select: { id: true, name: true, code: true },
+        orderBy: { name: "asc" },
+      })
+    : await prisma.venue.findMany({
+        where: {
+          active: true,
+          id: { in: userVenues.map((uv) => uv.venueId) },
+        },
+        select: { id: true, name: true, code: true },
+        orderBy: { name: "asc" },
+      });
 
   // Get roles for targeting
   const roles = await prisma.role.findMany({

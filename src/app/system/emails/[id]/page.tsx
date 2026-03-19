@@ -27,12 +27,21 @@ export default async function CampaignDetailPage({
       venue: {
         select: { id: true, name: true, code: true },
       },
-      emailTemplate: {
-        select: { id: true, name: true, category: true },
+      email: {
+        select: {
+          id: true,
+          name: true,
+          category: true,
+          subject: true,
+          previewText: true,
+          htmlContent: true,
+          textContent: true,
+          emailType: true,
+        },
       },
       recipients: {
         take: 100,
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ sentAt: "desc" }, { id: "desc" }],
         select: {
           id: true,
           userId: true,
@@ -57,6 +66,10 @@ export default async function CampaignDetailPage({
     notFound();
   }
 
+  if (!campaign.email) {
+    notFound();
+  }
+
   // Check permissions
   if (!isUserAdmin && campaign.venueId) {
     const userVenues = await prisma.userVenue.findMany({
@@ -69,25 +82,33 @@ export default async function CampaignDetailPage({
     }
   }
 
-  // Get venues and roles for editing
+  // Get venues for targeting display
   const venues = await prisma.venue.findMany({
     where: { active: true },
     select: { id: true, name: true, code: true },
     orderBy: { name: "asc" },
   });
 
-  const roles = await prisma.role.findMany({
-    select: { id: true, name: true, description: true },
-    orderBy: { name: "asc" },
-  });
+  const detailCampaign = {
+    ...campaign,
+    subject: campaign.customSubject || campaign.email.subject,
+    previewText: campaign.email.previewText,
+    htmlContent: campaign.customHtml || campaign.email.htmlContent,
+    textContent: campaign.email.textContent,
+    emailType: campaign.email.emailType,
+    emailTemplate: {
+      id: campaign.email.id,
+      name: campaign.email.name,
+      category: campaign.email.category,
+    },
+  };
 
   return (
     <DashboardLayout user={user}>
       <CampaignDetailClient
-        campaign={JSON.parse(JSON.stringify(campaign))}
+        campaign={JSON.parse(JSON.stringify(detailCampaign))}
         isAdmin={isUserAdmin}
         venues={venues}
-        roles={roles}
       />
     </DashboardLayout>
   );

@@ -1,567 +1,265 @@
-# Email System Redesign - Separated Architecture
+# Email Workspace Redesign Plan (Nav + Create Email + Assets + Audience + Campaigns + Reports)
 
-## Overview
+## Summary
+Create a single **Emails workspace** with five modules: **Create Email**, **Assets**, **Audience**, **Campaigns**, and **Reports**.
+This replaces the current split/partial flow with a permission-driven, folder-based, production-safe system that supports:
+- Role-based access for admin, manager, and any user explicitly granted module permissions.
+- Separate folder/subfolder trees per module.
+- Guarded raw SQL audience creation (SELECT-only via validated gateway).
+- One-off and recurring scheduling via custom recurrence builder.
+- Optional approval workflow for non-admin sends.
+- Custom report definitions with recurring scheduled runs.
 
-The current implementation combines email building with campaign sending in a single wizard. This redesign separates them into two distinct modules:
+## Implementation Progress Snapshot (March 19, 2026)
+Implemented:
+- Emails workspace routes and sidebar entrypoint under `/emails/*`.
+- RBAC module gating for `email_workspace` and module resources.
+- Compatibility redirects from legacy `/system/emails/*` and `/manage/emails/*` routes.
+- Campaign flow now links to saved emails (`emailId`) instead of HTML-only inline content.
+- Audience SQL guard utility + server action + workbench UI (`/emails/audience`) with validation results.
+- One-off campaign scheduling path in the new campaign wizard (`Save & Schedule`).
+- Recurrence utility + unit tests for timezone-aware daily/weekly/monthly next-run calculation.
+- Shared folder API actions for workspace modules (`list/create/rename/move/delete`) with RBAC checks.
+- Audience module folder UI now supports viewing nested folders and create/rename/move/delete operations.
+- Assets module now has top search/filter controls and folder CRUD UI wired to shared folder APIs.
+- Create, Campaigns, and Reports module pages now include folder CRUD UI via shared folder manager.
+- Folder CRUD UX is now standardized through a shared reusable folder manager component.
+- Email and campaign action layers now support `folderId` with folder access validation and schema-safe fallback behavior.
+- New Email and New Campaign flows now include folder selectors wired to folder assignment on save.
+- Email Builder, System Campaigns, and Manager Campaigns list screens now support folder filtering.
+- Campaign listing action now supports `folderId` and `venueId` filters (with non-admin venue scope enforcement).
+- Audience list server actions now support create/list/update/delete/run with SQL validation, folder assignment, and module RBAC checks.
+- Audience workbench now supports saving reusable lists, folder/type/search filtering, manual runs, and deletions.
+- Report definition server actions now support create/list/update/delete/run with folder assignment, scope controls, and baseline metrics output.
+- Reports workspace now supports creating definitions, folder/type/search filtering, manual runs, and deletions.
+- Asset server actions now support create/list/update/delete with folder assignment, visibility scope controls, and module RBAC checks.
+- Assets workspace now supports folder-aware search/filter plus metadata-based asset registration and deletion.
+- Audience SQL runs now execute validated queries with timeout + row cap and persist results into `audience_member_snapshots`.
+- Cron job endpoint now processes due scheduled/recurring email campaigns and due scheduled report definitions.
+- Campaign approvals now support venue policy reads/updates, manual approval requests, and approve/reject review actions.
+- Campaign creation and send now enforce approval status (`NOT_REQUIRED|PENDING|APPROVED|REJECTED`).
+- Reports workbench now supports recurring schedule configuration (daily/weekly/monthly with timezone/time), next-run preview, and persisted recurrence on create.
+- Report run history can now be viewed per definition, including run status/error details and CSV/JSON export of run payloads.
+- Report schedule lifecycle controls are now available (edit recurrence, pause schedule, resume schedule).
+- System campaign UI now includes admin controls for per-venue approval policy (enable policy + require for non-admin).
+- Unified `/emails/campaigns` routes now render native list, detail, and new-campaign experiences instead of redirecting to legacy paths.
+- Campaign detail actions now point to unified campaign routes, with legacy edit URLs redirecting into `/emails/campaigns/*`.
+- Unified `/emails/campaigns/[id]/edit` now provides draft campaign editing (email selection, folder assignment, targeting, preview, and test-send), and both legacy edit routes redirect there.
+- Reports now capture optional delivery metadata (email/webhook destination) on definitions and persist it onto manual/scheduled run records.
+- Report runs now actively dispatch to configured email/webhook destinations and persist dispatch outcome metadata on each run.
+- Report delivery now includes retry/backoff behavior, signed webhook dispatch headers, and per-definition delivery health scoring in the reports UI.
+- Scheduled report processing now uses atomic due-run claiming and failure retry requeue to reduce duplicate runs under concurrent cron workers.
+- Assets module now supports direct file upload to Supabase storage with folder/scope/tag assignment and automatic asset registration.
+- Asset search now supports multi-term tag matching (`hasSome`) in addition to name and MIME search.
+- Asset enrichment now auto-extracts image dimensions, MP4/MOV duration, generates thumbnails (resized image or placeholder), and persists metadata/index tags for richer search.
+- Campaign scheduling now records dedicated run history (`EmailCampaignRun`) with idempotency keys, run outcome stats, and retry metadata.
+- Recurring campaign execution now uses idempotency-key run creation to prevent duplicate concurrent sends for the same scheduled slot.
+- Manual campaign sends now also record `EmailCampaignRun` entries (`MANUAL` trigger), including sent/failed counts and partial-send outcomes.
+- Campaign detail now includes a Runs tab showing per-run status, counts, timings, and errors.
 
-1. **Email Builder Studio** - Create, design, and store email templates
-2. **Campaign Manager** - Target recipients, schedule, and send emails
+In progress / pending:
+- Apply and deploy Prisma migration for `EmailCampaignRun`, `EmailAsset.thumbnailUrl`, and `EmailAsset.metadataJson` in all environments.
 
----
+## 1. Information Architecture and Navigation
+1. Add sidebar item: `Emails`.
+2. Add module entries under Emails:
+- `Create Email`
+- `Assets`
+- `Audience`
+- `Campaigns`
+- `Reports`
+3. Add unified workspace routes:
+- `/emails`
+- `/emails/create`
+- `/emails/assets`
+- `/emails/audience`
+- `/emails/campaigns`
+- `/emails/reports`
+4. Keep compatibility redirects:
+- `/system/emails/*` -> `/emails/*`
+- `/manage/emails/*` -> `/emails/*`
+5. Gate module visibility by permissions; do not gate only by role name.
 
-## Architecture Diagram
+## 2. RBAC and Permission Stack Changes
+Add explicit permission resources:
+- `email_workspace`
+- `email_create`
+- `email_assets`
+- `email_audience`
+- `email_campaigns`
+- `email_reports`
 
-```mermaid
-flowchart TB
-    subgraph EmailBuilderStudio[Email Builder Studio]
-        direction TB
-        EB1[Create New Email]
-        EB2[AI Email Generator]
-        EB3[Visual HTML Editor]
-        EB4[Code Editor]
-        EB5[Image/Media Manager]
-        EB6[Template Library]
-        EB7[Email Preview]
-        
-        EB1 --> EB2
-        EB1 --> EB3
-        EB1 --> EB4
-        EB2 --> EB5
-        EB3 --> EB5
-        EB4 --> EB5
-        EB5 --> EB7
-        EB7 --> EB6
-    end
-    
-    subgraph CampaignManager[Campaign Manager]
-        direction TB
-        CM1[Create Campaign]
-        CM2[Select Email/Template]
-        CM3[Recipient Targeting]
-        CM4[Segmentation]
-        CM5[Preview Recipients]
-        CM6[Schedule/Send]
-        CM7[Analytics Dashboard]
-        
-        CM1 --> CM2
-        CM2 --> CM3
-        CM3 --> CM4
-        CM4 --> CM5
-        CM5 --> CM6
-        CM6 --> CM7
-    end
-    
-    subgraph SharedServices[Shared Services]
-        direction LR
-        SS1[Brevo API]
-        SS2[AI Service - OpenAI]
-        SS3[Media Storage]
-    end
-    
-    EmailBuilderStudio --> |Saved Templates| CampaignManager
-    CampaignManager --> |Send Emails| SS1
-    EmailBuilderStudio --> |Generate Content| SS2
-    EmailBuilderStudio --> |Store Images| SS3
-    CampaignManager --> |Track Opens/Clicks| SS1
-```
+Use existing action vocabulary with these assignments:
+- View modules: `view`, `view_team`, `view_all`
+- Create/update/delete content: `create`, `update`, `delete`, `archive`
+- Campaign execution: `send`, `approve`, `cancel`, `publish`
+- Audience SQL: `read` + `create` + `manage` (for SQL list authoring)
+- Reporting: `create`, `view`, `export`, `schedule` (via `manage` if no `schedule` action exists)
 
----
+Policy defaults:
+- Admin: full access.
+- Manager: team-scoped create/assets/audience/campaigns/reports.
+- Assigned users: only explicitly granted modules/actions.
 
-## Module 1: Email Builder Studio
+## 3. Data Model (Prisma) Additions
+Add folder system with separate trees per module using one shared table keyed by module:
+- `EmailFolder`
+- Fields: `id`, `module` (`CREATE_EMAIL|ASSETS|AUDIENCE|CAMPAIGNS|REPORTS`), `name`, `parentId`, `path`, `scope` (`PRIVATE|TEAM|SYSTEM`), `venueId`, `ownerId`, timestamps.
+- Constraint: parent and child must share same `module`.
 
-### Purpose
-A dedicated workspace for creating beautiful, responsive emails with AI assistance. Think of it like a simplified Mailchimp email designer.
+Add assets:
+- `EmailAsset`
+- Fields: `id`, `folderId`, `name`, `mimeType`, `kind` (`IMAGE|GIF|VIDEO|FILE`), `storageUrl`, `storagePath`, `sizeBytes`, `width`, `height`, `durationSec`, `tags[]`, `scope`, `venueId`, `ownerId`, timestamps.
 
-### Features
+Add audience:
+- `AudienceList`
+- Fields: `id`, `folderId`, `name`, `description`, `queryType` (`SQL|FILTER|AI_FILTER`), `sqlText`, `filterJson`, `lastRunAt`, `lastCount`, `scope`, `venueId`, `ownerId`, timestamps.
+- `AudienceRun`
+- Fields: `id`, `audienceListId`, `startedAt`, `completedAt`, `status`, `rowCount`, `sqlNormalized`, `validationLog`, `error`.
+- `AudienceMemberSnapshot`
+- Fields: `id`, `audienceRunId`, `userId`, `email`, `metadataJson`.
 
-#### 1.1 AI Email Generator
-- **Full Email Generation**: Describe the email you want, AI generates complete HTML
-- **Tone Selection**: Professional, Friendly, Urgent, Celebratory, Informational
-- **Style Selection**: Newsletter, Announcement, Notification, Invitation, Alert
-- **Auto-classification**: AI determines if email is Marketing or Transactional
-- **Iterative Refinement**: Ask AI to improve specific sections
+Add campaigns enhancements:
+- Extend existing `EmailCampaign` with `folderId`, `approvalStatus`, `recurrenceRuleJson`, `nextRunAt`, `lastRunAt`, `isRecurring`.
+- `CampaignAudienceLink` join table (`campaignId`, `audienceListId`, `filterOverrideJson`).
+- `EmailApprovalPolicy` (per venue): `enabled`, `requireForNonAdmin`.
+- `EmailCampaignApproval`: `campaignId`, `requestedBy`, `approvedBy`, `status`, `notes`, timestamps.
 
-#### 1.2 Visual Email Editor
-- **Drag-and-Drop Blocks**: Headers, text, images, buttons, dividers, spacers
-- **Pre-built Layouts**: 1-column, 2-column, sidebar layouts
-- **Style Controls**: Fonts, colors, spacing, alignment
-- **Responsive Preview**: Desktop and mobile views
-- **Variable Insertion**: {{userName}}, {{venueName}}, etc.
+Add report builder:
+- `EmailReportDefinition`
+- Fields: `id`, `folderId`, `name`, `description`, `reportType`, `configJson`, `scope`, `venueId`, `ownerId`, `isScheduled`, `recurrenceRuleJson`, `nextRunAt`, timestamps.
+- `EmailReportRun`
+- Fields: `id`, `reportDefinitionId`, `status`, `startedAt`, `completedAt`, `resultJson`, `error`, `deliveryConfigJson`.
 
-#### 1.3 HTML Code Editor
-- **Full HTML Access**: For advanced users
-- **Live Preview**: See changes in real-time
-- **Syntax Highlighting**: Code-friendly editor
-- **Inline CSS Support**: Email-compatible styling
-- **Template Variables**: Insert merge tags
+## 4. API / Server Action Interfaces (Public Contract Changes)
+Create or refactor actions under `src/lib/actions/email-workspace/*`:
 
-#### 1.4 Media Manager
-- **Image Upload**: Drag and drop images
-- **GIF Support**: Embed animated GIFs
-- **Image Library**: Reuse uploaded images
-- **External URLs**: Link to externally hosted images
-- **Alt Text**: Accessibility support
+Folders:
+- `createFolder(input)`
+- `renameFolder(input)`
+- `moveFolder(input)`
+- `deleteFolder(input)`
+- `listFolderTree(input)`
 
-#### 1.5 Template Library
-- **System Templates**: Pre-built professional templates
-- **Custom Templates**: Save your emails as reusable templates
-- **Categories**: Newsletter, Announcement, Notification, Marketing
-- **Template Variables**: Define what variables a template uses
-- **Import/Export**: Share templates between venues
+Create Email:
+- Reuse `emails.ts`; add `folderId` support and folder-aware search/list.
 
-### Email Builder UI Flow
+Assets:
+- `uploadEmailAsset(formData)`
+- `listAssets(filters)`
+- `moveAsset(input)`
+- `deleteAsset(input)`
+- `searchAssets(query, filters)`
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Email Builder Studio                                    [+ New Email] │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  🔍 Search templates...                    [Filter: All ▼]  │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌─── AI Generated ───┐  ┌─── My Templates ───┐  ┌─── System ───┐  │
-│  │                     │  │                     │  │               │  │
-│  │  [Newsletter #1]   │  │  [Welcome Email]   │  │  [Announcement]│  │
-│  │  [Promo Email]     │  │  [Shift Reminder]  │  │  [Notification]│  │
-│  │  [+ Generate New]  │  │  [+ Create New]    │  │  [Invitation]  │  │
-│  │                     │  │                     │  │               │  │
-│  └─────────────────────┘  └─────────────────────┘  └───────────────┘  │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
+Audience:
+- `validateAudienceSql(input)`; returns normalized SQL + policy errors.
+- `createAudienceList(input)`
+- `runAudienceList(input)`
+- `previewAudienceList(input)`
+- `listAudienceLists(filters)`
 
-### Email Editor Interface
+Campaigns:
+- `createCampaignDraft(input)` must require `emailId` + audience linkage.
+- `updateCampaign(input)`
+- `requestCampaignApproval(input)`
+- `approveCampaign(input)`
+- `scheduleCampaign(input)` one-off and recurring via custom builder payload.
+- `sendCampaignNow(input)`
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  ← Back to Studio     Editing: "March Newsletter"     [Save] [Preview]│
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  Email Name: [March 2024 Newsletter                       ]  │  │
-│  │  Subject:    [🎉 New Features in Staff Portal             ]  │  │
-│  │  Category:   [Newsletter ▼]    Type: [Marketing ▼]           │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                     │
-│  ┌────────────────────────┐  ┌───────────────────────────────────┐ │
-│  │  🤖 AI Assistant       │  │  Editor: [Visual] [HTML] [Preview]│ │
-│  │  ┌──────────────────┐  │  │  ┌─────────────────────────────┐  │ │
-│  │  │ Describe what    │  │  │  │ [B][I][U][Link][Img][Btn]  │  │ │
-│  │  │ you want to      │  │  │  ├─────────────────────────────┤  │ │
-│  │  │ create...        │  │  │  │                             │  │ │
-│  │  │                  │  │  │  │  🎉 New Features!           │  │ │
-│  │  │ Example: Create  │  │  │  │                             │  │ │
-│  │  │ a welcome email  │  │  │  │  Hello {{userName}},        │  │ │
-│  │  │ for new staff    │  │  │  │                             │  │ │
-│  │  │ with a friendly  │  │  │  │  We're excited to share...  │  │ │
-│  │  │ tone             │  │  │  │                             │  │ │
-│  │  └──────────────────┘  │  │  │  [View Features →]          │  │ │
-│  │  [Generate] [Improve]  │  │  │                             │  │ │
-│  │                        │  │  └─────────────────────────────┘  │ │
-│  │  Tone: [Friendly ▼]    │  │                                   │ │
-│  │  Style: [Newsletter▼]  │  │  Variables: {{userName}} {{venue}}│ │
-│  └────────────────────────┘  └───────────────────────────────────┘ │
-│                                                                     │
-│  [Save as Template]  [Save Draft]  [Use in Campaign →]              │
-└─────────────────────────────────────────────────────────────────────┘
-```
+Reports:
+- `createReportDefinition(input)`
+- `runReportDefinition(input)`
+- `scheduleReportDefinition(input)`
+- `listReportDefinitions(filters)`
 
----
+## 5. Module-by-Module UX Scope
+Create Email:
+- Visual block editor + code editor + preview + test email.
+- Save draft/template.
+- Folder/subfolder organization.
+- Fix current mismatch so campaign creation uses `emailId` instead of inline HTML-only flow.
 
-## Module 2: Campaign Manager
+Assets:
+- Folder/subfolder tree.
+- Search bar fixed at top.
+- Upload/manage images, gifs, videos.
+- Tagging and filtering by type, size, date.
 
-### Purpose
-A separate interface for creating campaigns, selecting recipients, scheduling sends, and tracking analytics.
+Audience:
+- Folder/subfolder tree.
+- Three creation modes: SQL, AI-assisted filter generation, default filter builder.
+- SQL mode via guarded gateway only; list preview before save; run history retained.
 
-### Features
+Campaigns:
+- Folder/subfolder tree.
+- Combine one or more emails with one or more audience lists.
+- Apply additional filters per campaign.
+- Send now, schedule once, or recurring (custom recurrence builder).
+- Optional approval policy for non-admin users.
 
-#### 2.1 Campaign Creation
-- **Select Email/Template**: Choose from saved emails or templates
-- **Edit Before Send**: Make last-minute changes
-- **A/B Testing**: Send variants to test effectiveness (future)
+Reports:
+- Folder/subfolder tree.
+- Custom report builder for send/delivery/open/click/bounce/unsubscribe metrics and audience performance.
+- Save definitions; run on-demand or recurring schedule.
+- Export existing formats via current report export infrastructure.
 
-#### 2.2 Recipient Targeting
-- **By Role**: Admin, Manager, Staff
-- **By Venue**: Single venue, multiple venues, all venues
-- **By Status**: Active, Inactive, Pending
-- **By Preferences**: Users who opted into marketing/transactional
-- **Custom Segments**: Saved segment queries
+## 6. Audience SQL Security Specification
+Enforce all of the following:
+- AST validation; single statement only.
+- `SELECT`/`WITH` only; block DML/DDL and unsafe functions.
+- Query only against whitelisted read views; no raw table access.
+- Tenant and venue scope policy injection based on caller permissions.
+- Read-only DB role; statement timeout and row limit.
+- Full execution audit log with actor, SQL hash, duration, row count, and denial reasons.
+- No data mutation path from audience SQL execution.
 
-#### 2.3 Saved Segments
-- **Create Reusable Segments**: "All Sydney Staff", "Managers + Admins"
-- **Segment Builder**: Visual query builder
-- **Segment Preview**: See count before saving
+## 7. Jobs and Scheduling
+Use scheduled worker for campaigns and reports:
+- Scan due jobs each minute by `nextRunAt`.
+- Compute next occurrence from recurrence JSON.
+- Idempotency key per run.
+- Retry policy with capped attempts and failure state.
+- Timezone-aware schedule evaluation.
 
-#### 2.4 Scheduling
-- **Send Immediately**: Send right away
-- **Schedule for Later**: Pick date and time
-- **Timezone Aware**: Send at optimal time for recipients
-- **Recurring**: Daily/weekly/monthly campaigns (future)
+## 8. Migration and Backward Compatibility
+1. Add new models and indexes via Prisma migration.
+2. Backfill root folders per module per scope.
+3. Backfill existing emails/campaigns into default folders.
+4. Wire `/emails/*` routes and add redirects from legacy paths.
+5. Keep existing action contracts temporarily; deprecate legacy endpoints after module migration.
+6. Update sidebar and permission seeding scripts.
 
-#### 2.5 Analytics Dashboard
-- **Campaign Stats**: Sent, Delivered, Opened, Clicked, Bounced
-- **Open Rate**: Percentage over time
-- **Click Map**: Which links were clicked
-- **Device Breakdown**: Desktop vs Mobile
-- **Geographic Data**: Opens by country/region
+## 9. Test Plan and Acceptance Criteria
+Unit tests:
+- SQL validator allow/deny matrix.
+- Recurrence calculator across timezone boundaries.
+- Permission checks for each module/action.
 
-### Campaign Manager UI Flow
+Integration tests:
+- Folder CRUD and move semantics by module.
+- Audience list creation, preview, run, snapshot persistence.
+- Campaign approval flow with policy on/off.
+- Scheduled and recurring campaign dispatch.
+- Report definition save, scheduled run, export compatibility.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Campaign Manager                                       [+ New Campaign]│
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  Status: [All ▼]  Type: [All ▼]  Search: [              ]  │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  Campaign Name        Status      Recipients  Sent    Rate  │   │
-│  ├─────────────────────────────────────────────────────────────┤   │
-│  │  March Newsletter     ✅ Sent        156      156    62%   │   │
-│  │  System Maintenance   ✅ Sent        200      198    71%   │   │
-│  │  April Promo          📅 Scheduled   180       -      -    │   │
-│  │  Welcome Series       📝 Draft        -        -      -    │   │
-│  │  Urgent: Clock Change ⏳ Sending     150      89     45%   │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
+E2E tests:
+- Create Email end-to-end with preview/test.
+- Assets search + folder navigation + upload.
+- Audience SQL list -> campaign targeting.
+- Campaign recurring schedule creation and execution.
+- Reports creation, scheduled run, and retrieval.
 
-### New Campaign Wizard
+Acceptance:
+- Users with granted permissions can access only authorized modules.
+- Raw SQL cannot mutate core DB and respects tenant/venue boundaries.
+- All five modules support folders/subfolders.
+- Campaign and report recurring runs execute correctly with audit trails.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  ← Back          New Campaign: Step 1 of 4 - Select Email           │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  Step 1: Select Email    Step 2: Targeting    Step 3: Preview    Send│
-│         ●───────────────────────○──────────────────○────────────○   │
-│                                                                     │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  Select an email or template to send:                        │   │
-│  │                                                              │   │
-│  │  📧 Recent Emails                                            │   │
-│  │  ○ March Newsletter (edited 2 hours ago)                    │   │
-│  │  ○ System Maintenance Notice (edited yesterday)             │   │
-│  │                                                              │   │
-│  │  📁 Saved Templates                                          │   │
-│  │  ○ Welcome Email Template                                   │   │
-│  │  ○ Monthly Newsletter Template                              │   │
-│  │  ○ Shift Reminder Template                                  │   │
-│  │                                                              │   │
-│  │  [+ Create New Email]  [Import from HTML]                   │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│                                         [Cancel]  [Next: Targeting →]│
-└─────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Database Schema Changes
-
-### New Model: Email (Separate from Campaign)
-
-```prisma
-// Email content - can be a template or a one-off email
-model Email {
-  id              String        @id @default(cuid())
-  name            String        // Internal name
-  description     String?
-  
-  // Content
-  subject         String
-  previewText     String?
-  htmlContent     String        @db.Text
-  textContent     String?       @db.Text
-  designJson      Json?         // Builder state for re-editing
-  
-  // Classification
-  emailType       EmailType     @default(TRANSACTIONAL)
-  category        String?       // "newsletter", "announcement", "notification"
-  
-  // Template settings
-  isTemplate      Boolean       @default(false)
-  variables       String[]      // ["userName", "venueName"]
-  thumbnailUrl    String?
-  
-  // Usage tracking
-  useCount        Int           @default(0)
-  lastUsedAt      DateTime?
-  
-  // Ownership
-  isSystem        Boolean       @default(false)
-  venueId         String?
-  createdBy       String
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
-  // Relations
-  venue           Venue?        @relation(fields: [venueId], references: [id])
-  creator         User          @relation(fields: [createdBy], references: [id])
-  campaigns       EmailCampaign[]
-  generations     EmailGeneration[]
-  
-  @@index([isTemplate])
-  @@index([category])
-  @@index([venueId])
-  @@map("emails")
-}
-
-// Campaign - now just the sending configuration
-model EmailCampaign {
-  id              String        @id @default(cuid())
-  name            String        // Campaign name
-  
-  // Link to email content
-  emailId         String
-  email           Email         @relation(fields: [emailId], references: [id])
-  
-  // Override subject/content if needed
-  customSubject   String?
-  customHtml      String?       @db.Text
-  
-  // Targeting
-  targetRoles     String[]
-  targetVenueIds  String[]
-  targetStatus    String[]      @default(["ACTIVE"])
-  targetUserIds   String[]
-  segmentId       String?       // Link to saved segment
-  
-  // Stats
-  recipientCount  Int           @default(0)
-  sentCount       Int           @default(0)
-  deliveredCount  Int           @default(0)
-  openedCount     Int           @default(0)
-  clickedCount    Int           @default(0)
-  bouncedCount    Int           @default(0)
-  unsubscribedCount Int         @default(0)
-  
-  // Status
-  status          CampaignStatus @default(DRAFT)
-  scheduledAt     DateTime?
-  sentAt          DateTime?
-  
-  // Ownership
-  createdBy       String
-  venueId         String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
-  // Relations
-  creator         User          @relation(fields: [createdBy], references: [id])
-  venue           Venue?        @relation(fields: [venueId], references: [id])
-  recipients      EmailRecipient[]
-  analytics       EmailCampaignAnalytics?
-  
-  @@index([status])
-  @@index([emailId])
-  @@map("email_campaigns")
-}
-
-// Saved Segment
-model EmailSegment {
-  id              String        @id @default(cuid())
-  name            String
-  description     String?
-  
-  // Segment rules
-  rules           Json          // Targeting rules as JSON
-  
-  // Stats
-  userCount       Int           @default(0)
-  lastCalculated  DateTime?
-  
-  // Ownership
-  venueId         String?
-  createdBy       String
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
-  venue           Venue?        @relation(fields: [venueId], references: [id])
-  creator         User          @relation(fields: [createdBy], references: [id])
-  campaigns       EmailCampaign[]
-  
-  @@map("email_segments")
-}
-```
-
----
-
-## File Structure
-
-```
-src/
-├── app/
-│   ├── system/
-│   │   ├── emails/
-│   │   │   ├── page.tsx                    # Redirect to builder or campaigns
-│   │   │   │
-│   │   │   ├── builder/                    # EMAIL BUILDER STUDIO
-│   │   │   │   ├── page.tsx                # Email/template library
-│   │   │   │   ├── new/
-│   │   │   │   │   └── page.tsx            # Create new email
-│   │   │   │   └── [id]/
-│   │   │   │       └── page.tsx            # Edit email
-│   │   │   │
-│   │   │   ├── campaigns/                  # CAMPAIGN MANAGER
-│   │   │   │   ├── page.tsx                # Campaign list
-│   │   │   │   ├── new/
-│   │   │   │   │   └── page.tsx            # New campaign wizard
-│   │   │   │   └── [id]/
-│   │   │   │       ├── page.tsx            # Campaign detail
-│   │   │   │       └── analytics/
-│   │   │   │           └── page.tsx        # Campaign analytics
-│   │   │   │
-│   │   │   ├── segments/                   # SAVED SEGMENTS
-│   │   │   │   └── page.tsx                # Segment management
-│   │   │   │
-│   │   │   └── media/                      # MEDIA LIBRARY
-│   │   │       └── page.tsx                # Image/media management
-│   │   │
-│   │   └── api/
-│   │       └── email-campaigns/
-│   │           └── webhook/
-│   │               └── route.ts            # Brevo webhook handler
-│   │
-│   └── manage/
-│       └── emails/                         # Manager versions (venue-scoped)
-│           ├── builder/
-│           ├── campaigns/
-│           └── segments/
-│
-├── lib/
-│   ├── actions/
-│   │   ├── emails.ts                       # Email CRUD (builder)
-│   │   ├── email-campaigns.ts              # Campaign CRUD & sending
-│   │   ├── email-segments.ts               # Segment management
-│   │   ├── email-ai.ts                     # AI generation (existing)
-│   │   └── email-media.ts                  # Media upload/management
-│   │
-│   └── components/
-│       └── email-builder/
-│           ├── EmailEditor.tsx             # Main editor component
-│           ├── VisualEditor.tsx            # Drag-drop visual editor
-│           ├── CodeEditor.tsx              # HTML code editor
-│           ├── EmailPreview.tsx            # Desktop/mobile preview
-│           ├── AIAssistant.tsx             # AI generation panel
-│           ├── MediaPicker.tsx             # Image/GIF picker
-│           ├── VariableInserter.tsx        # Merge tag picker
-│           ├── TemplateCard.tsx            # Template grid card
-│           └── BlockComponents/            # Drag-drop blocks
-│               ├── HeaderBlock.tsx
-│               ├── TextBlock.tsx
-│               ├── ImageBlock.tsx
-│               ├── ButtonBlock.tsx
-│               └── DividerBlock.tsx
-│
-└── types/
-    └── email-campaign.ts                   # Updated types
-```
-
----
-
-## Implementation Phases
-
-### Phase 1: Database Schema Update
-- [ ] Create new `Email` model separate from `EmailCampaign`
-- [ ] Add `EmailSegment` model for saved segments
-- [ ] Update `EmailCampaign` to link to `Email`
-- [ ] Run migration
-- [ ] Update TypeScript types
-
-### Phase 2: Email Builder Studio
-- [ ] Create builder page structure (`/system/emails/builder`)
-- [ ] Build email/template library UI
-- [ ] Implement visual editor with drag-drop blocks
-- [ ] Implement HTML code editor
-- [ ] Add AI assistant panel
-- [ ] Add media picker component
-- [ ] Add variable insertion UI
-- [ ] Implement save/save-as-template
-
-### Phase 3: Campaign Manager
-- [ ] Create campaign page structure (`/system/emails/campaigns`)
-- [ ] Build campaign list with filters
-- [ ] Create campaign wizard (4 steps)
-- [ ] Implement email selection step
-- [ ] Implement targeting step (reuse existing)
-- [ ] Implement preview step
-- [ ] Implement schedule/send step
-
-### Phase 4: Saved Segments
-- [ ] Create segment management page
-- [ ] Build segment builder UI
-- [ ] Implement segment preview
-- [ ] Add segment to campaign targeting
-
-### Phase 5: Analytics & Polish
-- [ ] Update analytics dashboard
-- [ ] Add email usage tracking
-- [ ] Implement thumbnail generation
-- [ ] Add media library management
-- [ ] Final testing and bug fixes
-
----
-
-## Key Differences from Current Implementation
-
-| Aspect | Current | New Design |
-|--------|---------|------------|
-| Email Creation | Part of campaign wizard | Separate Builder Studio |
-| Templates | Embedded in campaign flow | Standalone library |
-| AI Generation | Single prompt | Full assistant panel |
-| Editor | Basic textarea | Visual + Code editors |
-| Media | URL only | Full media manager |
-| Segments | Ad-hoc targeting | Saved, reusable segments |
-| Workflow | Linear wizard | Two separate modules |
-
----
-
-## User Workflows
-
-### Workflow 1: Creating a New Email Template
-1. Go to Email Builder Studio
-2. Click "New Email"
-3. Use AI to generate or start from scratch
-4. Design with visual editor or code
-5. Add images, variables, styling
-6. Preview on desktop/mobile
-7. Save as template
-
-### Workflow 2: Sending a Campaign
-1. Go to Campaign Manager
-2. Click "New Campaign"
-3. Select email/template from library
-4. Configure targeting (roles, venues, segments)
-5. Preview recipient count
-6. Review email preview
-7. Schedule or send immediately
-
-### Workflow 3: Using AI to Build an Email
-1. Go to Email Builder Studio
-2. Click "New Email"
-3. In AI Assistant, describe the email
-4. Select tone and style
-5. Click "Generate"
-6. Review generated HTML
-7. Refine with follow-up prompts
-8. Make manual adjustments
-9. Save
-
----
-
-## Questions for Clarification
-
-1. **Visual Editor Complexity**: Should we build a full drag-drop editor or use a simpler block-based approach?
-
-2. **Image Storage**: Use Supabase storage for email images?
-
-3. **Template Sharing**: Should templates be shareable between venues?
-
-4. **AI Provider**: Continue with OpenAI or add alternatives?
-
-5. **Segment Builder**: Simple checkbox-based or advanced query builder?
+## 10. Assumptions and Defaults (Locked)
+- Access model: admin, manager, and any explicitly permission-assigned user.
+- Folder strategy: separate trees per module.
+- Visibility model: `PRIVATE|TEAM|SYSTEM`.
+- SQL model: guarded SQL gateway with AST validation and whitelisted read views.
+- Recurrence model: custom recurrence builder (not raw cron).
+- Approval model: optional per-venue policy; enabled for non-admins when configured.
+- Storage: continue Supabase storage pattern, with email-specific asset namespace and metadata indexing.

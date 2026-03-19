@@ -1,57 +1,104 @@
+import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+type BrevoWebhookBody = {
+  event?: string;
+  email?: string;
+  "message-id"?: string;
+  campaign_id?: string | null;
+  url?: string;
+  device_type?: string;
+  reason?: string;
+  bounce_reason?: string;
+  bounce_type?: string;
+  [key: string]: unknown;
+};
+
+const SENT_STATUSES = new Set([
+  "SENT",
+  "DELIVERED",
+  "OPENED",
+  "CLICKED",
+  "BOUNCED",
+  "UNSUBSCRIBED",
+  "COMPLAINED",
+  "FAILED",
+]);
+
+async function safeUpdateUserPreference(
+  userId: string,
+  data: Prisma.UserEmailPreferenceUpdateInput
+) {
+  try {
+    await prisma.userEmailPreference.update({
+      where: { userId },
+      data,
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    
-    // Verify webhook signature (optional but recommended)
-    // In production, you should verify the signature comes from Brevo
-    
+    const body = (await request.json()) as BrevoWebhookBody;
+
+    // Verify webhook signature in production if available.
     const eventType = body.event;
     const messageId = body["message-id"];
     const email = body.email;
-    
-    // Log the webhook event
+
+    if (!eventType || !messageId || !email) {
+      return NextResponse.json(
+        { status: "error", error: "Missing required webhook fields" },
+        { status: 400 }
+      );
+    }
+
     await prisma.emailWebhookEvent.create({
       data: {
         eventType,
         brevoMessageId: messageId,
         campaignId: body.campaign_id || null,
         recipientEmail: email,
-        eventData: body,
+        eventData: body as unknown as Prisma.InputJsonValue,
       },
     });
 
-    // Process different event types
     switch (eventType) {
       case "sent":
-        await handleSentEvent(messageId, email, body);
+        await handleSentEvent(messageId);
         break;
       case "delivered":
-        await handleDeliveredEvent(messageId, email, body);
+        await handleDeliveredEvent(messageId);
         break;
       case "opened":
-        await handleOpenedEvent(messageId, email, body);
+        await handleOpenedEvent(messageId, body);
         break;
       case "clicked":
-        await handleClickedEvent(messageId, email, body);
+        await handleClickedEvent(messageId, body);
         break;
       case "hardBounce":
       case "softBounce":
-        await handleBounceEvent(messageId, email, body);
+        await handleBounceEvent(messageId, body);
         break;
       case "spam":
-        await handleSpamEvent(messageId, email, body);
+        await handleSpamEvent(messageId);
         break;
       case "unsubscribed":
-        await handleUnsubscribedEvent(messageId, email, body);
+        await handleUnsubscribedEvent(messageId);
         break;
       default:
         console.log(`Unhandled webhook event type: ${eventType}`);
     }
 
-    // Mark event as processed
     await prisma.emailWebhookEvent.updateMany({
       where: { brevoMessageId: messageId },
       data: { processed: true, processedAt: new Date() },
@@ -64,203 +111,186 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleSentEvent(messageId: string, email: string, data: any) {
-  const recipient = await prisma.emailRecipient.findFirst({
+async function findRecipient(messageId: string) {
+  return prisma.emailRecipient.findFirst({
     where: { brevoMessageId: messageId },
   });
-  
-  if (recipient) {
-    await prisma.emailRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        status: "SENT",
-        sentAt: new Date(),
-      },
-    });
-  }
 }
 
-async function handleDeliveredEvent(messageId: string, email: string, data: any) {
-  const recipient = await prisma.emailRecipient.findFirst({
-    where: { brevoMessageId: messageId },
+async function handleSentEvent(messageId: string) {
+  const recipient = await findRecipient(messageId);
+  if (!recipient) {
+    return;
+  }
+
+  await prisma.emailRecipient.update({
+    where: { id: recipient.id },
+    data: {
+      status: "SENT",
+      sentAt: new Date(),
+    },
   });
-  
-  if (recipient) {
-    await prisma.emailRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        status: "DELIVERED",
-        deliveredAt: new Date(),
-      },
-    });
-    
-    // Update campaign stats
-    await updateCampaignStats(recipient.campaignId);
-  }
 }
 
-async function handleOpenedEvent(messageId: string, email: string, data: any) {
-  const recipient = await prisma.emailRecipient.findFirst({
-    where: { brevoMessageId: messageId },
+async function handleDeliveredEvent(messageId: string) {
+  const recipient = await findRecipient(messageId);
+  if (!recipient) {
+    return;
+  }
+
+  await prisma.emailRecipient.update({
+    where: { id: recipient.id },
+    data: {
+      status: "DELIVERED",
+      deliveredAt: new Date(),
+    },
   });
-  
-  if (recipient) {
-    await prisma.emailRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        status: "OPENED",
-        openedAt: new Date(),
-        openedCount: { increment: 1 },
-        deviceType: data.device_type || null,
-      },
-    });
-    
-    // Update user engagement
-    await prisma.userEmailPreference.update({
-      where: { userId: recipient.userId },
-      data: {
-        lastOpenedAt: new Date(),
-        totalOpens: { increment: 1 },
-      },
-    });
-    
-    // Update campaign stats
-    await updateCampaignStats(recipient.campaignId);
+
+  await updateCampaignStats(recipient.campaignId);
+}
+
+async function handleOpenedEvent(messageId: string, data: BrevoWebhookBody) {
+  const recipient = await findRecipient(messageId);
+  if (!recipient) {
+    return;
   }
-}
 
-}
-
-async function handleClickedEvent(messageId: string, email: string, data: any) {
-  const recipient = await prisma.emailRecipient.findFirst({
-    where: { brevoMessageId: messageId },
+  await prisma.emailRecipient.update({
+    where: { id: recipient.id },
+    data: {
+      status: "OPENED",
+      openedAt: new Date(),
+      openedCount: { increment: 1 },
+      deviceType: data.device_type || null,
+    },
   });
-  
-  if (recipient) {
-    const clickedUrls = recipient.clickedUrls as any || {};
-    const newClick = {
-      url: data.url,
-      timestamp: new Date().toISOString(),
-    };
-    
-    await prisma.emailRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        status: "CLICKED",
-        clickedAt: new Date(),
-        clickedCount: { increment: 1 },
-        clickedUrls: [...(clickedUrls || []), newClick],
-      },
-    });
-    
-    // Update user engagement
-    await prisma.userEmailPreference.update({
-      where: { userId: recipient.userId },
-      data: {
-        lastClickedAt: new Date(),
-        totalClicks: { increment: 1 },
-      },
-    });
-    
-    // Update campaign stats
-    await updateCampaignStats(recipient.campaignId);
-  }
+
+  await safeUpdateUserPreference(recipient.userId, {
+    lastOpenedAt: new Date(),
+    totalOpens: { increment: 1 },
+  });
+
+  await updateCampaignStats(recipient.campaignId);
 }
 
-async function handleBounceEvent(messageId: string, email: string, data: any) {
-  const recipient = await prisma.emailRecipient.findFirst({
-    where: { brevoMessageId: messageId },
-  });
-  
-  if (recipient) {
-    await prisma.emailRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        status: "BOUNCED",
-        bounceReason: data.reason || data.bounce_reason,
-        bounceType: data.bounce_type,
-      },
-    });
-    
-    // Update campaign stats
-    await updateCampaignStats(recipient.campaignId);
+async function handleClickedEvent(messageId: string, data: BrevoWebhookBody) {
+  const recipient = await findRecipient(messageId);
+  if (!recipient) {
+    return;
   }
+
+  const existingClickedUrls = Array.isArray(recipient.clickedUrls)
+    ? (recipient.clickedUrls as Array<Record<string, unknown>>)
+    : [];
+
+  const newClick = {
+    url: typeof data.url === "string" ? data.url : "",
+    timestamp: new Date().toISOString(),
+  };
+
+  await prisma.emailRecipient.update({
+    where: { id: recipient.id },
+    data: {
+      status: "CLICKED",
+      clickedAt: new Date(),
+      clickedCount: { increment: 1 },
+      clickedUrls: [...existingClickedUrls, newClick] as Prisma.InputJsonValue,
+    },
+  });
+
+  await safeUpdateUserPreference(recipient.userId, {
+    lastClickedAt: new Date(),
+    totalClicks: { increment: 1 },
+  });
+
+  await updateCampaignStats(recipient.campaignId);
 }
 
-async function handleSpamEvent(messageId: string, email: string, data: any) {
-  const recipient = await prisma.emailRecipient.findFirst({
-    where: { brevoMessageId: messageId },
-  });
-  
-  if (recipient) {
-    await prisma.emailRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        status: "COMPLAINED",
-        complainedAt: new Date(),
-      },
-    });
-    
-    // Update campaign stats
-    await updateCampaignStats(recipient.campaignId);
+async function handleBounceEvent(messageId: string, data: BrevoWebhookBody) {
+  const recipient = await findRecipient(messageId);
+  if (!recipient) {
+    return;
   }
+
+  await prisma.emailRecipient.update({
+    where: { id: recipient.id },
+    data: {
+      status: "BOUNCED",
+      bounceReason:
+        (typeof data.reason === "string" ? data.reason : null) ||
+        (typeof data.bounce_reason === "string" ? data.bounce_reason : null),
+      bounceType: typeof data.bounce_type === "string" ? data.bounce_type : null,
+    },
+  });
+
+  await updateCampaignStats(recipient.campaignId);
 }
 
-async function handleUnsubscribedEvent(messageId: string, email: string, data: any) {
-  const recipient = await prisma.emailRecipient.findFirst({
-    where: { brevoMessageId: messageId },
-  });
-  
-  if (recipient) {
-    await prisma.emailRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        status: "UNSUBSCRIBED",
-        unsubscribedAt: new Date(),
-      },
-    });
-    
-    // Update user preferences
-    await prisma.userEmailPreference.update({
-      where: { userId: recipient.userId },
-      data: {
-        receiveMarketing: false,
-        unsubscribedAt: new Date(),
-        unsubscribedFrom: { push: "MARKETING" },
-      },
-    });
-    
-    // Update campaign stats
-    await updateCampaignStats(recipient.campaignId);
+async function handleSpamEvent(messageId: string) {
+  const recipient = await findRecipient(messageId);
+  if (!recipient) {
+    return;
   }
+
+  await prisma.emailRecipient.update({
+    where: { id: recipient.id },
+    data: {
+      status: "COMPLAINED",
+      complainedAt: new Date(),
+    },
+  });
+
+  await updateCampaignStats(recipient.campaignId);
+}
+
+async function handleUnsubscribedEvent(messageId: string) {
+  const recipient = await findRecipient(messageId);
+  if (!recipient) {
+    return;
+  }
+
+  await prisma.emailRecipient.update({
+    where: { id: recipient.id },
+    data: {
+      status: "UNSUBSCRIBED",
+      unsubscribedAt: new Date(),
+    },
+  });
+
+  await safeUpdateUserPreference(recipient.userId, {
+    receiveMarketing: false,
+    unsubscribedAt: new Date(),
+    unsubscribedFrom: { push: "MARKETING" },
+  });
+
+  await updateCampaignStats(recipient.campaignId);
 }
 
 async function updateCampaignStats(campaignId: string) {
-  const campaign = await prisma.emailCampaign.findUnique({
-    where: { id: campaignId },
-    include: {
-      _count: { select: { status: true } },
-      recipients: true,
-    },
+  const recipients = await prisma.emailRecipient.findMany({
+    where: { campaignId },
+    select: { status: true },
   });
-  
-  if (!campaign) return;
-  
-  const stats = campaign as any;
-  const recipients = campaign?.recipients || [];
-  
-  const totalSent = stats?._count?.status || 0;
-  const delivered = recipients.filter((r: any) => r.status === "DELIVERED").length || 0;
-  const opened = recipients.filter((r: any) => r.status === "OPENED" || r.status === "CLICKED").length || 0;
-  const clicked = recipients.filter((r: any) => r.status === "CLICKED").length || 0;
-  const bounced = recipients.filter((r: any) => r.status === "BOUNCED").length || 0;
-  const unsubscribed = recipients.filter((r: any) => r.status === "UNSUBSCRIBED").length || 0;
-  
-  const openRate = totalSent > 0 ? (opened / totalSent) * 100 : 0;
-  const clickRate = totalSent > 0 ? (clicked / totalSent) * 100 : 0;
-  const bounceRate = totalSent > 0 ? (bounced / totalSent) * 100 : 0;
-  const unsubscribeRate = totalSent > 0 ? (unsubscribed / totalSent) * 100 : 0;
-  
+
+  const totalSent = recipients.filter((recipient) => SENT_STATUSES.has(recipient.status)).length;
+  const delivered = recipients.filter((recipient) => recipient.status === "DELIVERED").length;
+  const opened = recipients.filter(
+    (recipient) => recipient.status === "OPENED" || recipient.status === "CLICKED"
+  ).length;
+  const clicked = recipients.filter((recipient) => recipient.status === "CLICKED").length;
+  const bounced = recipients.filter((recipient) => recipient.status === "BOUNCED").length;
+  const unsubscribed = recipients.filter(
+    (recipient) => recipient.status === "UNSUBSCRIBED"
+  ).length;
+  const complained = recipients.filter((recipient) => recipient.status === "COMPLAINED").length;
+
+  const openRate = totalSent > 0 ? opened / totalSent : 0;
+  const clickRate = totalSent > 0 ? clicked / totalSent : 0;
+  const clickToOpenRate = opened > 0 ? clicked / opened : 0;
+  const bounceRate = totalSent > 0 ? bounced / totalSent : 0;
+  const unsubscribeRate = totalSent > 0 ? unsubscribed / totalSent : 0;
+  const complaintRate = totalSent > 0 ? complained / totalSent : 0;
+
   await prisma.emailCampaign.update({
     where: { id: campaignId },
     data: {
@@ -269,26 +299,29 @@ async function updateCampaignStats(campaignId: string) {
       clickedCount: clicked,
       bouncedCount: bounced,
       unsubscribedCount: unsubscribed,
+      complaintCount: complained,
     },
   });
-    
-    // Update or create analytics record
-    await prisma.emailCampaignAnalytics.upsert({
+
+  await prisma.emailCampaignAnalytics.upsert({
     where: { campaignId },
-      update: {
-        openRate,
-        clickRate,
-        bounceRate,
-        unsubscribeRate,
-        updatedAt: new Date(),
-      },
-      create: {
-        campaignId,
-        openRate,
-        clickRate,
-        bounceRate,
-        unsubscribeRate,
-      },
-    });
-  }
+    update: {
+      openRate,
+      clickRate,
+      clickToOpenRate,
+      bounceRate,
+      unsubscribeRate,
+      complaintRate,
+      updatedAt: new Date(),
+    },
+    create: {
+      campaignId,
+      openRate,
+      clickRate,
+      clickToOpenRate,
+      bounceRate,
+      unsubscribeRate,
+      complaintRate,
+    },
+  });
 }

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -45,10 +46,20 @@ import {
   getEmailCampaigns,
   deleteEmailCampaign,
   cancelEmailCampaign,
+  requestCampaignApproval,
+  reviewCampaignApproval,
   sendEmailCampaign,
   scheduleEmailCampaign,
+  getEmailApprovalPolicy,
+  upsertEmailApprovalPolicy,
 } from "@/lib/actions/email-campaigns";
-import type { EmailCampaign, CampaignStatus, EmailType } from "@/types/email-campaign";
+import { listFolderTree, type EmailFolderNode } from "@/lib/actions/email-workspace/folders";
+import type {
+  EmailCampaign,
+  CampaignStatus,
+  CampaignApprovalStatus,
+  EmailType,
+} from "@/types/email-campaign";
 import {
   Plus,
   Search,
@@ -71,6 +82,7 @@ import { format } from "date-fns";
 
 interface EmailsPageClientProps {
   isAdmin: boolean;
+  venues: Array<{ id: string; name: string; code: string }>;
 }
 
 const statusColors: Record<CampaignStatus, string> = {
@@ -89,30 +101,118 @@ const emailTypeColors: Record<EmailType, string> = {
   MARKETING: "bg-pink-100 text-pink-800",
 };
 
-export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
+const approvalStatusColors: Record<CampaignApprovalStatus, string> = {
+  NOT_REQUIRED: "bg-slate-100 text-slate-700",
+  PENDING: "bg-amber-100 text-amber-800",
+  APPROVED: "bg-green-100 text-green-800",
+  REJECTED: "bg-red-100 text-red-800",
+};
+
+function flattenFolderOptions(
+  nodes: EmailFolderNode[],
+  depth: number = 0
+): Array<{ id: string; label: string }> {
+  const rows: Array<{ id: string; label: string }> = [];
+
+  for (const node of nodes) {
+    rows.push({
+      id: node.id,
+      label: `${"-- ".repeat(depth)}${node.name}`,
+    });
+    rows.push(...flattenFolderOptions(node.children, depth + 1));
+  }
+
+  return rows;
+}
+
+export function EmailsPageClient({ isAdmin, venues }: EmailsPageClientProps) {
   const router = useRouter();
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [folderFilter, setFolderFilter] = useState<string>("all");
+  const [folderOptions, setFolderOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<EmailCampaign | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [selectedPolicyVenueId, setSelectedPolicyVenueId] = useState<string>("");
+  const [policyEnabled, setPolicyEnabled] = useState(false);
+  const [policyRequireForNonAdmin, setPolicyRequireForNonAdmin] = useState(false);
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policySaving, setPolicySaving] = useState(false);
 
   useEffect(() => {
     loadCampaigns();
-  }, [statusFilter, typeFilter]);
+  }, [statusFilter, typeFilter, folderFilter]);
+
+  useEffect(() => {
+    void loadFolders();
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin || venues.length === 0) {
+      return;
+    }
+
+    if (!selectedPolicyVenueId) {
+      setSelectedPolicyVenueId(venues[0].id);
+    }
+  }, [isAdmin, venues, selectedPolicyVenueId]);
+
+  useEffect(() => {
+    if (!isAdmin || !selectedPolicyVenueId) {
+      return;
+    }
+
+    const loadPolicy = async () => {
+      setPolicyLoading(true);
+      try {
+        const response = await getEmailApprovalPolicy(selectedPolicyVenueId);
+        if (!response.success || !response.policy) {
+          toast.error(response.error || "Failed to load approval policy");
+          return;
+        }
+
+        setPolicyEnabled(response.policy.enabled);
+        setPolicyRequireForNonAdmin(response.policy.requireForNonAdmin);
+      } catch (error) {
+        console.error("Error loading approval policy:", error);
+        toast.error("Failed to load approval policy");
+      } finally {
+        setPolicyLoading(false);
+      }
+    };
+
+    void loadPolicy();
+  }, [isAdmin, selectedPolicyVenueId]);
+
+  const loadFolders = async () => {
+    try {
+      const response = await listFolderTree({ module: "campaigns" });
+      if (!response.success || !response.tree) {
+        return;
+      }
+
+      setFolderOptions(flattenFolderOptions(response.tree));
+    } catch (error) {
+      console.error("Error loading campaign folders:", error);
+    }
+  };
 
   const loadCampaigns = async () => {
     setLoading(true);
     try {
-      const filters: any = {};
+      const filters: Record<string, unknown> = {};
       if (statusFilter !== "all") {
         filters.status = statusFilter as CampaignStatus;
       }
       if (typeFilter !== "all") {
         filters.emailType = typeFilter as EmailType;
+      }
+      if (folderFilter !== "all" && folderFilter !== "none") {
+        filters.folderId = folderFilter;
       }
       if (search) {
         filters.search = search;
@@ -120,7 +220,11 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
 
       const result = await getEmailCampaigns(filters);
       if (result.success && result.campaigns) {
-        setCampaigns(result.campaigns);
+        const mappedCampaigns =
+          folderFilter === "none"
+            ? result.campaigns.filter((campaign) => !campaign.folderId)
+            : result.campaigns;
+        setCampaigns(mappedCampaigns);
       } else {
         toast.error(result.error || "Failed to load campaigns");
       }
@@ -191,6 +295,75 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
     }
   };
 
+  const handleRequestApproval = async (campaign: EmailCampaign) => {
+    setActionLoading(campaign.id);
+    try {
+      const result = await requestCampaignApproval(campaign.id);
+      if (result.success) {
+        toast.success("Campaign submitted for approval");
+        await loadCampaigns();
+      } else {
+        toast.error(result.error || "Failed to request approval");
+      }
+    } catch (error) {
+      toast.error("Failed to request approval");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReviewApproval = async (
+    campaign: EmailCampaign,
+    decision: "APPROVE" | "REJECT"
+  ) => {
+    setActionLoading(campaign.id);
+    try {
+      const result = await reviewCampaignApproval({
+        campaignId: campaign.id,
+        decision,
+      });
+      if (result.success) {
+        toast.success(decision === "APPROVE" ? "Campaign approved" : "Campaign rejected");
+        await loadCampaigns();
+      } else {
+        toast.error(result.error || "Failed to review approval");
+      }
+    } catch (error) {
+      toast.error("Failed to review approval");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleSaveApprovalPolicy = async () => {
+    if (!selectedPolicyVenueId) {
+      toast.error("Select a venue to update approval policy");
+      return;
+    }
+
+    setPolicySaving(true);
+    try {
+      const response = await upsertEmailApprovalPolicy({
+        venueId: selectedPolicyVenueId,
+        enabled: policyEnabled,
+        requireForNonAdmin: policyRequireForNonAdmin,
+      });
+
+      if (!response.success) {
+        toast.error(response.error || "Failed to save approval policy");
+        return;
+      }
+
+      toast.success("Approval policy updated");
+      await loadCampaigns();
+    } catch (error) {
+      console.error("Error saving approval policy:", error);
+      toast.error("Failed to save approval policy");
+    } finally {
+      setPolicySaving(false);
+    }
+  };
+
   const getStatusBadge = (status: CampaignStatus) => (
     <Badge className={statusColors[status]} variant="outline">
       {status.replace("_", " ")}
@@ -200,6 +373,12 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
   const getTypeBadge = (type: EmailType) => (
     <Badge className={emailTypeColors[type]} variant="outline">
       {type}
+    </Badge>
+  );
+
+  const getApprovalBadge = (status: CampaignApprovalStatus) => (
+    <Badge className={approvalStatusColors[status]} variant="outline">
+      {status === "NOT_REQUIRED" ? "Not Required" : status}
     </Badge>
   );
 
@@ -225,13 +404,86 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
             Create, manage, and send email campaigns to your staff
           </p>
         </div>
-        <Link href="/system/emails/new">
+        <Link href="/emails/campaigns/new">
           <Button>
             <Plus className="mr-2 h-4 w-4" />
             New Campaign
           </Button>
         </Link>
       </div>
+
+      {isAdmin && venues.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Approval Policy</CardTitle>
+            <CardDescription>
+              Control whether non-admin users must request approval before sending campaigns.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="approval-policy-venue">Venue</Label>
+                <Select
+                  value={selectedPolicyVenueId}
+                  onValueChange={setSelectedPolicyVenueId}
+                >
+                  <SelectTrigger id="approval-policy-venue">
+                    <SelectValue placeholder="Select venue" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {venues.map((venue) => (
+                      <SelectItem key={venue.id} value={venue.id}>
+                        {venue.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Policy Toggles</p>
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">Enable Policy</p>
+                      <p className="text-xs text-muted-foreground">
+                        Turns campaign approval checks on for this venue.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={policyEnabled}
+                      onCheckedChange={setPolicyEnabled}
+                      disabled={policyLoading || policySaving}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">Require For Non-Admin</p>
+                      <p className="text-xs text-muted-foreground">
+                        Non-admin users must request approval before send.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={policyRequireForNonAdmin}
+                      onCheckedChange={setPolicyRequireForNonAdmin}
+                      disabled={policyLoading || policySaving || !policyEnabled}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                onClick={handleSaveApprovalPolicy}
+                disabled={policyLoading || policySaving || !selectedPolicyVenueId}
+              >
+                {policyLoading ? "Loading..." : policySaving ? "Saving..." : "Save Approval Policy"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-4">
@@ -312,6 +564,20 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
                   <SelectItem value="MARKETING">Marketing</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={folderFilter} onValueChange={setFolderFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Folder" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Folders</SelectItem>
+                  <SelectItem value="none">No Folder</SelectItem>
+                  {folderOptions.map((folder) => (
+                    <SelectItem key={folder.id} value={folder.id}>
+                      {folder.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button variant="outline" onClick={loadCampaigns}>
                 Search
               </Button>
@@ -334,7 +600,7 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
               <p className="text-muted-foreground mb-4">
                 Get started by creating your first email campaign
               </p>
-              <Link href="/system/emails/new">
+              <Link href="/emails/campaigns/new">
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
                   Create Campaign
@@ -349,6 +615,7 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
                   <TableHead>Subject</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Approval</TableHead>
                   <TableHead>Recipients</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -363,6 +630,7 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
                     </TableCell>
                     <TableCell>{getTypeBadge(campaign.emailType)}</TableCell>
                     <TableCell>{getStatusBadge(campaign.status)}</TableCell>
+                    <TableCell>{getApprovalBadge(campaign.approvalStatus)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <Users className="h-4 w-4 text-muted-foreground" />
@@ -387,7 +655,7 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
                           <DropdownMenuLabel>Actions</DropdownMenuLabel>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem asChild>
-                            <Link href={`/system/emails/${campaign.id}`}>
+                            <Link href={`/emails/campaigns/${campaign.id}`}>
                               <Eye className="mr-2 h-4 w-4" />
                               View Details
                             </Link>
@@ -395,15 +663,24 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
                           {campaign.status === "DRAFT" && (
                             <>
                               <DropdownMenuItem asChild>
-                                <Link href={`/system/emails/${campaign.id}/edit`}>
+                                <Link href={`/emails/campaigns/${campaign.id}`}>
                                   <Edit className="mr-2 h-4 w-4" />
                                   Edit
                                 </Link>
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleSendNow(campaign)}>
-                                <Send className="mr-2 h-4 w-4" />
-                                Send Now
-                              </DropdownMenuItem>
+                              {(campaign.approvalStatus === "NOT_REQUIRED" ||
+                                campaign.approvalStatus === "APPROVED") && (
+                                <DropdownMenuItem onClick={() => handleSendNow(campaign)}>
+                                  <Send className="mr-2 h-4 w-4" />
+                                  Send Now
+                                </DropdownMenuItem>
+                              )}
+                              {campaign.approvalStatus === "REJECTED" && (
+                                <DropdownMenuItem onClick={() => handleRequestApproval(campaign)}>
+                                  <Clock className="mr-2 h-4 w-4" />
+                                  Request Approval
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 className="text-red-600"
                                 onClick={() => {
@@ -428,9 +705,21 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
                               </DropdownMenuItem>
                             </>
                           )}
+                          {campaign.approvalStatus === "PENDING" && isAdmin && (
+                            <>
+                              <DropdownMenuItem onClick={() => handleReviewApproval(campaign, "APPROVE")}>
+                                <Send className="mr-2 h-4 w-4" />
+                                Approve
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleReviewApproval(campaign, "REJECT")}>
+                                <XCircle className="mr-2 h-4 w-4" />
+                                Reject
+                              </DropdownMenuItem>
+                            </>
+                          )}
                           {campaign.status === "SENT" && (
                             <DropdownMenuItem asChild>
-                              <Link href={`/system/emails/${campaign.id}/analytics`}>
+                              <Link href={`/emails/campaigns/${campaign.id}`}>
                                 <BarChart3 className="mr-2 h-4 w-4" />
                                 View Analytics
                               </Link>
@@ -453,7 +742,7 @@ export function EmailsPageClient({ isAdmin }: EmailsPageClientProps) {
           <DialogHeader>
             <DialogTitle>Delete Campaign</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{selectedCampaign?.name}"? This action cannot be undone.
+              Are you sure you want to delete &quot;{selectedCampaign?.name}&quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
