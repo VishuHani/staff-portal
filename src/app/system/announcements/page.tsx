@@ -31,6 +31,9 @@ export default async function AdminNotificationsPage() {
     getNotificationHistory({ limit: 50 }),
     getAnnouncementHistory(),
   ]);
+  const unreadMessageCount = messageCountResult.success
+    ? (messageCountResult.count ?? 0)
+    : 0;
 
   // Handle errors
   if (statsResult.error) {
@@ -38,7 +41,7 @@ export default async function AdminNotificationsPage() {
       <DashboardLayout
         user={user}
         unreadCount={unreadResult.count || 0}
-        unreadMessageCount={messageCountResult.count || 0}
+        unreadMessageCount={unreadMessageCount}
       >
         <div className="space-y-6">
           <div>
@@ -59,7 +62,7 @@ export default async function AdminNotificationsPage() {
     <DashboardLayout
       user={user}
       unreadCount={unreadResult.count || 0}
-      unreadMessageCount={messageCountResult.count || 0}
+      unreadMessageCount={unreadMessageCount}
     >
       <NotificationsPageClient
         stats={statsResult.stats!}

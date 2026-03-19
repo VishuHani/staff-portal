@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { NotificationType } from "@prisma/client";
+import { PRISMA_ENUM_VALUES } from "@/types/prisma-enums";
 
 /**
  * Notification Validation Schemas
@@ -7,31 +8,9 @@ import { NotificationType } from "@prisma/client";
  */
 
 // Notification type enum validation
-export const notificationTypeSchema = z.enum([
-  "NEW_MESSAGE",
-  "MESSAGE_REPLY",
-  "MESSAGE_MENTION",
-  "MESSAGE_REACTION",
-  "POST_MENTION",
-  "POST_PINNED",
-  "POST_DELETED",
-  "TIME_OFF_REQUEST",
-  "TIME_OFF_APPROVED",
-  "TIME_OFF_REJECTED",
-  "TIME_OFF_CANCELLED",
-  "USER_CREATED",
-  "USER_UPDATED",
-  "ROLE_CHANGED",
-  "SYSTEM_ANNOUNCEMENT",
-  "GROUP_REMOVED",
-  "ROSTER_PUBLISHED",
-  "ROSTER_UPDATED",
-  "ROSTER_SHIFT_REMINDER",
-  "ROSTER_CONFLICT",
-  "ROSTER_PENDING_REVIEW",
-  "PERMISSION_GRANTED",
-  "PERMISSION_REVOKED",
-]);
+export const notificationTypeSchema = z.nativeEnum(NotificationType);
+
+export const notificationTypeValues = PRISMA_ENUM_VALUES.NotificationType;
 
 // Schema for creating a notification
 export const createNotificationSchema = z.object({

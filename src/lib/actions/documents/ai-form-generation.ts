@@ -5,6 +5,7 @@ import OpenAI from 'openai';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { researchFormRequirements, ResearchResult, ResearchOptions, isResearchEnabledSync } from '@/lib/services/web-research-service';
+import { fetchProtectedBinaryUrl } from '@/lib/security/protected-fetch';
 import { 
   detectFormCategory, 
   getComplianceRules, 
@@ -70,27 +71,35 @@ function getOpenAIClient(): OpenAI | null {
 // ============================================================================
 
 async function getPDFBuffer(pdfUrl: string): Promise<ArrayBuffer> {
+  const readPublicFileSafely = async (relativePath: string): Promise<ArrayBuffer> => {
+    const publicRoot = path.resolve(process.cwd(), "public");
+    const normalized = relativePath.replace(/^\/+/, "");
+    const resolvedPath = path.resolve(publicRoot, normalized);
+
+    if (resolvedPath !== publicRoot && !resolvedPath.startsWith(`${publicRoot}${path.sep}`)) {
+      throw new Error("Invalid local PDF path");
+    }
+
+    const buffer = await readFile(resolvedPath);
+    return buffer.buffer as ArrayBuffer;
+  };
+
   // Check if it's a local path (starts with /uploads or is a relative path)
   if (pdfUrl.startsWith('/uploads/') || pdfUrl.startsWith('/public/')) {
     // It's a local file - read from filesystem
-    const filePath = path.join(process.cwd(), 'public', pdfUrl);
-    const buffer = await readFile(filePath);
-    return buffer.buffer as ArrayBuffer;
+    return readPublicFileSafely(pdfUrl);
   }
   
   // Check if it's a full URL
   if (pdfUrl.startsWith('http://') || pdfUrl.startsWith('https://')) {
-    const response = await fetch(pdfUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to download PDF: ${response.status}`);
-    }
-    return response.arrayBuffer();
+    return fetchProtectedBinaryUrl(pdfUrl, {
+      maxBytes: 12 * 1024 * 1024,
+      timeoutMs: 15_000,
+    });
   }
   
   // Assume it's a local path relative to public
-  const filePath = path.join(process.cwd(), 'public', pdfUrl);
-  const buffer = await readFile(filePath);
-  return buffer.buffer as ArrayBuffer;
+  return readPublicFileSafely(pdfUrl);
 }
 
 // ============================================================================

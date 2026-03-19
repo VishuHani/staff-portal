@@ -694,6 +694,8 @@ model Message {
   sender            User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
+  @@index([conversationId, deletedAt, createdAt])
+  @@index([conversationId, senderId, deletedAt, createdAt])
   @@index([senderId])
   @@index([createdAt])
   @@index([deliveryStatus])
@@ -738,6 +740,7 @@ model Roster {
   unmatchedEntries   UnmatchedRosterEntry[]
 
   @@index([venueId])
+  @@index([venueId, status, startDate, createdAt])
   @@index([status])
   @@index([startDate, endDate])
   @@index([parentId])
@@ -1359,9 +1362,10 @@ model TemplateLibraryImport {
   customized    Boolean             @default(false)
   importedAt    DateTime            @default(now())
   importedBy    String
-  libraryItem   TemplateLibraryItem @relation(fields: [libraryItemId], references: [id])
-  venue         Venue               @relation(fields: [venueId], references: [id])
+  libraryItem   TemplateLibraryItem @relation(fields: [libraryItemId], references: [id], onDelete: Cascade)
+  venue         Venue               @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
+  @@unique([libraryItemId, venueId])
   @@index([libraryItemId])
   @@index([venueId])
   @@map("template_library_imports")
@@ -1567,13 +1571,15 @@ model EmailFolder {
 
   parent      EmailFolder?         @relation("EmailFolderTree", fields: [parentId], references: [id], onDelete: SetNull)
   children    EmailFolder[]        @relation("EmailFolderTree")
-  venue       Venue?               @relation(fields: [venueId], references: [id])
+  venue       Venue?               @relation(fields: [venueId], references: [id], onDelete: SetNull)
   owner       User                 @relation("EmailFolderOwner", fields: [ownerId], references: [id])
   emails      Email[]
   campaigns   EmailCampaign[]
   assets      EmailAsset[]
   audiences   AudienceList[]
   reports     EmailReportDefinition[]
+
+  // Case-insensitive sibling uniqueness is enforced in SQL migration.
 
   @@index([module])
   @@index([parentId])
@@ -1607,7 +1613,7 @@ model EmailAsset {
   updatedAt   DateTime          @updatedAt
 
   folder      EmailFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  venue       Venue?            @relation(fields: [venueId], references: [id])
+  venue       Venue?            @relation(fields: [venueId], references: [id], onDelete: SetNull)
   owner       User              @relation("EmailAssetOwner", fields: [ownerId], references: [id])
 
   @@index([folderId])
@@ -1636,7 +1642,7 @@ model AudienceList {
   updatedAt   DateTime          @updatedAt
 
   folder      EmailFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  venue       Venue?            @relation(fields: [venueId], references: [id])
+  venue       Venue?            @relation(fields: [venueId], references: [id], onDelete: SetNull)
   owner       User              @relation("AudienceListOwner", fields: [ownerId], references: [id])
   runs        AudienceRun[]
   campaigns   CampaignAudienceLink[]
@@ -1729,7 +1735,7 @@ model Email {
   
   // Relations
   folder          EmailFolder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  venue           Venue?        @relation(fields: [venueId], references: [id])
+  venue           Venue?        @relation(fields: [venueId], references: [id], onDelete: SetNull)
   creator         User          @relation(fields: [createdBy], references: [id])
   campaigns       EmailCampaign[]  // Campaigns that use this email
   generations     EmailGeneration[] // AI generations that created this email
@@ -1764,7 +1770,7 @@ model EmailSegment {
   updatedAt       DateTime      @updatedAt
   
   // Relations
-  venue           Venue?        @relation(fields: [venueId], references: [id])
+  venue           Venue?        @relation(fields: [venueId], references: [id], onDelete: SetNull)
   creator         User          @relation(fields: [createdBy], references: [id])
   campaigns       EmailCampaign[]  // Campaigns using this segment
   
@@ -1828,7 +1834,7 @@ model EmailCampaign {
   // Relations
   folder          EmailFolder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
   creator         User          @relation("EmailCampaignCreator", fields: [createdBy], references: [id])
-  venue           Venue?        @relation(fields: [venueId], references: [id])
+  venue           Venue?        @relation(fields: [venueId], references: [id], onDelete: SetNull)
   recipients      EmailRecipient[]
   runs            EmailCampaignRun[]
   analytics       EmailCampaignAnalytics?
@@ -1840,6 +1846,7 @@ model EmailCampaign {
   @@index([folderId])
   @@index([emailId])
   @@index([venueId])
+  @@index([venueId, status, createdAt])
   @@index([createdBy])
   @@index([nextRunAt])
   @@index([scheduledAt])
@@ -2039,7 +2046,7 @@ model EmailReportDefinition {
   updatedAt        DateTime          @updatedAt
 
   folder           EmailFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  venue            Venue?            @relation(fields: [venueId], references: [id])
+  venue            Venue?            @relation(fields: [venueId], references: [id], onDelete: SetNull)
   owner            User              @relation("EmailReportDefinitionOwner", fields: [ownerId], references: [id])
   runs             EmailReportRun[]
 

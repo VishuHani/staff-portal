@@ -1,8 +1,14 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/rbac/access";
+import {
+  actionFailure,
+  actionSuccess,
+  logActionError,
+  revalidatePaths,
+  type ActionResult,
+} from "@/lib/utils/action-contract";
 import {
   createRoleSchema,
   updateRoleSchema,
@@ -18,12 +24,18 @@ import { getAuditContext } from "@/lib/utils/audit-helpers";
 
 // System roles that cannot be renamed or deleted
 const SYSTEM_ROLES = ["ADMIN", "MANAGER", "STAFF"];
+type RoleListPayload = Awaited<ReturnType<typeof prisma.role.findMany>>;
+type PermissionListPayload = Awaited<
+  ReturnType<typeof prisma.permission.findMany>
+>;
 
 /**
  * Get all roles with their permissions
  * Admin only
  */
-export async function getAllRoles() {
+export async function getAllRoles(): Promise<
+  ActionResult<{ roles: RoleListPayload }>
+> {
   await requireAdmin();
 
   try {
@@ -45,10 +57,10 @@ export async function getAllRoles() {
       },
     });
 
-    return { success: true, roles };
+    return actionSuccess({ roles });
   } catch (error) {
-    console.error("Error fetching roles:", error);
-    return { error: "Failed to fetch roles" };
+    logActionError("admin.roles.getAllRoles", error);
+    return actionFailure("Failed to fetch roles");
   }
 }
 
@@ -56,7 +68,9 @@ export async function getAllRoles() {
  * Get all available permissions
  * Admin only
  */
-export async function getAllPermissions() {
+export async function getAllPermissions(): Promise<
+  ActionResult<{ permissions: PermissionListPayload }>
+> {
   await requireAdmin();
 
   try {
@@ -64,10 +78,10 @@ export async function getAllPermissions() {
       orderBy: [{ resource: "asc" }, { action: "asc" }],
     });
 
-    return { success: true, permissions };
+    return actionSuccess({ permissions });
   } catch (error) {
-    console.error("Error fetching permissions:", error);
-    return { error: "Failed to fetch permissions" };
+    logActionError("admin.roles.getAllPermissions", error);
+    return actionFailure("Failed to fetch permissions");
   }
 }
 
@@ -80,9 +94,7 @@ export async function createRole(data: CreateRoleInput & { permissionIds?: strin
 
   const validatedFields = createRoleSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(validatedFields.error.issues[0]?.message || "Invalid fields");
   }
 
   const { name, description } = validatedFields.data;
@@ -94,7 +106,7 @@ export async function createRole(data: CreateRoleInput & { permissionIds?: strin
     });
 
     if (existingRole) {
-      return { error: "Role name already exists" };
+      return actionFailure("Role name already exists");
     }
 
     // Create role with permissions if provided
@@ -136,16 +148,16 @@ export async function createRole(data: CreateRoleInput & { permissionIds?: strin
         ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
-      console.error("Error creating audit log:", error);
+      logActionError("admin.roles.createRole.auditLog", error, { roleName: name });
       // Don't fail role creation if audit log fails
     }
 
-    revalidatePath("/admin/roles");
+    revalidatePaths("/admin/roles");
 
-    return { success: true, role };
+    return actionSuccess({ role });
   } catch (error) {
-    console.error("Error creating role:", error);
-    return { error: "Failed to create role" };
+    logActionError("admin.roles.createRole", error, { name });
+    return actionFailure("Failed to create role");
   }
 }
 
@@ -158,9 +170,7 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
 
   const validatedFields = updateRoleSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(validatedFields.error.issues[0]?.message || "Invalid fields");
   }
 
   const { roleId, name, description } = validatedFields.data;
@@ -179,12 +189,12 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
     });
 
     if (!oldRole) {
-      return { error: "Role not found" };
+      return actionFailure("Role not found");
     }
 
     // Prevent renaming system roles
     if (SYSTEM_ROLES.includes(oldRole.name) && name && name !== oldRole.name) {
-      return { error: "Cannot rename system roles (ADMIN, MANAGER, STAFF)" };
+      return actionFailure("Cannot rename system roles (ADMIN, MANAGER, STAFF)");
     }
 
     // Check if role name is being changed and if it's already taken
@@ -199,7 +209,7 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
       });
 
       if (existingRole) {
-        return { error: "Role name already exists" };
+        return actionFailure("Role name already exists");
       }
     }
 
@@ -258,17 +268,16 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
         ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
-      console.error("Error creating audit log:", error);
+      logActionError("admin.roles.updateRole.auditLog", error, { roleId });
       // Don't fail role update if audit log fails
     }
 
-    revalidatePath("/admin/roles");
-    revalidatePath(`/admin/roles/${roleId}`);
+    revalidatePaths("/admin/roles", `/admin/roles/${roleId}`);
 
-    return { success: true, role };
+    return actionSuccess({ role });
   } catch (error) {
-    console.error("Error updating role:", error);
-    return { error: "Failed to update role" };
+    logActionError("admin.roles.updateRole", error, { roleId: data.roleId });
+    return actionFailure("Failed to update role");
   }
 }
 
@@ -281,9 +290,7 @@ export async function deleteRole(data: DeleteRoleInput) {
 
   const validatedFields = deleteRoleSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(validatedFields.error.issues[0]?.message || "Invalid fields");
   }
 
   const { roleId } = validatedFields.data;
@@ -302,12 +309,12 @@ export async function deleteRole(data: DeleteRoleInput) {
     });
 
     if (!role) {
-      return { error: "Role not found" };
+      return actionFailure("Role not found");
     }
 
     // Prevent deletion of system roles
     if (SYSTEM_ROLES.includes(role.name)) {
-      return { error: "Cannot delete system roles (ADMIN, MANAGER, STAFF)" };
+      return actionFailure("Cannot delete system roles (ADMIN, MANAGER, STAFF)");
     }
 
     // Check if any users have this role
@@ -316,9 +323,9 @@ export async function deleteRole(data: DeleteRoleInput) {
     });
 
     if (usersWithRole > 0) {
-      return {
-        error: `Cannot delete role. ${usersWithRole} user(s) still assigned to this role.`,
-      };
+      return actionFailure(
+        `Cannot delete role. ${usersWithRole} user(s) still assigned to this role.`
+      );
     }
 
     await prisma.role.delete({
@@ -341,16 +348,16 @@ export async function deleteRole(data: DeleteRoleInput) {
         ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
-      console.error("Error creating audit log:", error);
+      logActionError("admin.roles.deleteRole.auditLog", error, { roleId });
       // Don't fail role deletion if audit log fails
     }
 
-    revalidatePath("/admin/roles");
+    revalidatePaths("/admin/roles");
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error deleting role:", error);
-    return { error: "Failed to delete role" };
+    logActionError("admin.roles.deleteRole", error, { roleId: data.roleId });
+    return actionFailure("Failed to delete role");
   }
 }
 
@@ -363,9 +370,7 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
 
   const validatedFields = assignPermissionsSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(validatedFields.error.issues[0]?.message || "Invalid fields");
   }
 
   const { roleId, permissionIds } = validatedFields.data;
@@ -384,7 +389,7 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
     });
 
     if (!role) {
-      return { error: "Role not found" };
+      return actionFailure("Role not found");
     }
 
     const oldPermissionIds = role.rolePermissions.map(rp => rp.permissionId);
@@ -423,17 +428,16 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
         ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
-      console.error("Error creating audit log:", error);
+      logActionError("admin.roles.assignPermissionsToRole.auditLog", error, { roleId });
       // Don't fail permission assignment if audit log fails
     }
 
-    revalidatePath("/admin/roles");
-    revalidatePath(`/admin/roles/${roleId}`);
+    revalidatePaths("/admin/roles", `/admin/roles/${roleId}`);
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error assigning permissions:", error);
-    return { error: "Failed to assign permissions" };
+    logActionError("admin.roles.assignPermissionsToRole", error, { roleId: data.roleId });
+    return actionFailure("Failed to assign permissions");
   }
 }
 
@@ -445,12 +449,12 @@ export async function cloneRole(sourceRoleId: string, newName: string) {
   const admin = await requireAdmin();
 
   if (!newName || newName.trim().length < 2) {
-    return { error: "Role name must be at least 2 characters" };
+    return actionFailure("Role name must be at least 2 characters");
   }
 
   // Validate name format
   if (!/^[A-Z_]+$/.test(newName)) {
-    return { error: "Role name must be uppercase letters and underscores only" };
+    return actionFailure("Role name must be uppercase letters and underscores only");
   }
 
   try {
@@ -467,7 +471,7 @@ export async function cloneRole(sourceRoleId: string, newName: string) {
     });
 
     if (!sourceRole) {
-      return { error: "Source role not found" };
+      return actionFailure("Source role not found");
     }
 
     // Check if new name already exists
@@ -476,7 +480,7 @@ export async function cloneRole(sourceRoleId: string, newName: string) {
     });
 
     if (existingRole) {
-      return { error: "Role name already exists" };
+      return actionFailure("Role name already exists");
     }
 
     // Create new role with cloned permissions
@@ -516,15 +520,15 @@ export async function cloneRole(sourceRoleId: string, newName: string) {
         ipAddress: auditContext.ipAddress,
       });
     } catch (error) {
-      console.error("Error creating audit log:", error);
+      logActionError("admin.roles.cloneRole.auditLog", error, { sourceRoleId, newName });
       // Don't fail role clone if audit log fails
     }
 
-    revalidatePath("/admin/roles");
+    revalidatePaths("/admin/roles");
 
-    return { success: true, role: newRole };
+    return actionSuccess({ role: newRole });
   } catch (error) {
-    console.error("Error cloning role:", error);
-    return { error: "Failed to clone role" };
+    logActionError("admin.roles.cloneRole", error, { sourceRoleId, newName });
+    return actionFailure("Failed to clone role");
   }
 }

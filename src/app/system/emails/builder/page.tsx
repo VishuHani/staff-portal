@@ -6,6 +6,14 @@ import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { EmailBuilderClient } from "./email-builder-client";
 
+function normalizeJsonRecord(value: Prisma.JsonValue | null): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
 export default async function EmailBuilderPage() {
   const session = await auth();
   if (!session?.userId) {
@@ -53,6 +61,11 @@ export default async function EmailBuilderPage() {
     ],
   });
 
+  const emailsForClient = emails.map((email) => ({
+    ...email,
+    designJson: normalizeJsonRecord(email.designJson),
+  }));
+
   // Get venues for filtering (admin only)
   let venues: Array<{ id: string; name: string; code: string }> = [];
   if (user.role.name === "ADMIN") {
@@ -65,7 +78,7 @@ export default async function EmailBuilderPage() {
   return (
     <DashboardLayout user={user}>
       <EmailBuilderClient
-        emails={emails}
+        emails={emailsForClient}
         venues={venues}
         isAdmin={user.role.name === "ADMIN"}
         userVenueId={user.venueId}

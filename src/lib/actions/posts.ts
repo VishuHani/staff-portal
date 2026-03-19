@@ -1,6 +1,12 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import {
+  actionFailure,
+  actionSuccess,
+  logActionError,
+  revalidatePaths,
+  type ActionResult,
+} from "@/lib/utils/action-contract";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess, canAccessVenue } from "@/lib/rbac/access";
 import { getSharedVenueUsers, getAccessibleChannelIds } from "@/lib/utils/venue";
@@ -22,6 +28,22 @@ import {
   type ChannelPermissions,
 } from "@/lib/types/channel-permissions";
 
+type PostListPayload = {
+  posts: any[];
+};
+
+type PostPayload = {
+  post: any;
+};
+
+type PostStatsPayload = {
+  stats: {
+    totalPosts: number;
+    myPosts: number;
+    myComments: number;
+  };
+};
+
 /**
  * Helper: Check if user has permission to perform action in channel
  */
@@ -30,6 +52,11 @@ async function checkChannelPermission(
   channelId: string,
   permissionKey: keyof Omit<ChannelPermissions, "isReadOnly" | "requiresApproval">
 ): Promise<{ allowed: boolean; error?: string; role?: string | null }> {
+  const accessibleChannelIds = await getAccessibleChannelIds(userId);
+  if (!accessibleChannelIds.includes(channelId)) {
+    return { allowed: false, error: "Channel not found" };
+  }
+
   // Get channel with permissions
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
@@ -89,7 +116,9 @@ async function checkChannelPermission(
  * 
  * FIX: Users can now see their own posts (previously excluded due to getSharedVenueUsers excluding self)
  */
-export async function getPosts(filters?: FilterPostsInput) {
+export async function getPosts(
+  filters?: FilterPostsInput
+): Promise<ActionResult<PostListPayload>> {
   const user = await requireAuth();
 
   try {
@@ -105,10 +134,16 @@ export async function getPosts(filters?: FilterPostsInput) {
 
     // Build the base filter conditions
     const buildWhereClause = () => {
+      const channelIds = validatedFilters.channelId
+        ? accessibleChannelIds.includes(validatedFilters.channelId)
+          ? [validatedFilters.channelId]
+          : []
+        : accessibleChannelIds;
+
       // If specific channelId filter is provided, use simpler logic
       if (validatedFilters.channelId) {
         return {
-          channelId: validatedFilters.channelId,
+          channelId: { in: channelIds },
           OR: [
             // User's own posts in this channel
             { authorId: user.id },
@@ -126,7 +161,7 @@ export async function getPosts(filters?: FilterPostsInput) {
 
       // General case: show posts from accessible channels
       return {
-        channelId: { in: accessibleChannelIds },
+        channelId: { in: channelIds },
         OR: [
           // User's own posts in any accessible channel
           { authorId: user.id },
@@ -191,17 +226,19 @@ export async function getPosts(filters?: FilterPostsInput) {
       }),
     });
 
-    return { success: true, posts };
+    return actionSuccess({ posts });
   } catch (error) {
-    console.error("Error fetching posts:", error);
-    return { error: "Failed to fetch posts" };
+    logActionError("getPosts", error);
+    return actionFailure("Failed to fetch posts");
   }
 }
 
 /**
  * Get a single post by ID with full details
  */
-export async function getPostById(id: string) {
+export async function getPostById(
+  id: string
+): Promise<ActionResult<PostPayload>> {
   const user = await requireAuth();
 
   try {
@@ -274,43 +311,49 @@ export async function getPostById(id: string) {
     });
 
     if (!post) {
-      return { error: "Post not found" };
+      return actionFailure("Post not found");
     }
 
     // VENUE FILTERING: Check if user has access to this post
     // FIX: Users can always access their own posts
     const isOwnPost = post.authorId === user.id;
     const hasVenueAccess = sharedVenueUserIds.includes(post.authorId);
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    const hasChannelAccess = accessibleChannelIds.includes(post.channelId);
     
-    if (!isOwnPost && !hasVenueAccess) {
-      return { error: "Post not found" };
+    if (!hasChannelAccess || (!isOwnPost && !hasVenueAccess)) {
+      return actionFailure("Post not found");
     }
 
-    return { success: true, post };
+    return actionSuccess({ post });
   } catch (error) {
-    console.error("Error fetching post:", error);
-    return { error: "Failed to fetch post" };
+    logActionError("getPostById", error);
+    return actionFailure("Failed to fetch post");
   }
 }
 
 /**
  * Create a new post
  */
-export async function createPost(data: CreatePostInput) {
+export async function createPost(
+  data: CreatePostInput
+): Promise<ActionResult<PostPayload>> {
   const user = await requireAuth();
 
   // Check if user has permission to create posts
   const hasAccess = await canAccess("posts", "create");
   if (!hasAccess) {
-    return { error: "You don't have permission to create posts" };
+    return actionFailure("You don't have permission to create posts");
   }
 
   const validatedFields = createPostSchema.safeParse(data);
   if (!validatedFields.success) {
-    console.error("Validation error:", validatedFields.error.flatten());
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    logActionError("createPost", validatedFields.error.flatten(), {
+      validation: true,
+    });
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { channelId, content, mediaUrls } = validatedFields.data;
@@ -324,7 +367,7 @@ export async function createPost(data: CreatePostInput) {
     );
 
     if (!permissionCheck.allowed) {
-      return { error: permissionCheck.error || "Permission denied" };
+      return actionFailure(permissionCheck.error || "Permission denied");
     }
 
     // Convert mediaUrls array to JSON string
@@ -364,26 +407,28 @@ export async function createPost(data: CreatePostInput) {
       },
     });
 
-    revalidatePath("/posts");
+    revalidatePaths("/posts");
 
-    return { success: true, post };
+    return actionSuccess({ post });
   } catch (error) {
-    console.error("Error creating post:", error);
-    return { error: "Failed to create post" };
+    logActionError("createPost", error);
+    return actionFailure("Failed to create post");
   }
 }
 
 /**
  * Update a post (own posts only)
  */
-export async function updatePost(data: UpdatePostInput) {
+export async function updatePost(
+  data: UpdatePostInput
+): Promise<ActionResult<PostPayload>> {
   const user = await requireAuth();
 
   const validatedFields = updatePostSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { id, content } = validatedFields.data;
@@ -400,22 +445,23 @@ export async function updatePost(data: UpdatePostInput) {
     });
 
     if (!existingPost) {
-      return { error: "Post not found" };
+      return actionFailure("Post not found");
     }
 
-    // Check if user owns the post (for canEditOwnPosts)
-    const isOwnPost = existingPost.authorId === user.id;
+    // Update own posts only. Cross-user edits are denied even if the channel would allow them.
+    if (existingPost.authorId !== user.id) {
+      return actionFailure("You can only edit your own posts");
+    }
 
-    // Check channel permission
-    const permissionKey = isOwnPost ? "canEditOwnPosts" : "canEditAnyPosts";
+    // Check channel permission for own edits
     const permissionCheck = await checkChannelPermission(
       user.id,
       existingPost.channelId,
-      permissionKey
+      "canEditOwnPosts"
     );
 
     if (!permissionCheck.allowed) {
-      return { error: permissionCheck.error || "Permission denied" };
+      return actionFailure(permissionCheck.error || "Permission denied");
     }
 
     const post = await prisma.post.update({
@@ -452,12 +498,12 @@ export async function updatePost(data: UpdatePostInput) {
       },
     });
 
-    revalidatePath("/posts");
+    revalidatePaths("/posts");
 
-    return { success: true, post };
+    return actionSuccess({ post });
   } catch (error) {
-    console.error("Error updating post:", error);
-    return { error: "Failed to update post" };
+    logActionError("updatePost", error);
+    return actionFailure("Failed to update post");
   }
 }
 
@@ -469,9 +515,9 @@ export async function deletePost(data: DeletePostInput) {
 
   const validatedFields = deletePostSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { id } = validatedFields.data;
@@ -488,7 +534,7 @@ export async function deletePost(data: DeletePostInput) {
     });
 
     if (!existingPost) {
-      return { error: "Post not found" };
+      return actionFailure("Post not found");
     }
 
     // Check if user owns the post (for canDeleteOwnPosts)
@@ -503,19 +549,19 @@ export async function deletePost(data: DeletePostInput) {
     );
 
     if (!permissionCheck.allowed) {
-      return { error: permissionCheck.error || "Permission denied" };
+      return actionFailure(permissionCheck.error || "Permission denied");
     }
 
     await prisma.post.delete({
       where: { id },
     });
 
-    revalidatePath("/posts");
+    revalidatePaths("/posts");
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error deleting post:", error);
-    return { error: "Failed to delete post" };
+    logActionError("deletePost", error);
+    return actionFailure("Failed to delete post");
   }
 }
 
@@ -528,9 +574,9 @@ export async function pinPost(data: PinPostInput) {
 
   const validatedFields = pinPostSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { id, pinned } = validatedFields.data;
@@ -546,7 +592,7 @@ export async function pinPost(data: PinPostInput) {
     });
 
     if (!existingPost) {
-      return { error: "Post not found" };
+      return actionFailure("Post not found");
     }
 
     // Check channel permission to pin posts
@@ -557,7 +603,7 @@ export async function pinPost(data: PinPostInput) {
     );
 
     if (!permissionCheck.allowed) {
-      return { error: permissionCheck.error || "Permission denied" };
+      return actionFailure(permissionCheck.error || "Permission denied");
     }
 
     const post = await prisma.post.update({
@@ -565,19 +611,19 @@ export async function pinPost(data: PinPostInput) {
       data: { pinned },
     });
 
-    revalidatePath("/posts");
+    revalidatePaths("/posts");
 
-    return { success: true, post };
+    return actionSuccess({ post });
   } catch (error) {
-    console.error("Error pinning post:", error);
-    return { error: "Failed to pin post" };
+    logActionError("pinPost", error);
+    return actionFailure("Failed to pin post");
   }
 }
 
 /**
  * Get posts by current user
  */
-export async function getMyPosts() {
+export async function getMyPosts(): Promise<ActionResult<PostListPayload>> {
   const user = await requireAuth();
 
   try {
@@ -602,27 +648,29 @@ export async function getMyPosts() {
       orderBy: { createdAt: "desc" },
     });
 
-    return { success: true, posts };
+    return actionSuccess({ posts });
   } catch (error) {
-    console.error("Error fetching my posts:", error);
-    return { error: "Failed to fetch your posts" };
+    logActionError("getMyPosts", error);
+    return actionFailure("Failed to fetch your posts");
   }
 }
 
 /**
  * Get post statistics
  */
-export async function getPostStats() {
+export async function getPostStats(): Promise<ActionResult<PostStatsPayload>> {
   const user = await requireAuth();
 
   try {
     // Get users in shared venues for venue filtering
     const sharedVenueUserIds = await getSharedVenueUsers(user.id);
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
 
     const [totalPosts, myPosts, totalComments] = await Promise.all([
       // VENUE FILTERING: Only count posts from users in shared venues
       prisma.post.count({
         where: {
+          channelId: { in: accessibleChannelIds },
           authorId: { in: sharedVenueUserIds },
         },
       }),
@@ -630,17 +678,16 @@ export async function getPostStats() {
       prisma.comment.count({ where: { userId: user.id } }),
     ]);
 
-    return {
-      success: true,
+    return actionSuccess({
       stats: {
         totalPosts,
         myPosts,
         myComments: totalComments,
       },
-    };
+    });
   } catch (error) {
-    console.error("Error fetching post stats:", error);
-    return { error: "Failed to fetch statistics" };
+    logActionError("getPostStats", error);
+    return actionFailure("Failed to fetch statistics");
   }
 }
 
@@ -651,6 +698,20 @@ export async function markPostAsRead(postId: string) {
   const user = await requireAuth();
 
   try {
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      select: { channelId: true },
+    });
+
+    if (!post) {
+      return actionFailure("Post not found");
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(post.channelId)) {
+      return actionFailure("Post not found");
+    }
+
     // Use upsert to avoid duplicates
     await prisma.postRead.upsert({
       where: {
@@ -669,12 +730,12 @@ export async function markPostAsRead(postId: string) {
     });
 
     // Revalidate to update unread counts
-    revalidatePath("/posts");
+    revalidatePaths("/posts");
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error marking post as read:", error);
-    return { error: "Failed to mark post as read" };
+    logActionError("markPostAsRead", error);
+    return actionFailure("Failed to mark post as read");
   }
 }
 
@@ -685,6 +746,28 @@ export async function markPostsAsRead(postIds: string[]) {
   const user = await requireAuth();
 
   try {
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    const posts = await prisma.post.findMany({
+      where: {
+        id: { in: postIds },
+      },
+      select: {
+        id: true,
+        channelId: true,
+      },
+    });
+
+    if (posts.length !== postIds.length) {
+      return actionFailure("Post not found");
+    }
+
+    const hasInaccessiblePost = posts.some(
+      (post) => !accessibleChannelIds.includes(post.channelId)
+    );
+    if (hasInaccessiblePost) {
+      return actionFailure("Post not found");
+    }
+
     // Create read records for all posts that haven't been read yet
     const readRecords = postIds.map((postId) => ({
       userId: user.id,
@@ -698,22 +781,29 @@ export async function markPostsAsRead(postIds: string[]) {
       skipDuplicates: true,
     });
 
-    revalidatePath("/posts");
+    revalidatePaths("/posts");
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error marking posts as read:", error);
-    return { error: "Failed to mark posts as read" };
+    logActionError("markPostsAsRead", error);
+    return actionFailure("Failed to mark posts as read");
   }
 }
 
 /**
  * Get unread count for a specific channel
  */
-export async function getUnreadCountForChannel(channelId: string) {
+export async function getUnreadCountForChannel(
+  channelId: string
+): Promise<ActionResult<{ unreadCount: number }>> {
   const user = await requireAuth();
 
   try {
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(channelId)) {
+      return actionFailure("Channel not found");
+    }
+
     // Count posts in channel that the user hasn't read
     const unreadCount = await prisma.post.count({
       where: {
@@ -726,9 +816,9 @@ export async function getUnreadCountForChannel(channelId: string) {
       },
     });
 
-    return { success: true, unreadCount };
+    return actionSuccess({ unreadCount });
   } catch (error) {
-    console.error("Error getting unread count:", error);
-    return { error: "Failed to get unread count" };
+    logActionError("getUnreadCountForChannel", error);
+    return actionFailure("Failed to get unread count");
   }
 }

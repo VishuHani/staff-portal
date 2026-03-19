@@ -5,28 +5,34 @@ import { ChannelsPageClient } from "./channels-page-client";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { getUnreadCount } from "@/lib/actions/notifications";
 import { getUnreadMessageCount } from "@/lib/actions/messages";
+import { getUserVenueIds } from "@/lib/utils/venue";
 
 export const metadata = {
   title: "Channel Management | Admin",
   description: "Manage channels and members",
 };
 
-async function getChannelsData(userId: string, isManager: boolean, managerVenueIds: string[] | null) {
+async function getChannelsData(isAdmin: boolean, userVenueIds: string[] | null) {
   // Build channel filter based on user role
+  const noVenueAccess = !isAdmin && (!userVenueIds || userVenueIds.length === 0);
   let channelWhere: any = {};
 
-  // If manager, filter to channels where all members are from manager's venues
-  if (isManager && managerVenueIds && managerVenueIds.length > 0) {
-    // Get channels assigned to manager's venues
-    const channelVenues = await prisma.channelVenue.findMany({
-      where: {
-        venueId: { in: managerVenueIds },
-      },
-      select: { channelId: true },
-    });
-
-    const channelIds = channelVenues.map((cv) => cv.channelId);
-    channelWhere.id = { in: channelIds };
+  // Non-admin users only see channels assigned to their venues or public channels
+  if (!isAdmin) {
+    if (noVenueAccess) {
+      channelWhere.id = "impossible-id-no-venues";
+    } else if (userVenueIds) {
+      channelWhere.OR = [
+        { isPublic: true },
+        {
+          venues: {
+            some: {
+              venueId: { in: userVenueIds },
+            },
+          },
+        },
+      ];
+    }
   }
 
   // Get all channels with member counts and creator info
@@ -72,13 +78,17 @@ async function getChannelsData(userId: string, isManager: boolean, managerVenueI
   // Build user filter based on user role
   let userWhere: any = { active: true };
 
-  // If manager, filter to users from manager's venues
-  if (isManager && managerVenueIds && managerVenueIds.length > 0) {
-    userWhere.venues = {
-      some: {
-        venueId: { in: managerVenueIds },
-      },
-    };
+  // Non-admin users only see users from their venues
+  if (!isAdmin) {
+    if (noVenueAccess) {
+      userWhere.id = "impossible-id-no-venues";
+    } else if (userVenueIds) {
+      userWhere.venues = {
+        some: {
+          venueId: { in: userVenueIds },
+        },
+      };
+    }
   }
 
   // Get all active users for wizard
@@ -126,9 +136,13 @@ async function getChannelsData(userId: string, isManager: boolean, managerVenueI
   // Build venue filter based on user role
   let venueWhere: any = { active: true };
 
-  // If manager, filter to only manager's venues
-  if (isManager && managerVenueIds && managerVenueIds.length > 0) {
-    venueWhere.id = { in: managerVenueIds };
+  // Non-admin users only see their assigned venues
+  if (!isAdmin) {
+    if (noVenueAccess) {
+      venueWhere.id = "impossible-id-no-venues";
+    } else if (userVenueIds) {
+      venueWhere.id = { in: userVenueIds };
+    }
   }
 
   // Get all venues for filtering
@@ -187,19 +201,22 @@ export default async function AdminChannelsPage() {
     redirect("/dashboard");
   }
 
-  // Check if user is a manager
-  const isManager = userWithRole?.role.name === "MANAGER";
-  const managerVenueIds = isManager && userWithRole.venues.length > 0
-    ? userWithRole.venues.map((uv) => uv.venue.id)
-    : null;
+  const isAdmin = userWithRole?.role.name === "ADMIN";
+  const userVenues = userWithRole?.venues ?? [];
+  const userVenueIds = isAdmin && userVenues.length > 0
+    ? null
+    : userVenues.map((uv) => uv.venue.id);
 
-  const data = await getChannelsData(user.id, isManager, managerVenueIds);
+  const data = await getChannelsData(isAdmin, userVenueIds);
 
   // Get unread counts for header
   const [unreadResult, messageCountResult] = await Promise.all([
     getUnreadCount({ userId: user.id }),
     getUnreadMessageCount(),
   ]);
+  const unreadMessageCount = messageCountResult.success
+    ? (messageCountResult.count ?? 0)
+    : 0;
 
   return (
     <DashboardLayout
@@ -213,7 +230,7 @@ export default async function AdminChannelsPage() {
         },
       }}
       unreadCount={unreadResult.count || 0}
-      unreadMessageCount={messageCountResult.count || 0}
+      unreadMessageCount={unreadMessageCount}
     >
       <ChannelsPageClient
         initialChannels={data.channels}

@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/actions/auth';
 import { hasPermission } from '@/lib/rbac/permissions';
+import { apiError, apiSuccess } from '@/lib/utils/api-response';
 
 interface VenuePayConfigRequest {
   venueId: string;
@@ -24,30 +25,30 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return apiError('Unauthorized', 401);
     }
 
     const { searchParams } = new URL(request.url);
     const venueId = searchParams.get('venueId');
 
     if (!venueId) {
-      return NextResponse.json({ error: 'Venue ID is required' }, { status: 400 });
+      return apiError('Venue ID is required', 400);
     }
 
     // Check permissions - use 'venues' resource with 'manage' action
     const canManage = await hasPermission(user.id, 'venues', 'manage', venueId);
     if (!canManage) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      return apiError('Forbidden', 403);
     }
 
     const payConfig = await prisma.venuePayConfig.findUnique({
       where: { venueId },
     });
 
-    return NextResponse.json({ payConfig });
+    return apiSuccess({ payConfig });
   } catch (error) {
     console.error('Error fetching venue pay config:', error);
-    return NextResponse.json({ error: 'Failed to fetch pay config' }, { status: 500 });
+    return apiError('Failed to fetch pay config');
   }
 }
 
@@ -55,20 +56,20 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return apiError('Unauthorized', 401);
     }
 
     const body: VenuePayConfigRequest = await request.json();
 
     // Validate required fields
     if (!body.venueId) {
-      return NextResponse.json({ error: 'Venue ID is required' }, { status: 400 });
+      return apiError('Venue ID is required', 400);
     }
 
     // Check permissions - use 'venues' resource with 'manage' action
     const canManage = await hasPermission(user.id, 'venues', 'manage', body.venueId);
     if (!canManage) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      return apiError('Forbidden', 403);
     }
 
     // Upsert venue pay config
@@ -107,13 +108,10 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({ 
-      success: true,
-      payConfig 
-    });
+    return apiSuccess({ payConfig });
   } catch (error) {
     console.error('Error saving venue pay config:', error);
-    return NextResponse.json({ error: 'Failed to save pay config' }, { status: 500 });
+    return apiError('Failed to save pay config');
   }
 }
 
@@ -121,20 +119,20 @@ export async function DELETE(request: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return apiError('Unauthorized', 401);
     }
 
     const { searchParams } = new URL(request.url);
     const venueId = searchParams.get('venueId');
 
     if (!venueId) {
-      return NextResponse.json({ error: 'Venue ID is required' }, { status: 400 });
+      return apiError('Venue ID is required', 400);
     }
 
     // Check permissions - use 'venues' resource with 'manage' action
     const canManage = await hasPermission(user.id, 'venues', 'manage', venueId);
     if (!canManage) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      return apiError('Forbidden', 403);
     }
 
     // Delete venue pay config
@@ -142,9 +140,9 @@ export async function DELETE(request: NextRequest) {
       where: { venueId },
     });
 
-    return NextResponse.json({ success: true });
+    return apiSuccess({ deleted: true });
   } catch (error) {
     console.error('Error deleting venue pay config:', error);
-    return NextResponse.json({ error: 'Failed to delete pay config' }, { status: 500 });
+    return apiError('Failed to delete pay config');
   }
 }

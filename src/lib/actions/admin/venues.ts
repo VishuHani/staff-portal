@@ -1,11 +1,19 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin, requireAnyPermission } from "@/lib/rbac/access";
 import { getUserVenueIds } from "@/lib/utils/venue";
 import { isAdmin } from "@/lib/rbac/permissions";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
+import {
+  actionFailure,
+  actionSuccess,
+  isPrismaUniqueViolation,
+  logActionError,
+  revalidatePaths,
+  type ActionResult,
+} from "@/lib/utils/action-contract";
 import {
   createVenueSchema,
   updateVenueSchema,
@@ -21,7 +29,9 @@ import {
  * Get all venues
  * Admin only
  */
-export async function getAllVenues() {
+export async function getAllVenues(): Promise<
+  ActionResult<{ venues: Awaited<ReturnType<typeof prisma.venue.findMany>> }>
+> {
   await requireAdmin();
 
   try {
@@ -38,10 +48,10 @@ export async function getAllVenues() {
       },
     });
 
-    return { success: true, venues };
+    return actionSuccess({ venues });
   } catch (error) {
-    console.error("Error fetching venues:", error);
-    return { error: "Failed to fetch venues" };
+    logActionError("Error fetching venues", error);
+    return actionFailure("Failed to fetch venues");
   }
 }
 
@@ -49,7 +59,13 @@ export async function getAllVenues() {
  * Get a single venue by ID
  * Admin only
  */
-export async function getVenueById(venueId: string) {
+export async function getVenueById(
+  venueId: string
+): Promise<
+  ActionResult<{
+    venue: NonNullable<Awaited<ReturnType<typeof prisma.venue.findUnique>>>;
+  }>
+> {
   await requireAdmin();
 
   try {
@@ -84,13 +100,13 @@ export async function getVenueById(venueId: string) {
     });
 
     if (!venue) {
-      return { error: "Venue not found" };
+      return actionFailure("Venue not found");
     }
 
-    return { success: true, venue };
+    return actionSuccess({ venue });
   } catch (error) {
-    console.error("Error fetching venue:", error);
-    return { error: "Failed to fetch venue" };
+    logActionError("Error fetching venue", error, { venueId });
+    return actionFailure("Failed to fetch venue");
   }
 }
 
@@ -98,7 +114,15 @@ export async function getVenueById(venueId: string) {
  * Get venue statistics
  * Admin only
  */
-export async function getVenueStats() {
+export async function getVenueStats(): Promise<
+  ActionResult<{
+    stats: {
+      total: number;
+      active: number;
+      inactive: number;
+    };
+  }>
+> {
   await requireAdmin();
 
   try {
@@ -108,17 +132,16 @@ export async function getVenueStats() {
       prisma.venue.count({ where: { active: false } }),
     ]);
 
-    return {
-      success: true,
+    return actionSuccess({
       stats: {
         total,
         active,
         inactive,
       },
-    };
+    });
   } catch (error) {
-    console.error("Error fetching venue stats:", error);
-    return { error: "Failed to fetch venue statistics" };
+    logActionError("Error fetching venue stats", error);
+    return actionFailure("Failed to fetch venue statistics");
   }
 }
 
@@ -126,14 +149,18 @@ export async function getVenueStats() {
  * Create a new venue
  * Admin only
  */
-export async function createVenue(data: CreateVenueInput) {
+export async function createVenue(
+  data: CreateVenueInput
+): Promise<
+  ActionResult<{ venue: Awaited<ReturnType<typeof prisma.venue.create>> }>
+> {
   const admin = await requireAdmin();
 
   const validatedFields = createVenueSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const {
@@ -145,19 +172,10 @@ export async function createVenue(data: CreateVenueInput) {
     active,
     businessHoursStart,
     businessHoursEnd,
-    operatingDays
+    operatingDays,
   } = validatedFields.data;
 
   try {
-    // Check if code already exists
-    const existingVenue = await prisma.venue.findUnique({
-      where: { code },
-    });
-
-    if (existingVenue) {
-      return { error: "A venue with this code already exists" };
-    }
-
     const venue = await prisma.venue.create({
       data: {
         name,
@@ -186,15 +204,21 @@ export async function createVenue(data: CreateVenueInput) {
         }),
       });
     } catch (auditError) {
-      console.error("Error creating audit log:", auditError);
+      logActionError("Error creating venue audit log", auditError, {
+        venueId: venue.id,
+      });
     }
 
-    revalidatePath("/admin/stores");
+    revalidatePaths(["/admin/stores"]);
 
-    return { success: true, venue };
+    return actionSuccess({ venue });
   } catch (error) {
-    console.error("Error creating venue:", error);
-    return { error: "Failed to create venue" };
+    if (isPrismaUniqueViolation(error)) {
+      return actionFailure("A venue with this code already exists");
+    }
+
+    logActionError("Error creating venue", error, { code });
+    return actionFailure("Failed to create venue");
   }
 }
 
@@ -202,14 +226,18 @@ export async function createVenue(data: CreateVenueInput) {
  * Update a venue
  * Admin only
  */
-export async function updateVenue(data: UpdateVenueInput) {
+export async function updateVenue(
+  data: UpdateVenueInput
+): Promise<
+  ActionResult<{ venue: Awaited<ReturnType<typeof prisma.venue.update>> }>
+> {
   const admin = await requireAdmin();
 
   const validatedFields = updateVenueSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const {
@@ -232,23 +260,7 @@ export async function updateVenue(data: UpdateVenueInput) {
     });
 
     if (!oldVenue) {
-      return { error: "Venue not found" };
-    }
-
-    // Check if code is already taken by another venue
-    if (code) {
-      const existingVenue = await prisma.venue.findFirst({
-        where: {
-          code,
-          NOT: {
-            id: venueId,
-          },
-        },
-      });
-
-      if (existingVenue) {
-        return { error: "Venue code already in use" };
-      }
+      return actionFailure("Venue not found");
     }
 
     const venue = await prisma.venue.update({
@@ -295,16 +307,19 @@ export async function updateVenue(data: UpdateVenueInput) {
         }),
       });
     } catch (auditError) {
-      console.error("Error creating audit log:", auditError);
+      logActionError("Error updating venue audit log", auditError, { venueId });
     }
 
-    revalidatePath("/admin/stores");
-    revalidatePath(`/admin/stores/${venueId}`);
+    revalidatePaths(["/admin/stores", `/admin/stores/${venueId}`]);
 
-    return { success: true, venue };
+    return actionSuccess({ venue });
   } catch (error) {
-    console.error("Error updating venue:", error);
-    return { error: "Failed to update venue" };
+    if (isPrismaUniqueViolation(error)) {
+      return actionFailure("Venue code already in use");
+    }
+
+    logActionError("Error updating venue", error, { venueId });
+    return actionFailure("Failed to update venue");
   }
 }
 
@@ -314,14 +329,16 @@ export async function updateVenue(data: UpdateVenueInput) {
  *
  * Note: This will also delete all UserVenue assignments due to cascade
  */
-export async function deleteVenue(data: DeleteVenueInput) {
+export async function deleteVenue(
+  data: DeleteVenueInput
+): Promise<ActionResult<{}>> {
   const admin = await requireAdmin();
 
   const validatedFields = deleteVenueSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { venueId } = validatedFields.data;
@@ -333,7 +350,7 @@ export async function deleteVenue(data: DeleteVenueInput) {
     });
 
     if (!venue) {
-      return { error: "Venue not found" };
+      return actionFailure("Venue not found");
     }
 
     // Check if venue has users assigned
@@ -342,9 +359,9 @@ export async function deleteVenue(data: DeleteVenueInput) {
     });
 
     if (userCount > 0) {
-      return {
-        error: `Cannot delete venue: ${userCount} user${userCount !== 1 ? "s are" : " is"} assigned to this venue. Please reassign users first.`,
-      };
+      return actionFailure(
+        `Cannot delete venue: ${userCount} user${userCount !== 1 ? "s are" : " is"} assigned to this venue. Please reassign users first.`
+      );
     }
 
     // Check if this is a user's venueId (legacy single-venue field)
@@ -353,9 +370,9 @@ export async function deleteVenue(data: DeleteVenueInput) {
     });
 
     if (legacyUserCount > 0) {
-      return {
-        error: `Cannot delete venue: ${legacyUserCount} user${legacyUserCount !== 1 ? "s have" : " has"} this venue set as their primary venue. Please update users first.`,
-      };
+      return actionFailure(
+        `Cannot delete venue: ${legacyUserCount} user${legacyUserCount !== 1 ? "s have" : " has"} this venue set as their primary venue. Please update users first.`
+      );
     }
 
     await prisma.venue.delete({
@@ -376,15 +393,15 @@ export async function deleteVenue(data: DeleteVenueInput) {
         }),
       });
     } catch (auditError) {
-      console.error("Error creating audit log:", auditError);
+      logActionError("Error deleting venue audit log", auditError, { venueId });
     }
 
-    revalidatePath("/admin/stores");
+    revalidatePaths(["/admin/stores"]);
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error deleting venue:", error);
-    return { error: "Failed to delete venue" };
+    logActionError("Error deleting venue", error, { venueId });
+    return actionFailure("Failed to delete venue");
   }
 }
 
@@ -392,14 +409,18 @@ export async function deleteVenue(data: DeleteVenueInput) {
  * Toggle venue active status
  * Admin only
  */
-export async function toggleVenueActive(data: ToggleVenueActiveInput) {
+export async function toggleVenueActive(
+  data: ToggleVenueActiveInput
+): Promise<
+  ActionResult<{ venue: Awaited<ReturnType<typeof prisma.venue.update>> }>
+> {
   await requireAdmin();
 
   const validatedFields = toggleVenueActiveSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { venueId } = validatedFields.data;
@@ -411,7 +432,7 @@ export async function toggleVenueActive(data: ToggleVenueActiveInput) {
     });
 
     if (!venue) {
-      return { error: "Venue not found" };
+      return actionFailure("Venue not found");
     }
 
     const newActiveStatus = !venue.active;
@@ -429,13 +450,12 @@ export async function toggleVenueActive(data: ToggleVenueActiveInput) {
       },
     });
 
-    revalidatePath("/admin/stores");
-    revalidatePath(`/admin/stores/${venueId}`);
+    revalidatePaths(["/admin/stores", `/admin/stores/${venueId}`]);
 
-    return { success: true, venue: updatedVenue };
+    return actionSuccess({ venue: updatedVenue });
   } catch (error) {
-    console.error("Error toggling venue active status:", error);
-    return { error: "Failed to toggle venue status" };
+    logActionError("Error toggling venue active status", error, { venueId });
+    return actionFailure("Failed to toggle venue status");
   }
 }
 
@@ -443,7 +463,19 @@ export async function toggleVenueActive(data: ToggleVenueActiveInput) {
  * Get all active venues (for dropdowns, etc.)
  * Admin/Manager with permissions
  */
-export async function getActiveVenues() {
+export async function getActiveVenues(): Promise<
+  ActionResult<{
+    venues: {
+      id: string;
+      name: string;
+      code: string;
+      active: boolean;
+      businessHoursStart: string | null;
+      businessHoursEnd: string | null;
+      operatingDays: Prisma.JsonValue;
+    }[];
+  }>
+> {
   // Allow managers and admins with appropriate permissions
   const currentUser = await requireAnyPermission([
     { resource: "users", action: "view_team" },
@@ -464,7 +496,7 @@ export async function getActiveVenues() {
       const venueIds = await getUserVenueIds(currentUser.id);
       if (venueIds.length === 0) {
         // No venues assigned - return empty list
-        return { success: true, venues: [] };
+        return actionSuccess({ venues: [] });
       }
 
       whereClause = {
@@ -491,9 +523,9 @@ export async function getActiveVenues() {
       },
     });
 
-    return { success: true, venues };
+    return actionSuccess({ venues });
   } catch (error) {
-    console.error("Error fetching active venues:", error);
-    return { error: "Failed to fetch venues" };
+    logActionError("Error fetching active venues", error);
+    return actionFailure("Failed to fetch venues");
   }
 }

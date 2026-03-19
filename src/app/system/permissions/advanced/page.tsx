@@ -9,11 +9,11 @@ export default async function AdvancedPermissionsPage() {
 
   const rolesResult = await getAllRoles();
 
-  if ("error" in rolesResult) {
+  if (rolesResult.error) {
     redirect("/dashboard?error=forbidden");
   }
 
-  const { roles } = rolesResult;
+  const roles = rolesResult.roles ?? [];
 
   return (
     <DashboardLayout user={user}>

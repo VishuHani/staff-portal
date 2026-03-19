@@ -1,11 +1,16 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import type { EmailContentScope as PrismaEmailContentScope } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
 import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
-import { hasPermission, isAdmin, type PermissionAction } from "@/lib/rbac/permissions";
+import {
+  hasPermission,
+  isAdmin,
+  type PermissionAction,
+} from "@/lib/rbac/permissions";
 import {
   getNextRunAt,
   validateRecurrenceRule,
@@ -22,13 +27,15 @@ import {
   validateFolderAssignment,
 } from "@/lib/email-workspace/folder-access";
 
-type EmailContentScope = "PRIVATE" | "TEAM" | "SYSTEM";
+type EmailContentScope = PrismaEmailContentScope;
 
-type ReportDefinitionCreateData = Parameters<typeof prisma.emailReportDefinition.create>[0]["data"];
-type ReportDefinitionUpdateData = Parameters<typeof prisma.emailReportDefinition.update>[0]["data"];
-type ReportDefinitionWhereInput = NonNullable<
-  Parameters<typeof prisma.emailReportDefinition.findMany>[0]
->["where"];
+type ReportDefinitionCreateData = Parameters<
+  typeof prisma.emailReportDefinition.create
+>[0]["data"];
+type ReportDefinitionUpdateData = Parameters<
+  typeof prisma.emailReportDefinition.update
+>[0]["data"];
+type ReportDefinitionWhereInput = Prisma.EmailReportDefinitionWhereInput;
 
 export type EmailReportDeliveryConfig = ReportDeliveryConfig;
 
@@ -97,7 +104,7 @@ export interface CreateReportDefinitionInput {
   scope?: EmailContentScope;
   venueId?: string | null;
   isScheduled?: boolean;
-  recurrenceRuleJson?: Record<string, unknown> | null;
+  recurrenceRuleJson?: EmailRecurrenceRule | null;
   nextRunAt?: Date | null;
 }
 
@@ -111,7 +118,7 @@ export interface UpdateReportDefinitionInput {
   scope?: EmailContentScope;
   venueId?: string | null;
   isScheduled?: boolean;
-  recurrenceRuleJson?: Record<string, unknown> | null;
+  recurrenceRuleJson?: EmailRecurrenceRule | null;
   nextRunAt?: Date | null;
 }
 
@@ -171,14 +178,19 @@ function isReportSchemaMissingError(error: unknown): boolean {
     }
 
     if (error.code === "P2010") {
-      const meta = error.meta as { code?: string; message?: string } | undefined;
+      const meta = error.meta as
+        | { code?: string; message?: string }
+        | undefined;
       if (meta?.code === "42P01" || meta?.code === "42703") {
         return true;
       }
 
       if (typeof meta?.message === "string") {
         const message = meta.message.toLowerCase();
-        if (message.includes("email_report_definitions") || message.includes("email_report_runs")) {
+        if (
+          message.includes("email_report_definitions") ||
+          message.includes("email_report_runs")
+        ) {
           return true;
         }
       }
@@ -186,7 +198,10 @@ function isReportSchemaMissingError(error: unknown): boolean {
   }
 
   const message = String(error).toLowerCase();
-  return message.includes("email_report_definitions") || message.includes("email_report_runs");
+  return (
+    message.includes("email_report_definitions") ||
+    message.includes("email_report_runs")
+  );
 }
 
 function getSchemaMissingMessage() {
@@ -250,7 +265,11 @@ function canReadDefinition(
     return true;
   }
 
-  if (definition.scope === "TEAM" && definition.venueId && userVenueIds.includes(definition.venueId)) {
+  if (
+    definition.scope === "TEAM" &&
+    definition.venueId &&
+    userVenueIds.includes(definition.venueId)
+  ) {
     return true;
   }
 
@@ -320,7 +339,10 @@ function getResolvedScopeAndVenue(input: {
     };
   }
 
-  if (input.requestedVenueId && !input.userVenueIds.includes(input.requestedVenueId)) {
+  if (
+    input.requestedVenueId &&
+    !input.userVenueIds.includes(input.requestedVenueId)
+  ) {
     return {
       scope: "PRIVATE",
       venueId: null,
@@ -334,7 +356,9 @@ function getResolvedScopeAndVenue(input: {
   };
 }
 
-function parseRecurrenceRule(value: Prisma.JsonValue | null): EmailRecurrenceRule | null {
+function parseRecurrenceRule(
+  value: Prisma.JsonValue | null
+): EmailRecurrenceRule | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
@@ -356,7 +380,9 @@ function parseRecurrenceRule(value: Prisma.JsonValue | null): EmailRecurrenceRul
   };
 }
 
-function parseDeliveryConfig(value: Prisma.JsonValue): EmailReportDeliveryConfig | null {
+function parseDeliveryConfig(
+  value: Prisma.JsonValue
+): EmailReportDeliveryConfig | null {
   return extractDeliveryConfigFromConfigJson(value);
 }
 
@@ -400,14 +426,18 @@ function computeDeliveryHealth(
 ): EmailReportDeliveryHealth | null {
   const dispatches = runs
     .map((run) => parseRunDeliveryDispatch(run.deliveryConfigJson))
-    .filter((dispatch): dispatch is NonNullable<typeof dispatch> => Boolean(dispatch));
+    .filter((dispatch): dispatch is NonNullable<typeof dispatch> =>
+      Boolean(dispatch)
+    );
 
   if (dispatches.length === 0) {
     return null;
   }
 
   const totalAttempts = dispatches.length;
-  const successfulAttempts = dispatches.filter((dispatch) => dispatch.delivered).length;
+  const successfulAttempts = dispatches.filter(
+    (dispatch) => dispatch.delivered
+  ).length;
   const successRate = successfulAttempts / totalAttempts;
 
   let consecutiveFailures = 0;
@@ -438,28 +468,26 @@ function computeDeliveryHealth(
   };
 }
 
-function toDefinitionSummary(
-  definition: {
-    id: string;
-    folderId: string | null;
-    name: string;
-    description: string | null;
-    reportType: string;
-    scope: EmailContentScope;
-    venueId: string | null;
-    ownerId: string;
-    isScheduled: boolean;
-    configJson: Prisma.JsonValue;
-    recurrenceRuleJson: Prisma.JsonValue | null;
-    nextRunAt: Date | null;
-    createdAt: Date;
-    updatedAt: Date;
-    _count?: { runs: number };
-    runs?: Array<{
-      deliveryConfigJson: Prisma.JsonValue | null;
-    }>;
-  }
-): EmailReportDefinitionSummary {
+function toDefinitionSummary(definition: {
+  id: string;
+  folderId: string | null;
+  name: string;
+  description: string | null;
+  reportType: string;
+  scope: EmailContentScope;
+  venueId: string | null;
+  ownerId: string;
+  isScheduled: boolean;
+  configJson: Prisma.JsonValue;
+  recurrenceRuleJson: Prisma.JsonValue | null;
+  nextRunAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  _count?: { runs: number };
+  runs?: Array<{
+    deliveryConfigJson: Prisma.JsonValue | null;
+  }>;
+}): EmailReportDefinitionSummary {
   return {
     id: definition.id,
     folderId: definition.folderId,
@@ -582,7 +610,14 @@ export async function listReportDefinitions(
       whereClauses.push({ reportType: input.reportType.trim() });
     }
 
-    const where: ReportDefinitionWhereInput = whereClauses.length > 0 ? { AND: whereClauses } : {};
+    const where: ReportDefinitionWhereInput =
+      whereClauses.length > 0
+        ? {
+            AND: whereClauses.filter(
+              (clause): clause is ReportDefinitionWhereInput => Boolean(clause)
+            ),
+          }
+        : {};
     const take = Math.max(1, Math.min(input.take ?? 100, 250));
 
     const definitions = await prisma.emailReportDefinition.findMany({
@@ -706,13 +741,15 @@ export async function createReportDefinition(
       name: trimmedName,
       description: input.description?.trim() || null,
       reportType: trimmedReportType,
-      configJson: (input.configJson || { windowDays: 30 }) as Prisma.InputJsonValue,
+      configJson: (input.configJson || {
+        windowDays: 30,
+      }) as Prisma.InputJsonValue,
       scope: scopeResolution.scope,
       venueId: scopeResolution.venueId,
       ownerId: user.id,
       isScheduled: input.isScheduled || false,
       recurrenceRuleJson: input.recurrenceRuleJson
-        ? (input.recurrenceRuleJson as Prisma.InputJsonValue)
+        ? (input.recurrenceRuleJson as unknown as Prisma.InputJsonValue)
         : null,
       nextRunAt: input.nextRunAt || null,
     };
@@ -736,11 +773,13 @@ export async function createReportDefinition(
         };
       }
 
-      createData.nextRunAt = input.nextRunAt || getNextRunAt(recurrence, new Date());
+      createData.nextRunAt =
+        input.nextRunAt || getNextRunAt(recurrence, new Date());
       if (!createData.nextRunAt) {
         return {
           success: false,
-          error: "Unable to calculate the next scheduled run from recurrence settings.",
+          error:
+            "Unable to calculate the next scheduled run from recurrence settings.",
         };
       }
     } else {
@@ -763,7 +802,10 @@ export async function createReportDefinition(
         },
       });
     } catch (createError) {
-      if (createData.folderId !== undefined && isReportSchemaMissingError(createError)) {
+      if (
+        createData.folderId !== undefined &&
+        isReportSchemaMissingError(createError)
+      ) {
         delete createData.folderId;
         definition = await prisma.emailReportDefinition.create({
           data: createData as ReportDefinitionCreateData,
@@ -873,15 +915,13 @@ export async function updateReportDefinition(
       updateData.configJson = (input.configJson as Prisma.InputJsonValue) || {};
     }
 
-    if (
-      input.scope !== undefined ||
-      input.venueId !== undefined
-    ) {
+    if (input.scope !== undefined || input.venueId !== undefined) {
       const scopeResolution = getResolvedScopeAndVenue({
         isAdminUser,
         userVenueIds,
         requestedScope: input.scope || existing.scope,
-        requestedVenueId: input.venueId !== undefined ? input.venueId : existing.venueId,
+        requestedVenueId:
+          input.venueId !== undefined ? input.venueId : existing.venueId,
       });
 
       if (scopeResolution.error) {
@@ -901,7 +941,7 @@ export async function updateReportDefinition(
 
     if (input.recurrenceRuleJson !== undefined) {
       updateData.recurrenceRuleJson = input.recurrenceRuleJson
-        ? (input.recurrenceRuleJson as Prisma.InputJsonValue)
+        ? (input.recurrenceRuleJson as unknown as Prisma.InputJsonValue)
         : null;
     }
 
@@ -909,7 +949,8 @@ export async function updateReportDefinition(
       updateData.nextRunAt = input.nextRunAt;
     }
 
-    const resolvedIsScheduled = (updateData.isScheduled as boolean | undefined) ?? existing.isScheduled;
+    const resolvedIsScheduled =
+      (updateData.isScheduled as boolean | undefined) ?? existing.isScheduled;
     const resolvedRecurrence = parseRecurrenceRule(
       (updateData.recurrenceRuleJson as Prisma.JsonValue | null | undefined) ??
         (existing.recurrenceRuleJson as Prisma.JsonValue | null)
@@ -979,7 +1020,10 @@ export async function updateReportDefinition(
         },
       });
     } catch (updateError) {
-      if (updateData.folderId !== undefined && isReportSchemaMissingError(updateError)) {
+      if (
+        updateData.folderId !== undefined &&
+        isReportSchemaMissingError(updateError)
+      ) {
         delete updateData.folderId;
         definition = await prisma.emailReportDefinition.update({
           where: { id: input.id },
@@ -1055,7 +1099,11 @@ export async function deleteReportDefinition(
     }
 
     const isAdminUser = await isAdmin(user.id);
-    if (!isAdminUser && definition.ownerId !== user.id && definition.scope === "SYSTEM") {
+    if (
+      !isAdminUser &&
+      definition.ownerId !== user.id &&
+      definition.scope === "SYSTEM"
+    ) {
       return {
         success: false,
         error: "Only admins can delete system-scoped report definitions.",
@@ -1184,7 +1232,9 @@ export async function runReportDefinition(
       },
     };
 
-    const deliveryConfig = extractDeliveryConfigFromConfigJson(definition.configJson);
+    const deliveryConfig = extractDeliveryConfigFromConfigJson(
+      definition.configJson
+    );
 
     const run = await prisma.emailReportRun.create({
       data: {
@@ -1198,7 +1248,7 @@ export async function runReportDefinition(
               channel: deliveryConfig.channel,
               destination: deliveryConfig.destination,
             } as Prisma.InputJsonValue)
-          : null,
+          : Prisma.JsonNull,
       },
     });
 
@@ -1214,7 +1264,10 @@ export async function runReportDefinition(
       await prisma.emailReportRun.update({
         where: { id: run.id },
         data: {
-          deliveryConfigJson: buildRunDeliveryMetadata(deliveryConfig, deliveryOutcome),
+          deliveryConfigJson: buildRunDeliveryMetadata(
+            deliveryConfig,
+            deliveryOutcome
+          ),
         },
       });
     }

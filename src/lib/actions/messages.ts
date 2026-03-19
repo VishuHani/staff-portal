@@ -1,6 +1,11 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import {
+  actionFailure,
+  actionSuccess,
+  logActionError,
+  type ActionResult,
+} from "@/lib/utils/action-contract";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
 import { getSharedVenueUsers } from "@/lib/utils/venue";
@@ -42,6 +47,16 @@ import {
   type DeliveryStatus,
   type ExpireType,
 } from "@/lib/config/messaging";
+
+type MessageListPayload = {
+  messages: unknown[];
+  hasMore: boolean;
+  nextCursor?: string;
+};
+
+type MessageMutationPayload = {
+  message: Record<string, unknown>;
+};
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -106,7 +121,7 @@ export async function getMessages(
   conversationId: string,
   limit = 50,
   cursor?: string
-) {
+): Promise<ActionResult<MessageListPayload>> {
   const user = await requireAuth();
 
   try {
@@ -119,7 +134,7 @@ export async function getMessages(
     });
 
     if (!participant) {
-      return { error: "You don't have access to this conversation" };
+      return actionFailure("You don't have access to this conversation");
     }
 
     // Get messages that haven't expired or been deleted
@@ -188,18 +203,17 @@ export async function getMessages(
     // Reverse to show oldest first
     const orderedMessages = decryptedMessages.reverse();
 
-    return {
-      success: true,
+    return actionSuccess({
       messages: orderedMessages,
       hasMore: messages.length === limit,
       nextCursor:
         messages.length > 0
           ? messages[0].createdAt.toISOString()
           : undefined,
-    };
+    });
   } catch (error) {
-    console.error("Error fetching messages:", error);
-    return { error: "Failed to fetch messages" };
+    logActionError("getMessages", error);
+    return actionFailure("Failed to fetch messages");
   }
 }
 
@@ -213,7 +227,7 @@ export async function getMessages(
 export async function sendMessage(data: CreateMessageInput & {
   expireType?: ExpireType;
   expireDurationMs?: number;
-}) {
+}): Promise<ActionResult<MessageMutationPayload & { retryAfter?: number }>> {
   const user = await requireAuth();
 
   // Check rate limit
@@ -227,7 +241,7 @@ export async function sendMessage(data: CreateMessageInput & {
 
   if (!rateLimitResult.allowed) {
     return {
-      error: rateLimitResult.reason || "Rate limit exceeded",
+      ...actionFailure(rateLimitResult.reason || "Rate limit exceeded"),
       retryAfter: rateLimitResult.retryAfter,
     };
   }
@@ -235,21 +249,21 @@ export async function sendMessage(data: CreateMessageInput & {
   // Check permission
   const hasAccess = await canAccess("messages", "send");
   if (!hasAccess) {
-    return { error: "You don't have permission to send messages" };
+    return actionFailure("You don't have permission to send messages");
   }
 
   const validatedFields = createMessageSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
     const { conversationId, content, mediaUrls, expireType, expireDurationMs, replyToId } = validatedFields.data;
 
   // Validate message length
   if (content.length > MAX_MESSAGE_LENGTH) {
-    return { error: `Message exceeds ${MAX_MESSAGE_LENGTH} character limit` };
+    return actionFailure(`Message exceeds ${MAX_MESSAGE_LENGTH} character limit`);
   }
 
   try {
@@ -262,7 +276,7 @@ export async function sendMessage(data: CreateMessageInput & {
     });
 
     if (!participant) {
-      return { error: "You don't have access to this conversation" };
+      return actionFailure("You don't have access to this conversation");
     }
 
     // Get conversation details
@@ -286,7 +300,7 @@ export async function sendMessage(data: CreateMessageInput & {
     });
 
     if (!conversation) {
-      return { error: "Conversation not found" };
+      return actionFailure("Conversation not found");
     }
 
     // Encrypt message content
@@ -427,30 +441,31 @@ export async function sendMessage(data: CreateMessageInput & {
     }
 
     // Return decrypted message
-    return {
-      success: true,
+    return actionSuccess({
       message: {
         ...message,
         content, // Return plaintext to sender
       },
-    };
+    });
   } catch (error) {
-    console.error("Error sending message:", error);
-    return { error: "Failed to send message" };
+    logActionError("sendMessage", error);
+    return actionFailure("Failed to send message");
   }
 }
 
 /**
  * Update a message (own messages only)
  */
-export async function updateMessage(data: UpdateMessageInput) {
+export async function updateMessage(
+  data: UpdateMessageInput
+): Promise<ActionResult<MessageMutationPayload>> {
   const user = await requireAuth();
 
   const validatedFields = updateMessageSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { id, content } = validatedFields.data;
@@ -468,11 +483,11 @@ export async function updateMessage(data: UpdateMessageInput) {
     });
 
     if (!existingMessage) {
-      return { error: "Message not found" };
+      return actionFailure("Message not found");
     }
 
     if (existingMessage.deletedAt) {
-      return { error: "Cannot edit deleted message" };
+      return actionFailure("Cannot edit deleted message");
     }
 
     // Check edit permissions
@@ -484,7 +499,7 @@ export async function updateMessage(data: UpdateMessageInput) {
     );
 
     if (!editCheck.canEdit) {
-      return { error: editCheck.reason };
+      return actionFailure(editCheck.reason || "Cannot edit this message");
     }
 
     // Get previous content for edit history
@@ -537,16 +552,15 @@ export async function updateMessage(data: UpdateMessageInput) {
       },
     });
 
-    return {
-      success: true,
+    return actionSuccess({
       message: {
         ...message,
         content, // Return plaintext
       },
-    };
+    });
   } catch (error) {
-    console.error("Error updating message:", error);
-    return { error: "Failed to update message" };
+    logActionError("updateMessage", error);
+    return actionFailure("Failed to update message");
   }
 }
 
@@ -558,9 +572,9 @@ export async function deleteMessage(data: DeleteMessageInput) {
 
   const validatedFields = deleteMessageSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { id } = validatedFields.data;
@@ -571,11 +585,11 @@ export async function deleteMessage(data: DeleteMessageInput) {
     });
 
     if (!existingMessage) {
-      return { error: "Message not found" };
+      return actionFailure("Message not found");
     }
 
     if (existingMessage.senderId !== user.id) {
-      return { error: "You can only delete your own messages" };
+      return actionFailure("You can only delete your own messages");
     }
 
     // Soft delete
@@ -587,10 +601,10 @@ export async function deleteMessage(data: DeleteMessageInput) {
       },
     });
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error deleting message:", error);
-    return { error: "Failed to delete message" };
+    logActionError("deleteMessage", error);
+    return actionFailure("Failed to delete message");
   }
 }
 
@@ -617,7 +631,7 @@ export async function markMessageAsRead(messageId: string) {
     });
 
     if (!message) {
-      return { error: "Message not found" };
+      return actionFailure("Message not found");
     }
 
     // Check if user is a participant
@@ -629,12 +643,12 @@ export async function markMessageAsRead(messageId: string) {
     });
 
     if (!participant) {
-      return { error: "You don't have access to this conversation" };
+      return actionFailure("You don't have access to this conversation");
     }
 
     // Don't mark own messages as read
     if (message.senderId === user.id) {
-      return { success: true };
+      return actionSuccess({});
     }
 
     // Update message read status
@@ -671,10 +685,10 @@ export async function markMessageAsRead(messageId: string) {
       });
     }
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error marking message as read:", error);
-    return { error: "Failed to mark message as read" };
+    logActionError("markMessageAsRead", error);
+    return actionFailure("Failed to mark message as read");
   }
 }
 
@@ -686,9 +700,9 @@ export async function markConversationAsRead(data: MarkAsReadInput) {
 
   const validatedFields = markAsReadSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { conversationId } = validatedFields.data;
@@ -703,7 +717,7 @@ export async function markConversationAsRead(data: MarkAsReadInput) {
     });
 
     if (!participant) {
-      return { error: "You don't have access to this conversation" };
+      return actionFailure("You don't have access to this conversation");
     }
 
     // Update participant's lastReadAt
@@ -746,17 +760,19 @@ export async function markConversationAsRead(data: MarkAsReadInput) {
       });
     }
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error marking conversation as read:", error);
-    return { error: "Failed to mark conversation as read" };
+    logActionError("markConversationAsRead", error);
+    return actionFailure("Failed to mark conversation as read");
   }
 }
 
 /**
  * Get unread message count for a conversation or all conversations
  */
-export async function getUnreadMessageCount(conversationId?: string) {
+export async function getUnreadMessageCount(
+  conversationId?: string
+): Promise<ActionResult<{ count: number }>> {
   const user = await requireAuth();
 
   try {
@@ -770,7 +786,7 @@ export async function getUnreadMessageCount(conversationId?: string) {
       });
 
       if (!participant) {
-        return { error: "You don't have access to this conversation" };
+        return actionFailure("You don't have access to this conversation");
       }
 
       const count = await prisma.message.count({
@@ -784,36 +800,56 @@ export async function getUnreadMessageCount(conversationId?: string) {
         },
       });
 
-      return { success: true, count };
+      return actionSuccess({ count });
     } else {
       // Get total unread count across all conversations
       const participants = await prisma.conversationParticipant.findMany({
         where: {
           userId: user.id,
         },
+        select: {
+          conversationId: true,
+          lastReadAt: true,
+        },
       });
 
-      let totalCount = 0;
-
-      for (const participant of participants) {
-        const count = await prisma.message.count({
-          where: {
-            conversationId: participant.conversationId,
-            senderId: { not: user.id },
-            deletedAt: null,
-            createdAt: {
-              gt: participant.lastReadAt || new Date(0),
-            },
-          },
-        });
-        totalCount += count;
+      if (participants.length === 0) {
+        return actionSuccess({ count: 0 });
       }
 
-      return { success: true, count: totalCount };
+      const unreadMessages = await prisma.message.findMany({
+        where: {
+          conversationId: { in: participants.map((p) => p.conversationId) },
+          senderId: { not: user.id },
+          deletedAt: null,
+        },
+        select: {
+          conversationId: true,
+          createdAt: true,
+        },
+      });
+
+      const lastReadByConversation = new Map(
+        participants.map((participant) => [
+          participant.conversationId,
+          participant.lastReadAt || new Date(0),
+        ])
+      );
+
+      let totalCount = 0;
+      for (const message of unreadMessages) {
+        const lastReadAt =
+          lastReadByConversation.get(message.conversationId) || new Date(0);
+        if (message.createdAt > lastReadAt) {
+          totalCount++;
+        }
+      }
+
+      return actionSuccess({ count: totalCount });
     }
   } catch (error) {
-    console.error("Error getting unread count:", error);
-    return { error: "Failed to get unread count" };
+    logActionError("getUnreadMessageCount", error);
+    return actionFailure("Failed to get unread count");
   }
 }
 
@@ -824,11 +860,14 @@ export async function getUnreadMessageCount(conversationId?: string) {
 /**
  * Search messages across conversations
  */
-export async function searchMessages(query: string, limit = 50) {
+export async function searchMessages(
+  query: string,
+  limit = 50
+): Promise<ActionResult<{ messages: unknown[] }>> {
   const user = await requireAuth();
 
   if (!query || query.trim().length < 2) {
-    return { error: "Search query must be at least 2 characters" };
+    return actionFailure("Search query must be at least 2 characters");
   }
 
   try {
@@ -892,10 +931,10 @@ export async function searchMessages(query: string, limit = 50) {
       content: decryptMessageContent(msg.content, msg.conversationId, msg.isEncrypted),
     }));
 
-    return { success: true, messages: decryptedMessages };
+    return actionSuccess({ messages: decryptedMessages });
   } catch (error) {
-    console.error("Error searching messages:", error);
-    return { error: "Failed to search messages" };
+    logActionError("searchMessages", error);
+    return actionFailure("Failed to search messages");
   }
 }
 
@@ -911,9 +950,9 @@ export async function toggleReaction(data: ToggleReactionInput) {
 
   const validatedFields = toggleReactionSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { messageId, emoji } = validatedFields.data;
@@ -935,16 +974,16 @@ export async function toggleReaction(data: ToggleReactionInput) {
     });
 
     if (!message) {
-      return { error: "Message not found" };
+      return actionFailure("Message not found");
     }
 
     if (message.deletedAt) {
-      return { error: "Cannot react to deleted message" };
+      return actionFailure("Cannot react to deleted message");
     }
 
     // Check if user is a participant
     if (message.conversation.participants.length === 0) {
-      return { error: "You don't have access to this conversation" };
+      return actionFailure("You don't have access to this conversation");
     }
 
     // Parse existing reactions
@@ -993,10 +1032,10 @@ export async function toggleReaction(data: ToggleReactionInput) {
       );
     }
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error toggling reaction:", error);
-    return { error: "Failed to toggle reaction" };
+    logActionError("toggleReaction", error);
+    return actionFailure("Failed to toggle reaction");
   }
 }
 
@@ -1054,7 +1093,7 @@ export async function cleanupExpiredMessages() {
       deletedCount: result.count + afterReadMessages.length,
     };
   } catch (error) {
-    console.error("Error cleaning up expired messages:", error);
-    return { error: "Failed to cleanup expired messages" };
+    logActionError("cleanupExpiredMessages", error);
+    return actionFailure("Failed to cleanup expired messages");
   }
 }

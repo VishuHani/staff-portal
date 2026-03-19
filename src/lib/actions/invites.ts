@@ -12,7 +12,7 @@ import {
   type CreateInvitationInput,
   type InvitationFilters,
 } from "@/lib/schemas/invites";
-import { revalidatePath } from "next/cache";
+import { revalidatePaths } from "@/lib/utils/action-contract";
 
 // ============================================================================
 // TYPES
@@ -44,6 +44,10 @@ export interface InvitationWithDetails {
  */
 function generateInvitationToken(): string {
   return randomBytes(32).toString("hex");
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
 
 /**
@@ -113,6 +117,7 @@ export async function createInvitation(data: CreateInvitationInput): Promise<{
     }
     
     const { email, scope, venueId, roleId, documentIds } = validated.data;
+    const normalizedEmail = normalizeEmail(email);
     
     // Check if user has permission to create invitations
     const canInvite = await hasPermission(user.id, "invites", "create");
@@ -141,7 +146,7 @@ export async function createInvitation(data: CreateInvitationInput): Promise<{
     
     // Check if email is already registered
     const existingUser = await prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
     });
     
     if (existingUser) {
@@ -151,9 +156,10 @@ export async function createInvitation(data: CreateInvitationInput): Promise<{
     // Check for existing pending invitation
     const existingInvitation = await prisma.userInvitation.findFirst({
       where: {
-        email,
+        email: normalizedEmail,
         status: "PENDING",
         expiresAt: { gte: new Date() },
+        ...(scope === "VENUE" ? { venueId } : { venueId: null }),
       },
     });
     
@@ -170,7 +176,7 @@ export async function createInvitation(data: CreateInvitationInput): Promise<{
     
     const invitation = await prisma.userInvitation.create({
       data: {
-        email,
+        email: normalizedEmail,
         token,
         inviterId: user.id,
         scope,
@@ -199,13 +205,12 @@ export async function createInvitation(data: CreateInvitationInput): Promise<{
     });
     
     await sendBrevoEmail({
-      to: email,
+      to: normalizedEmail,
       subject: emailTemplate.subject,
       htmlContent: emailTemplate.htmlContent,
     });
     
-    revalidatePath("/system/invites");
-    revalidatePath("/manage/invites");
+    revalidatePaths("/system/invites", "/manage/invites");
     
     return { success: true, invitation: invitation as InvitationWithDetails };
   } catch (error) {
@@ -357,8 +362,7 @@ export async function cancelInvitation(invitationId: string): Promise<{
       data: { status: "CANCELLED" },
     });
     
-    revalidatePath("/system/invites");
-    revalidatePath("/manage/invites");
+    revalidatePaths("/system/invites", "/manage/invites");
     
     return { success: true };
   } catch (error) {
@@ -432,7 +436,7 @@ export async function resendInvitation(invitationId: string): Promise<{
     });
     
     await sendBrevoEmail({
-      to: invitation.email,
+      to: normalizeEmail(invitation.email),
       subject: emailTemplate.subject,
       htmlContent: emailTemplate.htmlContent,
     });
@@ -514,6 +518,10 @@ export async function acceptInvitation(token: string, userId: string): Promise<{
   try {
     const invitation = await prisma.userInvitation.findUnique({
       where: { token },
+      include: {
+        venue: { select: { id: true, name: true } },
+        role: { select: { id: true, name: true } },
+      },
     });
     
     if (!invitation) {
@@ -530,6 +538,19 @@ export async function acceptInvitation(token: string, userId: string): Promise<{
         data: { status: "EXPIRED" },
       });
       return { success: false, error: "This invitation has expired" };
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true },
+    });
+
+    if (!user) {
+      return { success: false, error: "User not found" };
+    }
+
+    if (normalizeEmail(user.email) !== normalizeEmail(invitation.email)) {
+      return { success: false, error: "Invitation email does not match the signed-in account" };
     }
     
     // Update invitation status
@@ -587,13 +608,14 @@ export async function acceptInvitation(token: string, userId: string): Promise<{
     
     // Link any document assignments that were created for this email (prospective user assignments)
     const { linkDocumentAssignmentsToUser } = await import("./documents/assignments");
-    await linkDocumentAssignmentsToUser(userId, invitation.email);
-    
+    await linkDocumentAssignmentsToUser(userId, invitation.email, invitation.venueId ?? undefined);
+
     // Also link any assignments that were created via this invitation
     await prisma.documentAssignment.updateMany({
       where: {
         invitationId: invitation.id,
         userId: null,
+        ...(invitation.venueId ? { venueId: invitation.venueId } : {}),
       },
       data: {
         userId,
@@ -998,7 +1020,7 @@ export async function updateInviteSettingsAction(data: {
       },
     });
     
-    revalidatePath("/system/invites/settings");
+    revalidatePaths("/system/invites/settings");
     
     return { success: true, settings: updatedSettings };
   } catch (error) {

@@ -30,25 +30,19 @@
  * ```
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { jobQueue } from "@/lib/utils/job-queue";
 import { processEmailWorkspaceJobs } from "@/lib/jobs/email-workspace";
-import { env } from "@/lib/config";
-
-// Secret for authenticating cron requests
-const CRON_SECRET = process.env.CRON_SECRET;
+import { cronJobsRateLimiter } from "@/lib/utils/public-rate-limit";
+import { apiError, apiSuccess } from "@/lib/utils/api-response";
 
 /**
  * Verify cron request authorization
  */
 function isAuthorized(request: NextRequest): boolean {
-  // In development, allow without auth
-  if (!env.isProduction) {
-    return true;
-  }
+  const cronSecret = process.env.CRON_SECRET;
 
-  // In production, require CRON_SECRET
-  if (!CRON_SECRET) {
+  if (!cronSecret) {
     console.warn("[Cron] CRON_SECRET not configured - cron endpoint disabled");
     return false;
   }
@@ -63,7 +57,7 @@ function isAuthorized(request: NextRequest): boolean {
     ? authHeader.slice(7)
     : authHeader;
 
-  return token === CRON_SECRET;
+  return token === cronSecret;
 }
 
 /**
@@ -73,10 +67,7 @@ function isAuthorized(request: NextRequest): boolean {
 export async function GET(request: NextRequest) {
   // Check authorization
   if (!isAuthorized(request)) {
-    return NextResponse.json(
-      { error: "Unauthorized" },
-      { status: 401 }
-    );
+    return apiError("Unauthorized", 401);
   }
 
   const startTime = Date.now();
@@ -99,8 +90,7 @@ export async function GET(request: NextRequest) {
 
     const duration = Date.now() - startTime;
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       timestamp: new Date().toISOString(),
       duration: `${duration}ms`,
       processed: result.processed,
@@ -115,14 +105,9 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("[Cron] Job processing error:", error);
 
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-        timestamp: new Date().toISOString(),
-      },
-      { status: 500 }
-    );
+    return apiError(error instanceof Error ? error.message : "Unknown error", 500, {
+      timestamp: new Date().toISOString(),
+    });
   }
 }
 
@@ -133,10 +118,23 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   // Check authorization
   if (!isAuthorized(request)) {
-    return NextResponse.json(
-      { error: "Unauthorized" },
-      { status: 401 }
+    return apiError("Unauthorized", 401);
+  }
+
+  const ipAddress =
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip") ||
+    "unknown";
+  const rateLimit = await cronJobsRateLimiter.check(ipAddress);
+  if (!rateLimit.allowed) {
+    const response = apiError(
+      rateLimit.reason || "Rate limit exceeded. Please try again later.",
+      429
     );
+    if (rateLimit.retryAfter) {
+      response.headers.set("Retry-After", String(rateLimit.retryAfter));
+    }
+    return response;
   }
 
   try {
@@ -144,10 +142,7 @@ export async function POST(request: NextRequest) {
     const { type, payload, delay, maxAttempts } = body;
 
     if (!type) {
-      return NextResponse.json(
-        { error: "Job type is required" },
-        { status: 400 }
-      );
+      return apiError("Job type is required", 400);
     }
 
     const jobId = await jobQueue.enqueue(type, payload || {}, {
@@ -155,18 +150,11 @@ export async function POST(request: NextRequest) {
       maxAttempts,
     });
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       jobId,
       message: `Job ${jobId} enqueued`,
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 }
-    );
+    return apiError(error instanceof Error ? error.message : "Unknown error");
   }
 }

@@ -2,8 +2,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireAuth, isAdmin } from "@/lib/rbac/access";
-import { hasPermission } from "@/lib/rbac/permissions";
-import { revalidatePath } from "next/cache";
+import { normalizePagination } from "@/lib/utils/pagination";
+import { revalidatePaths } from "@/lib/utils/action-contract";
 import {
   isFolderSchemaMissingError,
   validateFolderAssignment,
@@ -13,44 +13,42 @@ import {
   isCampaignRunSchemaMissingError,
   isPrismaUniqueConstraintError,
 } from "@/lib/email-workspace/campaign-runs";
+import {
+  CAMPAIGN_SEND_BATCH_SIZE,
+  DEFAULT_CAMPAIGN_PAGE_SIZE,
+  MAX_CAMPAIGN_PAGE_SIZE,
+  chunkArray,
+  resolveCampaignApprovalRequirement,
+  updateCampaignRunRecord,
+} from "@/lib/actions/email-campaigns/shared";
+import type {
+  CampaignPagination,
+  CampaignSummary,
+  EmailCampaignListItem,
+} from "@/lib/actions/email-campaigns/shared";
+export type {
+  CampaignPagination,
+  CampaignSummary,
+  EmailCampaignListItem,
+} from "@/lib/actions/email-campaigns/shared";
+import {
+  getEmailApprovalPolicy as getEmailApprovalPolicyImpl,
+  requestCampaignApproval as requestCampaignApprovalImpl,
+  reviewCampaignApproval as reviewCampaignApprovalImpl,
+  upsertEmailApprovalPolicy as upsertEmailApprovalPolicyImpl,
+} from "@/lib/actions/email-campaigns/approvals";
 import type {
   EmailCampaign,
   EmailRecipient,
   EmailTemplate,
   EmailCampaignAnalytics,
   CampaignStatus,
-  CampaignApprovalStatus,
   EmailType,
   EmailRecipientStatus,
 } from "@/types/email-campaign";
 
 type EmailCampaignCreateData = Parameters<typeof prisma.emailCampaign.create>[0]["data"];
 type EmailCampaignUpdateData = Parameters<typeof prisma.emailCampaign.update>[0]["data"];
-
-type ResolvedApprovalRequirement = {
-  approvalStatus: CampaignApprovalStatus;
-  requiresApproval: boolean;
-};
-
-async function updateCampaignRunRecord(
-  runId: string | null,
-  data: Parameters<typeof prisma.emailCampaignRun.update>[0]["data"]
-) {
-  if (!runId) {
-    return;
-  }
-
-  try {
-    await prisma.emailCampaignRun.update({
-      where: { id: runId },
-      data,
-    });
-  } catch (error) {
-    if (!isCampaignRunSchemaMissingError(error)) {
-      throw error;
-    }
-  }
-}
 
 // ============================================================================
 // TYPES
@@ -104,6 +102,8 @@ export interface EmailCampaignFilters {
   search?: string;
   dateFrom?: Date;
   dateTo?: Date;
+  page?: number;
+  limit?: number;
 }
 
 export interface TargetingPreview {
@@ -126,49 +126,6 @@ export interface RecipientPreviewResult {
     roleName: string;
     venueName: string | null;
   }>;
-}
-
-async function resolveCampaignApprovalRequirement(input: {
-  venueId?: string | null;
-  isUserAdmin: boolean;
-}): Promise<ResolvedApprovalRequirement> {
-  if (input.isUserAdmin || !input.venueId) {
-    return {
-      approvalStatus: "NOT_REQUIRED",
-      requiresApproval: false,
-    };
-  }
-
-  const policy = await prisma.emailApprovalPolicy.findUnique({
-    where: { venueId: input.venueId },
-    select: {
-      enabled: true,
-      requireForNonAdmin: true,
-    },
-  });
-
-  const requiresApproval = Boolean(policy?.enabled && policy?.requireForNonAdmin);
-
-  return {
-    approvalStatus: requiresApproval ? "PENDING" : "NOT_REQUIRED",
-    requiresApproval,
-  };
-}
-
-async function canApproveCampaign(userId: string): Promise<boolean> {
-  if (await isAdmin(userId)) {
-    return true;
-  }
-
-  if (await hasPermission(userId, "email_workspace", "approve")) {
-    return true;
-  }
-
-  if (await hasPermission(userId, "email_campaigns", "approve")) {
-    return true;
-  }
-
-  return hasPermission(userId, "email_campaigns", "manage");
 }
 
 // ============================================================================
@@ -323,8 +280,7 @@ export async function createEmailCampaign(
       }
     });
 
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
+    revalidatePaths("/system/emails", "/manage/emails");
 
     return { success: true, campaign: campaign as EmailCampaign };
   } catch (error) {
@@ -439,8 +395,7 @@ export async function updateEmailCampaign(
       }
     }
 
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
+    revalidatePaths("/system/emails", "/manage/emails");
 
     return { success: true, campaign: campaign as EmailCampaign };
   } catch (error) {
@@ -489,8 +444,7 @@ export async function deleteEmailCampaign(id: string): Promise<{
       where: { id },
     });
 
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
+    revalidatePaths("/system/emails", "/manage/emails");
 
     return { success: true };
   } catch (error) {
@@ -571,13 +525,26 @@ export async function getEmailCampaign(id: string): Promise<{
 
 export async function getEmailCampaigns(filters?: EmailCampaignFilters): Promise<{
   success: boolean;
-  campaigns?: EmailCampaign[];
+  campaigns?: EmailCampaignListItem[];
   total?: number;
+  summary?: CampaignSummary;
+  pagination?: CampaignPagination;
   error?: string;
 }> {
   try {
     const user = await requireAuth();
     const isUserAdmin = await isAdmin(user.id);
+
+    const pagination = normalizePagination(
+      {
+        page: filters?.page,
+        limit: filters?.limit,
+      },
+      {
+        defaultLimit: DEFAULT_CAMPAIGN_PAGE_SIZE,
+        maxLimit: MAX_CAMPAIGN_PAGE_SIZE,
+      }
+    );
 
     const where: any = {};
 
@@ -589,7 +556,7 @@ export async function getEmailCampaigns(filters?: EmailCampaignFilters): Promise
       where.email = { emailType: filters.emailType };
     }
     if (filters?.folderId) {
-      where.folderId = filters.folderId;
+      where.folderId = filters.folderId === "none" ? null : filters.folderId;
     }
     if (filters?.createdBy) {
       where.createdBy = filters.createdBy;
@@ -620,7 +587,24 @@ export async function getEmailCampaigns(filters?: EmailCampaignFilters): Promise
 
       if (filters?.venueId) {
         if (!allowedVenueIds.includes(filters.venueId)) {
-          return { success: true, campaigns: [], total: 0 };
+          return {
+            success: true,
+            campaigns: [],
+            total: 0,
+            summary: {
+              drafts: 0,
+              scheduled: 0,
+              sent: 0,
+              totalRecipients: 0,
+            },
+            pagination: {
+              page: pagination.page,
+              limit: pagination.limit,
+              total: 0,
+              totalPages: 0,
+              hasMore: false,
+            },
+          };
         }
 
         where.venueId = filters.venueId;
@@ -629,28 +613,64 @@ export async function getEmailCampaigns(filters?: EmailCampaignFilters): Promise
       }
     }
 
-    // Get total count
-    const total = await prisma.emailCampaign.count({ where });
+    const [total, statusCounts, recipientSummary, campaigns] = await Promise.all([
+      prisma.emailCampaign.count({ where }),
+      prisma.emailCampaign.groupBy({
+        by: ["status"],
+        where,
+        _count: { _all: true },
+      }),
+      prisma.emailCampaign.aggregate({
+        where,
+        _sum: { recipientCount: true },
+      }),
+      prisma.emailCampaign.findMany({
+        where,
+        include: {
+          creator: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+          venue: {
+            select: { id: true, name: true, code: true },
+          },
+          email: {
+            select: { id: true, name: true, subject: true, emailType: true },
+          },
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: pagination.skip,
+        take: pagination.take,
+      }),
+    ]);
 
-    // Get campaigns
-    const campaigns = await prisma.emailCampaign.findMany({
-      where,
-      include: {
-        creator: {
-          select: { id: true, firstName: true, lastName: true, email: true },
-        },
-        venue: {
-          select: { id: true, name: true, code: true },
-        },
-        email: {
-          select: { id: true, name: true, subject: true, emailType: true },
-        },
+    const statusMap = statusCounts.reduce<Record<string, number>>((acc, row) => {
+      acc[row.status] = row._count._all;
+      return acc;
+    }, {});
+    const totalPages = total > 0 ? Math.ceil(total / pagination.limit) : 0;
+
+    return {
+      success: true,
+      campaigns: campaigns.map((campaign) => ({
+        ...campaign,
+        subject: campaign.customSubject || campaign.email.subject,
+        emailType: campaign.email.emailType,
+      })),
+      total,
+      summary: {
+        drafts: statusMap.DRAFT || 0,
+        scheduled: statusMap.SCHEDULED || 0,
+        sent: (statusMap.SENT || 0) + (statusMap.PARTIALLY_SENT || 0),
+        totalRecipients: recipientSummary._sum.recipientCount || 0,
       },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    });
-
-    return { success: true, campaigns: campaigns as EmailCampaign[], total };
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        totalPages,
+        hasMore: pagination.page < totalPages,
+      },
+    };
   } catch (error) {
     console.error("Error fetching email campaigns:", error);
     return { success: false, error: "Failed to fetch email campaigns" };
@@ -983,40 +1003,76 @@ export async function sendEmailCampaign(id: string): Promise<{
     let sentCount = 0;
     let failedCount = 0;
 
-    for (const recipient of recipientPreview.users) {
-      try {
-        const result = await sendBrevoEmail({
-          to: recipient.email,
-          toName: `${recipient.firstName || ""} ${recipient.lastName || ""}`.trim(),
-          subject,
-          htmlContent,
-          textContent,
-        });
+    for (const recipientBatch of chunkArray(
+      recipientPreview.users,
+      CAMPAIGN_SEND_BATCH_SIZE
+    )) {
+      await Promise.allSettled(
+        recipientBatch.map(async (recipient) => {
+          try {
+            const result = await sendBrevoEmail({
+              to: recipient.email,
+              toName: `${recipient.firstName || ""} ${recipient.lastName || ""}`.trim(),
+              subject,
+              htmlContent,
+              textContent,
+            });
 
-        if (result.success) {
-          sentCount++;
-          await prisma.emailRecipient.updateMany({
-            where: { campaignId: id, userId: recipient.id },
-            data: {
-              status: "SENT" as any,
-              brevoMessageId: result.messageId,
-              sentAt: new Date(),
-            },
-          });
-        } else {
-          failedCount++;
-          await prisma.emailRecipient.updateMany({
-            where: { campaignId: id, userId: recipient.id },
-            data: {
-              status: "FAILED" as any,
-              error: "Failed to send",
-            },
-          });
-        }
-      } catch (error) {
-        failedCount++;
-        console.error(`Error sending to ${recipient.email}:`, error);
-      }
+            if (result.success) {
+              sentCount++;
+              try {
+                await prisma.emailRecipient.updateMany({
+                  where: { campaignId: id, userId: recipient.id },
+                  data: {
+                    status: "SENT" as any,
+                    brevoMessageId: result.messageId,
+                    sentAt: new Date(),
+                  },
+                });
+              } catch (updateError) {
+                console.error(
+                  `Error updating sent status for ${recipient.email}:`,
+                  updateError
+                );
+              }
+              return;
+            }
+
+            failedCount++;
+            try {
+              await prisma.emailRecipient.updateMany({
+                where: { campaignId: id, userId: recipient.id },
+                data: {
+                  status: "FAILED" as any,
+                  error: "Failed to send",
+                },
+              });
+            } catch (updateError) {
+              console.error(
+                `Error updating failed status for ${recipient.email}:`,
+                updateError
+              );
+            }
+          } catch (error) {
+            failedCount++;
+            console.error(`Error sending to ${recipient.email}:`, error);
+            try {
+              await prisma.emailRecipient.updateMany({
+                where: { campaignId: id, userId: recipient.id },
+                data: {
+                  status: "FAILED" as any,
+                  error: error instanceof Error ? error.message : "Failed to send",
+                },
+              });
+            } catch (updateError) {
+              console.error(
+                `Error updating failed status for ${recipient.email}:`,
+                updateError
+              );
+            }
+          }
+        })
+      );
     }
 
     // Update campaign status
@@ -1052,8 +1108,7 @@ export async function sendEmailCampaign(id: string): Promise<{
       } as any,
     });
 
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
+    revalidatePaths("/system/emails", "/manage/emails");
 
     return { success: true, recipientCount: sentCount };
   } catch (error) {
@@ -1112,8 +1167,7 @@ export async function scheduleEmailCampaign(
       },
     });
 
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
+    revalidatePaths("/system/emails", "/manage/emails");
 
     return { success: true };
   } catch (error) {
@@ -1165,8 +1219,7 @@ export async function cancelEmailCampaign(id: string): Promise<{
       },
     });
 
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
+    revalidatePaths("/system/emails", "/manage/emails");
 
     return { success: true };
   } catch (error) {
@@ -1175,223 +1228,28 @@ export async function cancelEmailCampaign(id: string): Promise<{
   }
 }
 
-// ============================================================================
-// APPROVAL POLICY / WORKFLOW
-// ============================================================================
-
-export async function getEmailApprovalPolicy(venueId: string): Promise<{
-  success: boolean;
-  policy?: {
-    venueId: string;
-    enabled: boolean;
-    requireForNonAdmin: boolean;
-    updatedAt: Date;
-  };
-  error?: string;
-}> {
-  try {
-    const user = await requireAuth();
-    const isUserAdmin = await isAdmin(user.id);
-
-    if (!isUserAdmin && !(await hasPermission(user.id, "email_campaigns", "manage"))) {
-      return { success: false, error: "You don't have permission to view approval policy." };
-    }
-
-    const policy = await prisma.emailApprovalPolicy.findUnique({
-      where: { venueId },
-      select: {
-        venueId: true,
-        enabled: true,
-        requireForNonAdmin: true,
-        updatedAt: true,
-      },
-    });
-
-    return {
-      success: true,
-      policy: policy || {
-        venueId,
-        enabled: false,
-        requireForNonAdmin: false,
-        updatedAt: new Date(0),
-      },
-    };
-  } catch (error) {
-    console.error("Error fetching email approval policy:", error);
-    return { success: false, error: "Failed to fetch approval policy." };
-  }
+export async function getEmailApprovalPolicy(venueId: string) {
+  return getEmailApprovalPolicyImpl(venueId);
 }
 
 export async function upsertEmailApprovalPolicy(input: {
   venueId: string;
   enabled: boolean;
   requireForNonAdmin: boolean;
-}): Promise<{ success: boolean; error?: string }> {
-  try {
-    const user = await requireAuth();
-    if (!(await isAdmin(user.id))) {
-      return { success: false, error: "Only admins can update approval policy." };
-    }
-
-    await prisma.emailApprovalPolicy.upsert({
-      where: { venueId: input.venueId },
-      create: {
-        venueId: input.venueId,
-        enabled: input.enabled,
-        requireForNonAdmin: input.requireForNonAdmin,
-      },
-      update: {
-        enabled: input.enabled,
-        requireForNonAdmin: input.requireForNonAdmin,
-      },
-    });
-
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
-
-    return { success: true };
-  } catch (error) {
-    console.error("Error upserting email approval policy:", error);
-    return { success: false, error: "Failed to update approval policy." };
-  }
+}) {
+  return upsertEmailApprovalPolicyImpl(input);
 }
 
-export async function requestCampaignApproval(
-  campaignId: string,
-  notes?: string
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const user = await requireAuth();
-
-    const campaign = await prisma.emailCampaign.findUnique({
-      where: { id: campaignId },
-      select: {
-        id: true,
-        createdBy: true,
-        venueId: true,
-        approvalStatus: true,
-      },
-    });
-
-    if (!campaign) {
-      return { success: false, error: "Campaign not found." };
-    }
-
-    const isUserAdmin = await isAdmin(user.id);
-    const canManageCampaigns =
-      isUserAdmin || (await hasPermission(user.id, "email_campaigns", "manage"));
-
-    if (!canManageCampaigns && campaign.createdBy !== user.id) {
-      return { success: false, error: "You don't have permission to request approval for this campaign." };
-    }
-
-    if (campaign.approvalStatus === "APPROVED") {
-      return { success: false, error: "Campaign is already approved." };
-    }
-
-    await prisma.$transaction(async (tx) => {
-      await tx.emailCampaign.update({
-        where: { id: campaignId },
-        data: {
-          approvalStatus: "PENDING",
-        },
-      });
-
-      await tx.emailCampaignApproval.create({
-        data: {
-          campaignId,
-          requestedBy: user.id,
-          status: "PENDING",
-          notes: notes?.trim() || null,
-        },
-      });
-    });
-
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
-
-    return { success: true };
-  } catch (error) {
-    console.error("Error requesting campaign approval:", error);
-    return { success: false, error: "Failed to request campaign approval." };
-  }
+export async function requestCampaignApproval(campaignId: string, notes?: string) {
+  return requestCampaignApprovalImpl(campaignId, notes);
 }
 
 export async function reviewCampaignApproval(input: {
   campaignId: string;
   decision: "APPROVE" | "REJECT";
   notes?: string;
-}): Promise<{ success: boolean; error?: string }> {
-  try {
-    const user = await requireAuth();
-
-    if (!(await canApproveCampaign(user.id))) {
-      return { success: false, error: "You don't have permission to review campaign approvals." };
-    }
-
-    const campaign = await prisma.emailCampaign.findUnique({
-      where: { id: input.campaignId },
-      select: {
-        id: true,
-        approvalStatus: true,
-      },
-    });
-
-    if (!campaign) {
-      return { success: false, error: "Campaign not found." };
-    }
-
-    const nextStatus: CampaignApprovalStatus =
-      input.decision === "APPROVE" ? "APPROVED" : "REJECTED";
-
-    await prisma.$transaction(async (tx) => {
-      const pending = await tx.emailCampaignApproval.findFirst({
-        where: {
-          campaignId: input.campaignId,
-          status: "PENDING",
-        },
-        orderBy: { requestedAt: "desc" },
-      });
-
-      if (pending) {
-        await tx.emailCampaignApproval.update({
-          where: { id: pending.id },
-          data: {
-            status: nextStatus,
-            approvedBy: user.id,
-            approvedAt: new Date(),
-            notes: input.notes?.trim() || pending.notes,
-          },
-        });
-      } else {
-        await tx.emailCampaignApproval.create({
-          data: {
-            campaignId: input.campaignId,
-            requestedBy: user.id,
-            approvedBy: user.id,
-            status: nextStatus,
-            approvedAt: new Date(),
-            notes: input.notes?.trim() || null,
-          },
-        });
-      }
-
-      await tx.emailCampaign.update({
-        where: { id: input.campaignId },
-        data: {
-          approvalStatus: nextStatus,
-        },
-      });
-    });
-
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
-
-    return { success: true };
-  } catch (error) {
-    console.error("Error reviewing campaign approval:", error);
-    return { success: false, error: "Failed to review campaign approval." };
-  }
+}) {
+  return reviewCampaignApprovalImpl(input);
 }
 
 // ============================================================================
@@ -1761,8 +1619,7 @@ export async function createEmailSegment(data: {
       },
     });
 
-    revalidatePath("/system/emails");
-    revalidatePath("/manage/emails");
+    revalidatePaths("/system/emails", "/manage/emails");
 
     return { success: true, segment: { id: segment.id, name: segment.name } };
   } catch (error) {

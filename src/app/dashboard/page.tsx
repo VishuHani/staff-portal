@@ -21,6 +21,10 @@ export default async function DashboardPage() {
     getUnreadCount({ userId: user.id }),
     getUnreadMessageCount(),
   ]);
+  const unreadCount = unreadResult.count || 0;
+  const unreadMessageCount = messageCountResult.success
+    ? (messageCountResult.count ?? 0)
+    : 0;
 
   // Get role-specific dashboard data
   const userRole = user.role.name;
@@ -32,8 +36,8 @@ export default async function DashboardPage() {
     return (
       <DashboardLayout
         user={user}
-        unreadCount={unreadResult.count || 0}
-        unreadMessageCount={messageCountResult.count || 0}
+        unreadCount={unreadCount}
+        unreadMessageCount={unreadMessageCount}
       >
         <StaffDashboardClient
           userId={user.id}
@@ -42,7 +46,7 @@ export default async function DashboardPage() {
           weeklySummary={dashboardData.success ? dashboardData.data.weeklySummary : []}
           recentActivity={dashboardData.success ? dashboardData.data.recentActivity : []}
           trends={dashboardData.success ? dashboardData.data.trends : []}
-          unreadMessageCount={messageCountResult.count || 0}
+          unreadMessageCount={unreadMessageCount}
         />
       </DashboardLayout>
     );
@@ -55,8 +59,8 @@ export default async function DashboardPage() {
     return (
       <DashboardLayout
         user={user}
-        unreadCount={unreadResult.count || 0}
-        unreadMessageCount={messageCountResult.count || 0}
+        unreadCount={unreadCount}
+        unreadMessageCount={unreadMessageCount}
       >
         <ManagerDashboardClient
           userId={user.id}
@@ -78,8 +82,8 @@ export default async function DashboardPage() {
     return (
       <DashboardLayout
         user={user}
-        unreadCount={unreadResult.count || 0}
-        unreadMessageCount={messageCountResult.count || 0}
+        unreadCount={unreadCount}
+        unreadMessageCount={unreadMessageCount}
       >
         <AdminDashboardClient
           userId={user.id}
@@ -99,8 +103,8 @@ export default async function DashboardPage() {
   return (
     <DashboardLayout
       user={user}
-      unreadCount={unreadResult.count || 0}
-      unreadMessageCount={messageCountResult.count || 0}
+      unreadCount={unreadCount}
+      unreadMessageCount={unreadMessageCount}
     >
       <div className="space-y-6">
         <div>

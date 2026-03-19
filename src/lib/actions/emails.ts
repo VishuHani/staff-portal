@@ -1,5 +1,6 @@
 "use server";
 
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import {
@@ -459,7 +460,10 @@ export async function duplicateEmail(id: string): Promise<{ success: boolean; em
         previewText: existingEmail.previewText,
         htmlContent: existingEmail.htmlContent,
         textContent: existingEmail.textContent,
-        designJson: existingEmail.designJson,
+        designJson:
+          existingEmail.designJson === null
+            ? Prisma.JsonNull
+            : (existingEmail.designJson as unknown as Prisma.InputJsonValue),
         emailType: existingEmail.emailType,
         category: existingEmail.category,
         isTemplate: false, // Duplicates are not templates by default
@@ -504,7 +508,10 @@ export async function saveEmailAsTemplate(id: string, templateName?: string): Pr
         previewText: existingEmail.previewText,
         htmlContent: existingEmail.htmlContent,
         textContent: existingEmail.textContent,
-        designJson: existingEmail.designJson,
+        designJson:
+          existingEmail.designJson === null
+            ? Prisma.JsonNull
+            : (existingEmail.designJson as unknown as Prisma.InputJsonValue),
         emailType: existingEmail.emailType,
         category: existingEmail.category || "general",
         isTemplate: true,

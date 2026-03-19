@@ -4,6 +4,7 @@
 // ============================================================================
 
 import OpenAI from 'openai';
+import { fetchProtectedBinaryUrl } from '@/lib/security/protected-fetch';
 import { 
   DocumentAnalysisResult, 
   AnalyzeDocumentRequest,
@@ -118,13 +119,10 @@ async function extractPdfContent(pdfUrl: string): Promise<ExtractedContent> {
     // In production, you'd use pdf-parse or pdf-lib for text extraction
     
     // Fetch the PDF
-    const response = await fetch(pdfUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch PDF: ${response.statusText}`);
-    }
-    
-    // Convert to base64 for AI processing
-    const arrayBuffer = await response.arrayBuffer();
+    const arrayBuffer = await fetchProtectedBinaryUrl(pdfUrl, {
+      maxBytes: 12 * 1024 * 1024,
+      timeoutMs: 15_000,
+    });
     const base64 = Buffer.from(arrayBuffer).toString('base64');
     
     // Use AI to extract text (fallback approach)

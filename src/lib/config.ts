@@ -56,6 +56,18 @@ function getNumber(key: string, defaultValue: number): number {
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
+/**
+ * Get comma-separated environment variable as a list
+ */
+function getList(key: string): string[] {
+  const value = process.env[key];
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 // ============================================================================
 // Environment Configuration
 // ============================================================================
@@ -84,6 +96,11 @@ export const env = {
   // App URLs
   app: {
     url: getOptional("NEXT_PUBLIC_APP_URL", "http://localhost:3000"),
+  },
+
+  // Document fetch hardening
+  documentFetch: {
+    allowedHosts: getList("DOCUMENT_FETCH_ALLOWED_HOSTS"),
   },
 
   // Email (Brevo)
@@ -284,6 +301,7 @@ export const config = {
   env,
   constants,
   features,
+  documentFetch: env.documentFetch,
   validate: validateConfig,
 } as const;
 

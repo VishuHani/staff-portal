@@ -10,6 +10,7 @@
  */
 
 import OpenAI from "openai";
+import { fetchProtectedBinaryUrl } from "@/lib/security/protected-fetch";
 import {
   STRUCTURE_DETECTION_SYSTEM_PROMPT,
   FIELD_DETECTION_SYSTEM_PROMPT,
@@ -389,11 +390,10 @@ export async function analyzePDFFromURL(
   try {
     // Stage 1: Fetch PDF from URL
     onProgress?.("extracting", "Fetching PDF from URL...", 5);
-    const response = await fetch(pdfUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch PDF: ${response.statusText}`);
-    }
-    const pdfData = await response.arrayBuffer();
+    const pdfData = await fetchProtectedBinaryUrl(pdfUrl, {
+      maxBytes: 12 * 1024 * 1024,
+      timeoutMs: 15_000,
+    });
 
     // Stage 2: Load PDF document
     onProgress?.("extracting", "Loading PDF document...", 10);

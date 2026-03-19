@@ -5,31 +5,60 @@ import { ChannelSettingsClient } from "./settings-client";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { getUnreadCount } from "@/lib/actions/notifications";
 import { getUnreadMessageCount } from "@/lib/actions/messages";
+import { getCurrentUser } from "@/lib/actions/auth";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const channel = await prisma.channel.findUnique({
-    where: { id },
-    select: { name: true },
+  const user = await getCurrentUser();
+  if (!user) {
+    return {
+      title: "Channel Not Found",
+    };
+  }
+
+  const userWithRole = await prisma.user.findUnique({
+    where: { id: user.id },
+    include: {
+      role: true,
+      venues: {
+        include: {
+          venue: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      },
+    },
   });
 
+  const channel = await prisma.channel.findUnique({
+    where: { id },
+    include: {
+      venues: {
+        select: {
+          venueId: true,
+        },
+      },
+    },
+  });
+
+  const isAdmin = userWithRole?.role.name === "ADMIN";
+  const userVenueIds = userWithRole?.venues.map((uv) => uv.venue.id) || [];
+  const canAccessChannel =
+    !!channel &&
+    (isAdmin || channel.isPublic || channel.venues.some((venue) => userVenueIds.includes(venue.venueId)));
+
   return {
-    title: channel ? `${channel.name} Settings | Channel Management` : "Channel Not Found",
+    title: canAccessChannel ? `${channel!.name} Settings | Channel Management` : "Channel Not Found",
   };
 }
 
-async function getChannelSettingsData(channelId: string, userId: string, isManager: boolean, managerVenueIds: string[] | null) {
+async function getChannelSettingsData(channelId: string, isAdmin: boolean, userVenueIds: string[] | null) {
   // Get channel with full details
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
     include: {
-      createdByUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-          email: true,
-        },
-      },
       venues: {
         include: {
           venue: {
@@ -39,6 +68,13 @@ async function getChannelSettingsData(channelId: string, userId: string, isManag
               code: true,
             },
           },
+        },
+      },
+      createdByUser: {
+        select: {
+          firstName: true,
+          lastName: true,
+          email: true,
         },
       },
       _count: {
@@ -57,9 +93,13 @@ async function getChannelSettingsData(channelId: string, userId: string, isManag
   // Build venue filter based on user role
   let venueWhere: any = { active: true };
 
-  // If manager, filter to only manager's venues
-  if (isManager && managerVenueIds && managerVenueIds.length > 0) {
-    venueWhere.id = { in: managerVenueIds };
+  // Non-admin users only see their assigned venues
+  if (!isAdmin) {
+    if (userVenueIds && userVenueIds.length > 0) {
+      venueWhere.id = { in: userVenueIds };
+    } else {
+      venueWhere.id = "impossible-id-no-venues";
+    }
   }
 
   // Get all venues for dropdown
@@ -118,14 +158,22 @@ export default async function ChannelSettingsPage({ params }: { params: Promise<
   }
 
   // Check if user is a manager
-  const isManager = userWithRole?.role.name === "MANAGER";
-  const managerVenueIds = isManager && userWithRole.venues.length > 0
-    ? userWithRole.venues.map((uv) => uv.venue.id)
-    : null;
+  const userVenues = userWithRole?.venues ?? [];
+  const userVenueIds = userVenues.map((uv) => uv.venue.id);
+  const isAdmin = userWithRole?.role.name === "ADMIN";
 
-  const data = await getChannelSettingsData(id, user.id, isManager, managerVenueIds);
+  const data = await getChannelSettingsData(id, isAdmin, isAdmin ? null : userVenueIds);
 
   if (!data) {
+    notFound();
+  }
+
+  const canAccessChannel =
+    userWithRole?.role.name === "ADMIN" ||
+    data.channel.isPublic ||
+    data.channel.venues.some((venue) => userVenueIds.includes(venue.venue.id));
+
+  if (!canAccessChannel) {
     notFound();
   }
 
@@ -134,6 +182,9 @@ export default async function ChannelSettingsPage({ params }: { params: Promise<
     getUnreadCount({ userId: user.id }),
     getUnreadMessageCount(),
   ]);
+  const unreadMessageCount = messageCountResult.success
+    ? (messageCountResult.count ?? 0)
+    : 0;
 
   return (
     <DashboardLayout
@@ -147,13 +198,13 @@ export default async function ChannelSettingsPage({ params }: { params: Promise<
         },
       }}
       unreadCount={unreadResult.count || 0}
-      unreadMessageCount={messageCountResult.count || 0}
+      unreadMessageCount={unreadMessageCount}
     >
       <ChannelSettingsClient
         channel={data.channel}
         venues={data.venues}
         currentUserId={user.id}
-        isManager={isManager}
+        isManager={!isAdmin && userWithRole?.role.name === "MANAGER"}
       />
     </DashboardLayout>
   );

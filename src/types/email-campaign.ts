@@ -1,80 +1,32 @@
 // ============================================================================
 // Email System Types - Builder & Campaigns
-// These types are defined locally to avoid Prisma client import issues.
-// They correspond to the models in prisma/schema.prisma
+// These types are backed by Prisma-generated enum values and correspond to
+// the models in prisma/schema.prisma.
 // ============================================================================
 
-// Email type enum - matches Prisma EmailType
-export type EmailType = "TRANSACTIONAL" | "MARKETING";
+import {
+  PRISMA_ENUM_LOOKUPS,
+  PRISMA_ENUM_VALUES,
+  type PrismaCampaignApprovalStatusValue,
+  type PrismaCampaignStatusValue,
+  type PrismaEmailRecipientStatusValue,
+  type PrismaEmailTypeValue,
+} from "@/types/prisma-enums";
 
-// Campaign status enum - matches Prisma CampaignStatus
-export type CampaignStatus = 
-  | "DRAFT" 
-  | "SCHEDULED" 
-  | "QUEUED" 
-  | "SENDING" 
-  | "SENT" 
-  | "PARTIALLY_SENT" 
-  | "FAILED" 
-  | "CANCELLED";
+export type EmailType = PrismaEmailTypeValue;
+export type CampaignStatus = PrismaCampaignStatusValue;
+export type CampaignApprovalStatus = PrismaCampaignApprovalStatusValue;
+export type EmailRecipientStatus = PrismaEmailRecipientStatusValue;
 
-export type CampaignApprovalStatus =
-  | "NOT_REQUIRED"
-  | "PENDING"
-  | "APPROVED"
-  | "REJECTED";
+export const EmailType = PRISMA_ENUM_LOOKUPS.EmailType;
+export const CampaignStatus = PRISMA_ENUM_LOOKUPS.CampaignStatus;
+export const CampaignApprovalStatus = PRISMA_ENUM_LOOKUPS.CampaignApprovalStatus;
+export const EmailRecipientStatus = PRISMA_ENUM_LOOKUPS.EmailRecipientStatus;
 
-// Email recipient status enum - matches Prisma EmailRecipientStatus
-export type EmailRecipientStatus = 
-  | "PENDING" 
-  | "QUEUED" 
-  | "SENT" 
-  | "DELIVERED" 
-  | "OPENED" 
-  | "CLICKED" 
-  | "BOUNCED" 
-  | "UNSUBSCRIBED" 
-  | "COMPLAINED" 
-  | "FAILED" 
-  | "SKIPPED";
-
-// Runtime enum objects for use in code
-export const EmailType = {
-  TRANSACTIONAL: "TRANSACTIONAL" as const,
-  MARKETING: "MARKETING" as const,
-};
-
-export const CampaignStatus = {
-  DRAFT: "DRAFT" as const,
-  SCHEDULED: "SCHEDULED" as const,
-  QUEUED: "QUEUED" as const,
-  SENDING: "SENDING" as const,
-  SENT: "SENT" as const,
-  PARTIALLY_SENT: "PARTIALLY_SENT" as const,
-  FAILED: "FAILED" as const,
-  CANCELLED: "CANCELLED" as const,
-};
-
-export const CampaignApprovalStatus = {
-  NOT_REQUIRED: "NOT_REQUIRED" as const,
-  PENDING: "PENDING" as const,
-  APPROVED: "APPROVED" as const,
-  REJECTED: "REJECTED" as const,
-};
-
-export const EmailRecipientStatus = {
-  PENDING: "PENDING" as const,
-  QUEUED: "QUEUED" as const,
-  SENT: "SENT" as const,
-  DELIVERED: "DELIVERED" as const,
-  OPENED: "OPENED" as const,
-  CLICKED: "CLICKED" as const,
-  BOUNCED: "BOUNCED" as const,
-  UNSUBSCRIBED: "UNSUBSCRIBED" as const,
-  COMPLAINED: "COMPLAINED" as const,
-  FAILED: "FAILED" as const,
-  SKIPPED: "SKIPPED" as const,
-};
+export const EmailTypeValues = PRISMA_ENUM_VALUES.EmailType;
+export const CampaignStatusValues = PRISMA_ENUM_VALUES.CampaignStatus;
+export const CampaignApprovalStatusValues = PRISMA_ENUM_VALUES.CampaignApprovalStatus;
+export const EmailRecipientStatusValues = PRISMA_ENUM_VALUES.EmailRecipientStatus;
 
 // ============================================================================
 // Email Model (Email Builder Studio)

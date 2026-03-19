@@ -2,7 +2,6 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
-import { revalidatePath } from "next/cache";
 import { RosterStatus } from "@prisma/client";
 import { createNotification } from "@/lib/services/notifications";
 import { NotificationType } from "@prisma/client";
@@ -14,6 +13,13 @@ import {
 import { recordAudit } from "@/lib/services/roster-audit";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import { getAuditContext } from "@/lib/utils/audit-helpers";
+import {
+  actionFailure,
+  actionSuccess,
+  logActionError,
+  revalidatePaths,
+  type ActionResult,
+} from "@/lib/utils/action-contract";
 
 // Types
 export interface CreateRosterInput {
@@ -32,14 +38,16 @@ export interface UpdateRosterInput {
 }
 
 // Create a new roster
-export async function createRoster(data: CreateRosterInput) {
+export async function createRoster(
+  data: CreateRosterInput
+): Promise<ActionResult<{ roster: { id: string } }>> {
   try {
     const user = await requireAuth();
 
     // Check permission
     const hasPermission = await canAccess("rosters", "create");
     if (!hasPermission) {
-      return { success: false, error: "You don't have permission to create rosters" };
+      return actionFailure("You don't have permission to create rosters");
     }
 
     // Validate venue access for managers
@@ -50,7 +58,7 @@ export async function createRoster(data: CreateRosterInput) {
       });
       const venueIds = userVenues.map((v) => v.venueId);
       if (!venueIds.includes(data.venueId)) {
-        return { success: false, error: "You don't have access to this venue" };
+        return actionFailure("You don't have access to this venue");
       }
     }
 
@@ -121,13 +129,12 @@ export async function createRoster(data: CreateRosterInput) {
       ipAddress: auditContext.ipAddress,
     });
 
-    revalidatePath("/manage/rosters");
-    revalidatePath("/system/rosters");
+    revalidatePaths("/manage/rosters", "/system/rosters");
 
-    return { success: true, roster };
+    return actionSuccess({ roster });
   } catch (error) {
-    console.error("Error creating roster:", error);
-    return { success: false, error: "Failed to create roster" };
+    logActionError("rosters.roster.createRoster", error, { venueId: data.venueId });
+    return actionFailure("Failed to create roster");
   }
 }
 
@@ -138,7 +145,7 @@ export async function updateRoster(rosterId: string, data: UpdateRosterInput) {
 
     const hasPermission = await canAccess("rosters", "edit");
     if (!hasPermission) {
-      return { success: false, error: "You don't have permission to edit rosters" };
+      return actionFailure("You don't have permission to edit rosters");
     }
 
     // Get current roster
@@ -148,7 +155,7 @@ export async function updateRoster(rosterId: string, data: UpdateRosterInput) {
     });
 
     if (!existingRoster) {
-      return { success: false, error: "Roster not found" };
+      return actionFailure("Roster not found");
     }
 
     // Check venue access for managers
@@ -159,13 +166,13 @@ export async function updateRoster(rosterId: string, data: UpdateRosterInput) {
       });
       const venueIds = userVenues.map((v) => v.venueId);
       if (!venueIds.includes(existingRoster.venueId)) {
-        return { success: false, error: "You don't have access to this roster" };
+        return actionFailure("You don't have access to this roster");
       }
     }
 
     // Only allow editing of draft rosters
     if (existingRoster.status !== RosterStatus.DRAFT) {
-      return { success: false, error: "Can only edit draft rosters" };
+      return actionFailure("Can only edit draft rosters");
     }
 
     // Increment revision
@@ -215,13 +222,12 @@ export async function updateRoster(rosterId: string, data: UpdateRosterInput) {
       ipAddress: auditContext.ipAddress,
     });
 
-    revalidatePath(`/manage/rosters/${rosterId}`);
-    revalidatePath("/manage/rosters");
+    revalidatePaths(`/manage/rosters/${rosterId}`, "/manage/rosters");
 
-    return { success: true, roster };
+    return actionSuccess({ roster });
   } catch (error) {
-    console.error("Error updating roster:", error);
-    return { success: false, error: "Failed to update roster" };
+    logActionError("rosters.roster.updateRoster", error, { rosterId });
+    return actionFailure("Failed to update roster");
   }
 }
 
@@ -232,7 +238,7 @@ export async function deleteRoster(rosterId: string) {
 
     const hasPermission = await canAccess("rosters", "delete");
     if (!hasPermission) {
-      return { success: false, error: "You don't have permission to delete rosters" };
+      return actionFailure("You don't have permission to delete rosters");
     }
 
     const roster = await prisma.roster.findUnique({
@@ -240,7 +246,7 @@ export async function deleteRoster(rosterId: string) {
     });
 
     if (!roster) {
-      return { success: false, error: "Roster not found" };
+      return actionFailure("Roster not found");
     }
 
     // Check venue access for managers
@@ -251,13 +257,13 @@ export async function deleteRoster(rosterId: string) {
       });
       const venueIds = userVenues.map((v) => v.venueId);
       if (!venueIds.includes(roster.venueId)) {
-        return { success: false, error: "You don't have access to this roster" };
+        return actionFailure("You don't have access to this roster");
       }
     }
 
     // Only allow deleting drafts
     if (roster.status !== RosterStatus.DRAFT) {
-      return { success: false, error: "Can only delete draft rosters" };
+      return actionFailure("Can only delete draft rosters");
     }
 
     // Delete roster (cascade will handle shifts and history)
@@ -282,13 +288,12 @@ export async function deleteRoster(rosterId: string) {
       ipAddress: auditContext.ipAddress,
     });
 
-    revalidatePath("/manage/rosters");
-    revalidatePath("/system/rosters");
+    revalidatePaths("/manage/rosters", "/system/rosters");
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error deleting roster:", error);
-    return { success: false, error: "Failed to delete roster" };
+    logActionError("rosters.roster.deleteRoster", error, { rosterId });
+    return actionFailure("Failed to delete roster");
   }
 }
 
@@ -299,7 +304,7 @@ export async function publishRoster(rosterId: string) {
 
     const hasPermission = await canAccess("rosters", "publish");
     if (!hasPermission) {
-      return { success: false, error: "You don't have permission to publish rosters" };
+      return actionFailure("You don't have permission to publish rosters");
     }
 
     const roster = await prisma.roster.findUnique({
@@ -314,7 +319,7 @@ export async function publishRoster(rosterId: string) {
     });
 
     if (!roster) {
-      return { success: false, error: "Roster not found" };
+      return actionFailure("Roster not found");
     }
 
     // Check venue access for managers
@@ -325,13 +330,13 @@ export async function publishRoster(rosterId: string) {
       });
       const venueIds = userVenues.map((v) => v.venueId);
       if (!venueIds.includes(roster.venueId)) {
-        return { success: false, error: "You don't have access to this roster" };
+        return actionFailure("You don't have access to this roster");
       }
     }
 
     // Check if roster has any shifts
     if (roster.shifts.length === 0) {
-      return { success: false, error: "Cannot publish a roster with no assigned shifts" };
+      return actionFailure("Cannot publish a roster with no assigned shifts");
     }
 
     const newRevision = roster.revision + 1;
@@ -399,14 +404,12 @@ export async function publishRoster(rosterId: string) {
       });
     }
 
-    revalidatePath(`/manage/rosters/${rosterId}`);
-    revalidatePath("/manage/rosters");
-    revalidatePath("/my/rosters");
+    revalidatePaths(`/manage/rosters/${rosterId}`, "/manage/rosters", "/my/rosters");
 
-    return { success: true, roster: updatedRoster, notifiedCount: uniqueStaffIds.length };
+    return actionSuccess({ roster: updatedRoster, notifiedCount: uniqueStaffIds.length });
   } catch (error) {
-    console.error("Error publishing roster:", error);
-    return { success: false, error: "Failed to publish roster" };
+    logActionError("rosters.roster.publishRoster", error, { rosterId });
+    return actionFailure("Failed to publish roster");
   }
 }
 
@@ -417,7 +420,7 @@ export async function archiveRoster(rosterId: string) {
 
     const hasPermission = await canAccess("rosters", "edit");
     if (!hasPermission) {
-      return { success: false, error: "You don't have permission to archive rosters" };
+      return actionFailure("You don't have permission to archive rosters");
     }
 
     const roster = await prisma.roster.findUnique({
@@ -425,12 +428,12 @@ export async function archiveRoster(rosterId: string) {
     });
 
     if (!roster) {
-      return { success: false, error: "Roster not found" };
+      return actionFailure("Roster not found");
     }
 
     // Only published rosters can be archived
     if (roster.status !== RosterStatus.PUBLISHED) {
-      return { success: false, error: "Only published rosters can be archived" };
+      return actionFailure("Only published rosters can be archived");
     }
 
     const newRevision = roster.revision + 1;
@@ -462,13 +465,12 @@ export async function archiveRoster(rosterId: string) {
       },
     });
 
-    revalidatePath(`/manage/rosters/${rosterId}`);
-    revalidatePath("/manage/rosters");
+    revalidatePaths(`/manage/rosters/${rosterId}`, "/manage/rosters");
 
-    return { success: true, roster: updatedRoster };
+    return actionSuccess({ roster: updatedRoster });
   } catch (error) {
-    console.error("Error archiving roster:", error);
-    return { success: false, error: "Failed to archive roster" };
+    logActionError("rosters.roster.archiveRoster", error, { rosterId });
+    return actionFailure("Failed to archive roster");
   }
 }
 
@@ -483,13 +485,13 @@ export interface CopyRosterInput {
 export async function copyRoster(
   sourceRosterId: string,
   input: CopyRosterInput
-) {
+): Promise<ActionResult<{ rosterId: string }>> {
   try {
     const user = await requireAuth();
 
     const hasPermission = await canAccess("rosters", "create");
     if (!hasPermission) {
-      return { success: false, error: "You don't have permission to create rosters" };
+      return actionFailure("You don't have permission to create rosters");
     }
 
     // Get source roster with all shifts
@@ -503,7 +505,7 @@ export async function copyRoster(
     });
 
     if (!sourceRoster) {
-      return { success: false, error: "Source roster not found" };
+      return actionFailure("Source roster not found");
     }
 
     // Check venue access for managers
@@ -514,17 +516,14 @@ export async function copyRoster(
       });
       const venueIds = userVenues.map((v) => v.venueId);
       if (!venueIds.includes(sourceRoster.venueId)) {
-        return { success: false, error: "You don't have access to this roster" };
+        return actionFailure("You don't have access to this roster");
       }
     }
 
     // For new versions (same week), use the version chain service
     if (input.createNewVersion) {
       if (sourceRoster.status !== RosterStatus.PUBLISHED) {
-        return {
-          success: false,
-          error: "Can only create new versions of published rosters"
-        };
+        return actionFailure("Can only create new versions of published rosters");
       }
 
       // Use the version chain service for creating new versions
@@ -534,19 +533,17 @@ export async function copyRoster(
       });
 
       if (!result.success) {
-        return { success: false, error: result.error };
+        return actionFailure(result.error || "Failed to create new version");
       }
 
-      revalidatePath("/manage/rosters");
-      revalidatePath("/system/rosters");
+      revalidatePaths("/manage/rosters", "/system/rosters");
 
-      return {
-        success: true,
+      return actionSuccess({
         rosterId: result.rosterId,
         versionNumber: result.versionNumber,
         chainId: result.chainId,
         shiftsCount: sourceRoster.shifts.length,
-      };
+      });
     }
 
     // For different week copies, create standalone roster
@@ -576,10 +573,9 @@ export async function copyRoster(
     });
 
     if (existingRoster) {
-      return {
-        success: false,
-        error: `A roster already exists for this week. Use "Create New Version" to update it.`,
-      };
+      return actionFailure(
+        `A roster already exists for this week. Use "Create New Version" to update it.`
+      );
     }
 
     // Generate chainId for the new week
@@ -673,18 +669,16 @@ export async function copyRoster(
       },
     });
 
-    revalidatePath("/manage/rosters");
-    revalidatePath("/system/rosters");
+    revalidatePaths("/manage/rosters", "/system/rosters");
 
-    return {
-      success: true,
+    return actionSuccess({
       rosterId: newRoster.id,
       chainId,
       versionNumber: 1,
       shiftsCount: sourceRoster.shifts.length,
-    };
+    });
   } catch (error) {
-    console.error("Error copying roster:", error);
-    return { success: false, error: "Failed to copy roster" };
+    logActionError("rosters.roster.copyRoster", error, { sourceRosterId });
+    return actionFailure("Failed to copy roster");
   }
 }

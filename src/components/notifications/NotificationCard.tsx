@@ -34,6 +34,8 @@ import {
 import { markAsRead, deleteNotification } from "@/lib/actions/notifications";
 import { toast } from "sonner";
 import type { NotificationType } from "@prisma/client";
+import { useRouter } from "next/navigation";
+import { sanitizeAppPath } from "@/lib/services/email/sanitization";
 
 interface Notification {
   id: string;
@@ -113,6 +115,7 @@ function getNotificationColor(type: NotificationType) {
 }
 
 export function NotificationCard({ notification, userId, onUpdate }: NotificationCardProps) {
+  const router = useRouter();
   const [isMarkingRead, setIsMarkingRead] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [timeAgo, setTimeAgo] = useState<string>("");
@@ -177,12 +180,14 @@ export function NotificationCard({ notification, userId, onUpdate }: Notificatio
   }, [notification.createdAt]);
 
   const handleActionClick = () => {
-    if (notification.link) {
+    const safeLink = sanitizeAppPath(notification.link);
+
+    if (safeLink) {
       // Mark as read when action is clicked
       if (!notification.readAt) {
         markAsRead({ notificationId: notification.id, userId });
       }
-      window.location.href = notification.link;
+      router.push(safeLink);
     }
   };
 
@@ -276,7 +281,7 @@ export function NotificationCard({ notification, userId, onUpdate }: Notificatio
             </div>
 
             {/* Action Button */}
-            {notification.link && (
+            {sanitizeAppPath(notification.link) && (
               <Button
                 variant="outline"
                 size="sm"

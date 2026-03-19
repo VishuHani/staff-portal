@@ -1,23 +1,17 @@
-import { NextResponse } from "next/server";
 import { listMyDocumentAssignments } from "@/lib/actions/documents/assignments";
+import { apiError, apiSuccess } from "@/lib/utils/api-response";
 
 export async function GET() {
   try {
     const result = await listMyDocumentAssignments();
-    
+
     if (!result.success) {
-      return NextResponse.json(
-        { error: result.error || "Failed to fetch assignments" },
-        { status: 400 }
-      );
+      return apiError(result.error || "Failed to fetch assignments", 400);
     }
-    
-    return NextResponse.json({ assignments: result.data });
+
+    return apiSuccess({ assignments: result.data ?? [] });
   } catch (error) {
     console.error("Error in /api/documents/my-assignments:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return apiError("Internal server error");
   }
 }

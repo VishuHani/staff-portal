@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { createClient } from "@/lib/auth/supabase-server";
 import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/rbac/permissions";
+import { apiError, apiSuccess } from "@/lib/utils/api-response";
 
 // PUT /api/admin/break-rules/[id] - Update a break rule
 export async function PUT(
@@ -11,14 +12,27 @@ export async function PUT(
   try {
     const { id } = await params;
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiError("Unauthorized", 401);
     }
 
     const body = await request.json();
-    const { name, description, minShiftHours, maxShiftHours, breakMinutes, isPaid, additionalBreakMinutes, additionalBreakThreshold, priority, isDefault } = body;
+    const {
+      name,
+      description,
+      minShiftHours,
+      maxShiftHours,
+      breakMinutes,
+      isPaid,
+      additionalBreakMinutes,
+      additionalBreakThreshold,
+      priority,
+      isDefault,
+    } = body;
 
     // Get the break rule to check permissions
     const existingRule = await prisma.breakRule.findUnique({
@@ -26,13 +40,18 @@ export async function PUT(
     });
 
     if (!existingRule) {
-      return NextResponse.json({ error: "Break rule not found" }, { status: 404 });
+      return apiError("Break rule not found", 404);
     }
 
     // Check permissions
-    const canManage = await hasPermission(user.id, "venues", "manage", existingRule.venueId);
+    const canManage = await hasPermission(
+      user.id,
+      "venues",
+      "manage",
+      existingRule.venueId
+    );
     if (!canManage) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return apiError("Forbidden", 403);
     }
 
     // If this is set as default, unset any existing default rule for this venue
@@ -59,10 +78,10 @@ export async function PUT(
       },
     });
 
-    return NextResponse.json(breakRule);
+    return apiSuccess({ breakRule });
   } catch (error) {
     console.error("Error updating break rule:", error);
-    return NextResponse.json({ error: "Failed to update break rule" }, { status: 500 });
+    return apiError("Failed to update break rule");
   }
 }
 
@@ -74,10 +93,12 @@ export async function DELETE(
   try {
     const { id } = await params;
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiError("Unauthorized", 401);
     }
 
     // Get the break rule to check permissions
@@ -86,13 +107,18 @@ export async function DELETE(
     });
 
     if (!existingRule) {
-      return NextResponse.json({ error: "Break rule not found" }, { status: 404 });
+      return apiError("Break rule not found", 404);
     }
 
     // Check permissions
-    const canManage = await hasPermission(user.id, "venues", "manage", existingRule.venueId);
+    const canManage = await hasPermission(
+      user.id,
+      "venues",
+      "manage",
+      existingRule.venueId
+    );
     if (!canManage) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return apiError("Forbidden", 403);
     }
 
     // Soft delete by setting isActive to false
@@ -101,9 +127,9 @@ export async function DELETE(
       data: { isActive: false },
     });
 
-    return NextResponse.json({ success: true });
+    return apiSuccess({ deleted: true });
   } catch (error) {
     console.error("Error deleting break rule:", error);
-    return NextResponse.json({ error: "Failed to delete break rule" }, { status: 500 });
+    return apiError("Failed to delete break rule");
   }
 }

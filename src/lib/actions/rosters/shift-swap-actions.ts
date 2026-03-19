@@ -558,7 +558,7 @@ export async function getEligibleSwapUsers(shiftId: string) {
       where: {
         active: true,
         deletedAt: null,
-        id: { not: shift.userId },
+        ...(shift.userId ? { id: { not: shift.userId } } : {}),
         OR: [
           { venueId: shift.roster.venueId },
           { venues: { some: { venueId: shift.roster.venueId } } },

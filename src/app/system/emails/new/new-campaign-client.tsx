@@ -22,6 +22,7 @@ import {
 } from "@/lib/actions/email-campaigns";
 import { listFolderTree, type EmailFolderNode } from "@/lib/actions/email-workspace/folders";
 import { getEmail } from "@/lib/actions/emails";
+import { sanitizeEmailHtmlFragment } from "@/lib/services/email/sanitization";
 import type { EmailType, RecipientPreview } from "@/types/email-campaign";
 import {
   ArrowLeft,
@@ -930,7 +931,7 @@ export function NewCampaignClient({ isAdmin, venues, roles }: NewCampaignClientP
             <div
               className="min-h-[200px] bg-white p-4"
               dangerouslySetInnerHTML={{
-                __html: selectedEmailDetail?.htmlContent || "<p>No email content available</p>",
+                __html: sanitizeEmailHtmlFragment(selectedEmailDetail?.htmlContent || "<p>No email content available</p>"),
               }}
             />
           </div>

@@ -14,8 +14,12 @@ import {
   type ResetPasswordInput,
 } from "@/lib/auth/schemas";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
-import { NotificationType } from "@prisma/client";
 import { rateLimit, getClientIp } from "@/lib/utils/rate-limit";
+import { PRISMA_ENUM_VALUES } from "@/types/prisma-enums";
+import {
+  userAuthContextSelect,
+  type UserAuthContext,
+} from "@/lib/users/selectors";
 
 export async function login(formData: LoginInput) {
   // RATE LIMITING: Prevent brute force attacks
@@ -197,24 +201,7 @@ export async function signup(formData: SignupInput) {
   });
 
   // Initialize notification preferences (EMAIL + IN_APP enabled by default)
-  const notificationTypes: NotificationType[] = [
-    "NEW_MESSAGE",
-    "MESSAGE_REPLY",
-    "MESSAGE_MENTION",
-    "MESSAGE_REACTION",
-    "POST_MENTION",
-    "POST_PINNED",
-    "POST_DELETED",
-    "TIME_OFF_REQUEST",
-    "TIME_OFF_APPROVED",
-    "TIME_OFF_REJECTED",
-    "TIME_OFF_CANCELLED",
-    "USER_CREATED",
-    "USER_UPDATED",
-    "ROLE_CHANGED",
-    "SYSTEM_ANNOUNCEMENT",
-    "GROUP_REMOVED",
-  ];
+  const notificationTypes = PRISMA_ENUM_VALUES.NotificationType;
 
   try {
     await prisma.notificationPreference.createMany({
@@ -318,7 +305,7 @@ export async function resetPassword(formData: ResetPasswordInput) {
   };
 }
 
-export async function getCurrentUser() {
+export async function getCurrentUser(): Promise<UserAuthContext | null> {
   const supabase = await createClient();
 
   const {
@@ -331,30 +318,7 @@ export async function getCurrentUser() {
 
   const user = await prisma.user.findUnique({
     where: { id: supabaseUser.id },
-    include: {
-      role: {
-        include: {
-          rolePermissions: {
-            include: {
-              permission: true,
-            },
-          },
-        },
-      },
-      venue: true,
-      venues: {
-        include: {
-          venue: {
-            select: {
-              id: true,
-              name: true,
-              code: true,
-              active: true,
-            },
-          },
-        },
-      },
-    },
+    select: userAuthContextSelect,
   });
 
   return user;

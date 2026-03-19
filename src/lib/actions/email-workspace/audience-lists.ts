@@ -1,11 +1,19 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import type {
+  AudienceQueryType as PrismaAudienceQueryType,
+  EmailContentScope as PrismaEmailContentScope,
+} from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
 import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
-import { hasPermission, isAdmin, type PermissionAction } from "@/lib/rbac/permissions";
+import {
+  hasPermission,
+  isAdmin,
+  type PermissionAction,
+} from "@/lib/rbac/permissions";
 import {
   DEFAULT_ALLOWED_AUDIENCE_SOURCES,
   validateAudienceSql,
@@ -15,8 +23,12 @@ import {
   validateFolderAssignment,
 } from "@/lib/email-workspace/folder-access";
 
-type AudienceListCreateData = Parameters<typeof prisma.audienceList.create>[0]["data"];
-type AudienceListUpdateData = Parameters<typeof prisma.audienceList.update>[0]["data"];
+type AudienceListCreateData = Parameters<
+  typeof prisma.audienceList.create
+>[0]["data"];
+type AudienceListUpdateData = Parameters<
+  typeof prisma.audienceList.update
+>[0]["data"];
 type AudienceListWhereInput = Exclude<
   NonNullable<Parameters<typeof prisma.audienceList.findMany>[0]>["where"],
   undefined
@@ -26,8 +38,8 @@ type UserWhereInput = Exclude<
   undefined
 >;
 
-type AudienceQueryType = "SQL" | "FILTER" | "AI_FILTER";
-type EmailContentScope = "PRIVATE" | "TEAM" | "SYSTEM";
+type AudienceQueryType = PrismaAudienceQueryType;
+type EmailContentScope = PrismaEmailContentScope;
 
 type SqlResultRow = Record<string, unknown>;
 type AudienceFilterActiveStatus = "ACTIVE" | "INACTIVE" | "ANY";
@@ -140,7 +152,9 @@ function isAudienceSchemaMissingError(error: unknown): boolean {
     }
 
     if (error.code === "P2010") {
-      const meta = error.meta as { code?: string; message?: string } | undefined;
+      const meta = error.meta as
+        | { code?: string; message?: string }
+        | undefined;
       if (meta?.code === "42P01" || meta?.code === "42703") {
         return true;
       }
@@ -171,7 +185,12 @@ function getSchemaMissingMessage() {
 }
 
 function revalidateAudiencePaths() {
-  const paths = ["/emails/audience", "/emails/campaigns", "/system/emails", "/manage/emails"];
+  const paths = [
+    "/emails/audience",
+    "/emails/campaigns",
+    "/system/emails",
+    "/manage/emails",
+  ];
   for (const path of paths) {
     revalidatePath(path);
   }
@@ -229,30 +248,32 @@ function canReadAudienceList(
     return true;
   }
 
-  if (list.scope === "TEAM" && list.venueId && userVenueIds.includes(list.venueId)) {
+  if (
+    list.scope === "TEAM" &&
+    list.venueId &&
+    userVenueIds.includes(list.venueId)
+  ) {
     return true;
   }
 
   return false;
 }
 
-function toAudienceListSummary(
-  list: {
-    id: string;
-    folderId: string | null;
-    name: string;
-    description: string | null;
-    queryType: AudienceQueryType;
-    scope: EmailContentScope;
-    venueId: string | null;
-    ownerId: string;
-    lastRunAt: Date | null;
-    lastCount: number;
-    createdAt: Date;
-    updatedAt: Date;
-    _count?: { runs: number };
-  }
-): AudienceListSummary {
+function toAudienceListSummary(list: {
+  id: string;
+  folderId: string | null;
+  name: string;
+  description: string | null;
+  queryType: AudienceQueryType;
+  scope: EmailContentScope;
+  venueId: string | null;
+  ownerId: string;
+  lastRunAt: Date | null;
+  lastCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+  _count?: { runs: number };
+}): AudienceListSummary {
   return {
     id: list.id,
     folderId: list.folderId,
@@ -333,7 +354,11 @@ function getCaseInsensitive(
 }
 
 function extractEmail(row: SqlResultRow): string | null {
-  const value = getCaseInsensitive(row, ["email", "user_email", "recipient_email"]);
+  const value = getCaseInsensitive(row, [
+    "email",
+    "user_email",
+    "recipient_email",
+  ]);
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
@@ -370,17 +395,28 @@ function toSnapshotMetadata(row: SqlResultRow): Prisma.InputJsonValue | null {
     metadata[key] = value;
   }
 
-  return Object.keys(metadata).length > 0 ? (metadata as Prisma.InputJsonValue) : null;
+  return Object.keys(metadata).length > 0
+    ? (metadata as Prisma.InputJsonValue)
+    : null;
 }
 
 async function executeAudienceSql(
   normalizedSql: string
-): Promise<{ rowCount: number; snapshots: Array<{ userId: string | null; email: string; metadataJson: Prisma.InputJsonValue | null }> }> {
+): Promise<{
+  rowCount: number;
+  snapshots: Array<{
+    userId: string | null;
+    email: string;
+    metadataJson: Prisma.InputJsonValue | null;
+  }>;
+}> {
   const sql = stripTrailingSemicolon(normalizedSql);
   const wrappedSql = `SELECT * FROM (${sql}) AS audience_source LIMIT ${MAX_AUDIENCE_SQL_ROWS}`;
 
   const rows = await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${SQL_STATEMENT_TIMEOUT_MS}ms'`);
+    await tx.$executeRawUnsafe(
+      `SET LOCAL statement_timeout = '${SQL_STATEMENT_TIMEOUT_MS}ms'`
+    );
     return tx.$queryRawUnsafe<SqlResultRow[]>(wrappedSql);
   });
 
@@ -400,8 +436,11 @@ async function executeAudienceSql(
     .filter(
       (
         value
-      ): value is { userId: string | null; email: string; metadataJson: Prisma.InputJsonValue | null } =>
-        Boolean(value)
+      ): value is {
+        userId: string | null;
+        email: string;
+        metadataJson: Prisma.InputJsonValue | null;
+      } => Boolean(value)
     );
 
   return {
@@ -458,7 +497,11 @@ function parseActiveStatus(value: unknown): AudienceFilterActiveStatus {
   }
 
   const normalized = value.trim().toUpperCase();
-  if (normalized === "ACTIVE" || normalized === "INACTIVE" || normalized === "ANY") {
+  if (
+    normalized === "ACTIVE" ||
+    normalized === "INACTIVE" ||
+    normalized === "ANY"
+  ) {
     return normalized;
   }
 
@@ -466,22 +509,33 @@ function parseActiveStatus(value: unknown): AudienceFilterActiveStatus {
 }
 
 function readFilterSource(filterJson: unknown): Record<string, unknown> {
-  if (!filterJson || typeof filterJson !== "object" || Array.isArray(filterJson)) {
+  if (
+    !filterJson ||
+    typeof filterJson !== "object" ||
+    Array.isArray(filterJson)
+  ) {
     return {};
   }
 
   const base = filterJson as Record<string, unknown>;
-  if (base.filters && typeof base.filters === "object" && !Array.isArray(base.filters)) {
+  if (
+    base.filters &&
+    typeof base.filters === "object" &&
+    !Array.isArray(base.filters)
+  ) {
     return base.filters as Record<string, unknown>;
   }
 
   return base;
 }
 
-function parseAudienceFilterPayload(filterJson: unknown): AudienceFilterPayload {
-  const base = filterJson && typeof filterJson === "object" && !Array.isArray(filterJson)
-    ? (filterJson as Record<string, unknown>)
-    : {};
+function parseAudienceFilterPayload(
+  filterJson: unknown
+): AudienceFilterPayload {
+  const base =
+    filterJson && typeof filterJson === "object" && !Array.isArray(filterJson)
+      ? (filterJson as Record<string, unknown>)
+      : {};
   const source = readFilterSource(filterJson);
 
   const aiPromptSource =
@@ -508,7 +562,9 @@ function parseAudienceFilterPayload(filterJson: unknown): AudienceFilterPayload 
   };
 }
 
-function deriveFilterPayloadFromPrompt(prompt: string): Partial<AudienceFilterPayload> {
+function deriveFilterPayloadFromPrompt(
+  prompt: string
+): Partial<AudienceFilterPayload> {
   const normalized = prompt.toLowerCase();
   const derivedRoles = new Set<string>();
 
@@ -547,11 +603,11 @@ function mergeFilterPayload(
     roleNames:
       configured.roleNames.length > 0
         ? configured.roleNames
-        : derived.roleNames ?? [],
+        : (derived.roleNames ?? []),
     activeStatus:
       configured.activeStatus !== "ANY"
         ? configured.activeStatus
-        : derived.activeStatus ?? "ANY",
+        : (derived.activeStatus ?? "ANY"),
     venueIds: configured.venueIds,
     search: configured.search,
     limit: configured.limit || derived.limit || 500,
@@ -571,7 +627,11 @@ async function executeAudienceFilter({
   filter: AudienceFilterPayload;
 }): Promise<{
   rowCount: number;
-  snapshots: Array<{ userId: string | null; email: string; metadataJson: Prisma.InputJsonValue | null }>;
+  snapshots: Array<{
+    userId: string | null;
+    email: string;
+    metadataJson: Prisma.InputJsonValue | null;
+  }>;
   appliedFilter: Record<string, unknown>;
 }> {
   const andWhere: UserWhereInput[] = [];
@@ -612,7 +672,9 @@ async function executeAudienceFilter({
         ],
       });
     } else {
-      const allowedVenueIds = requestedVenueIds.filter((venueId) => userVenueIds.includes(venueId));
+      const allowedVenueIds = requestedVenueIds.filter((venueId) =>
+        userVenueIds.includes(venueId)
+      );
       if (allowedVenueIds.length > 0) {
         andWhere.push({
           OR: [
@@ -656,11 +718,7 @@ async function executeAudienceFilter({
       },
       venueId: true,
     },
-    orderBy: [
-      { lastName: "asc" },
-      { firstName: "asc" },
-      { email: "asc" },
-    ],
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { email: "asc" }],
     take: filter.limit,
   });
 
@@ -736,7 +794,10 @@ function getResolvedScopeAndVenue(input: {
     };
   }
 
-  if (input.requestedVenueId && !input.userVenueIds.includes(input.requestedVenueId)) {
+  if (
+    input.requestedVenueId &&
+    !input.userVenueIds.includes(input.requestedVenueId)
+  ) {
     return {
       scope: "PRIVATE",
       venueId: null,
@@ -792,7 +853,8 @@ export async function listAudienceLists(
       whereClauses.push({ queryType: input.queryType });
     }
 
-    const where: AudienceListWhereInput = whereClauses.length > 0 ? { AND: whereClauses } : {};
+    const where: AudienceListWhereInput =
+      whereClauses.length > 0 ? { AND: whereClauses } : {};
     const take = Math.max(1, Math.min(input.take ?? 100, 250));
 
     const lists = await prisma.audienceList.findMany({
@@ -885,7 +947,10 @@ export async function createAudienceList(
         };
       }
 
-      const validation = validateAudienceSql(sqlText, DEFAULT_ALLOWED_AUDIENCE_SOURCES);
+      const validation = validateAudienceSql(
+        sqlText,
+        DEFAULT_ALLOWED_AUDIENCE_SOURCES
+      );
       if (!validation.valid) {
         return {
           success: false,
@@ -959,7 +1024,10 @@ export async function createAudienceList(
         },
       });
     } catch (createError) {
-      if (createData.folderId !== undefined && isAudienceSchemaMissingError(createError)) {
+      if (
+        createData.folderId !== undefined &&
+        isAudienceSchemaMissingError(createError)
+      ) {
         delete createData.folderId;
         list = await prisma.audienceList.create({
           data: createData as AudienceListCreateData,
@@ -1030,7 +1098,12 @@ export async function updateAudienceList(
 
     const isAdminUser = await isAdmin(user.id);
     const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
-    const canRead = canReadAudienceList(list, user.id, isAdminUser, userVenueIds);
+    const canRead = canReadAudienceList(
+      list,
+      user.id,
+      isAdminUser,
+      userVenueIds
+    );
     if (!canRead) {
       return {
         success: false,
@@ -1069,7 +1142,10 @@ export async function updateAudienceList(
         };
       }
 
-      const validation = validateAudienceSql(sqlText, DEFAULT_ALLOWED_AUDIENCE_SOURCES);
+      const validation = validateAudienceSql(
+        sqlText,
+        DEFAULT_ALLOWED_AUDIENCE_SOURCES
+      );
       if (!validation.valid) {
         return {
           success: false,
@@ -1093,7 +1169,8 @@ export async function updateAudienceList(
         isAdminUser,
         userVenueIds,
         requestedScope: input.scope || list.scope,
-        requestedVenueId: input.venueId !== undefined ? input.venueId : list.venueId,
+        requestedVenueId:
+          input.venueId !== undefined ? input.venueId : list.venueId,
       });
 
       if (scopeResolution.error) {
@@ -1147,7 +1224,10 @@ export async function updateAudienceList(
         },
       });
     } catch (updateError) {
-      if (updateData.folderId !== undefined && isAudienceSchemaMissingError(updateError)) {
+      if (
+        updateData.folderId !== undefined &&
+        isAudienceSchemaMissingError(updateError)
+      ) {
         delete updateData.folderId;
         updated = await prisma.audienceList.update({
           where: { id: input.id },
@@ -1316,7 +1396,10 @@ export async function runAudienceList(
 
     if (list.queryType === "SQL") {
       const sqlText = list.sqlText?.trim() || "";
-      const validation = validateAudienceSql(sqlText, DEFAULT_ALLOWED_AUDIENCE_SOURCES);
+      const validation = validateAudienceSql(
+        sqlText,
+        DEFAULT_ALLOWED_AUDIENCE_SOURCES
+      );
 
       validationLog = {
         mode: "SQL",

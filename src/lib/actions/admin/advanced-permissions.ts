@@ -1,8 +1,14 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/rbac/access";
+import {
+  actionFailure,
+  actionSuccess,
+  logActionError,
+  revalidatePaths,
+  type ActionResult,
+} from "@/lib/utils/action-contract";
 import { z } from "zod";
 
 // ============================================================================
@@ -21,7 +27,9 @@ const deleteFieldPermissionSchema = z.object({
 });
 
 export type FieldPermissionInput = z.infer<typeof fieldPermissionSchema>;
-export type DeleteFieldPermissionInput = z.infer<typeof deleteFieldPermissionSchema>;
+export type DeleteFieldPermissionInput = z.infer<
+  typeof deleteFieldPermissionSchema
+>;
 
 // ============================================================================
 // CONDITIONAL PERMISSION SCHEMAS
@@ -33,7 +41,17 @@ const conditionalPermissionSchema = z.object({
   action: z.string().min(1),
   conditions: z.object({
     field: z.string().min(1),
-    operator: z.enum(["=", "!=", ">", "<", ">=", "<=", "in", "not_in", "contains"]),
+    operator: z.enum([
+      "=",
+      "!=",
+      ">",
+      "<",
+      ">=",
+      "<=",
+      "in",
+      "not_in",
+      "contains",
+    ]),
     value: z.any(),
   }),
 });
@@ -42,8 +60,12 @@ const deleteConditionalPermissionSchema = z.object({
   id: z.string().cuid(),
 });
 
-export type ConditionalPermissionInput = z.infer<typeof conditionalPermissionSchema>;
-export type DeleteConditionalPermissionInput = z.infer<typeof deleteConditionalPermissionSchema>;
+export type ConditionalPermissionInput = z.infer<
+  typeof conditionalPermissionSchema
+>;
+export type DeleteConditionalPermissionInput = z.infer<
+  typeof deleteConditionalPermissionSchema
+>;
 
 // ============================================================================
 // TIME-BASED ACCESS SCHEMAS
@@ -64,7 +86,9 @@ const deleteTimeBasedAccessSchema = z.object({
 });
 
 export type TimeBasedAccessInput = z.infer<typeof timeBasedAccessSchema>;
-export type DeleteTimeBasedAccessInput = z.infer<typeof deleteTimeBasedAccessSchema>;
+export type DeleteTimeBasedAccessInput = z.infer<
+  typeof deleteTimeBasedAccessSchema
+>;
 
 // ============================================================================
 // FIELD PERMISSION ACTIONS
@@ -90,10 +114,10 @@ export async function getFieldPermissions(roleId: string) {
       orderBy: [{ resource: "asc" }, { field: "asc" }],
     });
 
-    return { success: true, permissions };
+    return actionSuccess({ permissions });
   } catch (error) {
-    console.error("Error fetching field permissions:", error);
-    return { error: "Failed to fetch field permissions" };
+    logActionError("Error fetching field permissions", error, { roleId });
+    return actionFailure("Failed to fetch field permissions");
   }
 }
 
@@ -105,9 +129,9 @@ export async function createFieldPermission(data: FieldPermissionInput) {
 
   const validatedFields = fieldPermissionSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { roleId, resource, field, access } = validatedFields.data;
@@ -125,7 +149,7 @@ export async function createFieldPermission(data: FieldPermissionInput) {
     });
 
     if (existing) {
-      return { error: "Field permission already exists for this role" };
+      return actionFailure("Field permission already exists for this role");
     }
 
     const permission = await prisma.fieldPermission.create({
@@ -145,12 +169,16 @@ export async function createFieldPermission(data: FieldPermissionInput) {
       },
     });
 
-    revalidatePath("/admin/permissions");
+    revalidatePaths(["/admin/permissions"]);
 
-    return { success: true, permission };
+    return actionSuccess({ permission });
   } catch (error) {
-    console.error("Error creating field permission:", error);
-    return { error: "Failed to create field permission" };
+    logActionError("Error creating field permission", error, {
+      roleId,
+      resource,
+      field,
+    });
+    return actionFailure("Failed to create field permission");
   }
 }
 
@@ -162,9 +190,9 @@ export async function deleteFieldPermission(data: DeleteFieldPermissionInput) {
 
   const validatedFields = deleteFieldPermissionSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { id } = validatedFields.data;
@@ -174,12 +202,12 @@ export async function deleteFieldPermission(data: DeleteFieldPermissionInput) {
       where: { id },
     });
 
-    revalidatePath("/admin/permissions");
+    revalidatePaths(["/admin/permissions"]);
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error deleting field permission:", error);
-    return { error: "Failed to delete field permission" };
+    logActionError("Error deleting field permission", error, { id });
+    return actionFailure("Failed to delete field permission");
   }
 }
 
@@ -207,24 +235,26 @@ export async function getConditionalPermissions(roleId: string) {
       orderBy: [{ resource: "asc" }, { action: "asc" }],
     });
 
-    return { success: true, permissions };
+    return actionSuccess({ permissions });
   } catch (error) {
-    console.error("Error fetching conditional permissions:", error);
-    return { error: "Failed to fetch conditional permissions" };
+    logActionError("Error fetching conditional permissions", error, { roleId });
+    return actionFailure("Failed to fetch conditional permissions");
   }
 }
 
 /**
  * Create a conditional permission
  */
-export async function createConditionalPermission(data: ConditionalPermissionInput) {
+export async function createConditionalPermission(
+  data: ConditionalPermissionInput
+) {
   await requireAdmin();
 
   const validatedFields = conditionalPermissionSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { roleId, resource, action, conditions } = validatedFields.data;
@@ -247,26 +277,32 @@ export async function createConditionalPermission(data: ConditionalPermissionInp
       },
     });
 
-    revalidatePath("/admin/permissions");
+    revalidatePaths(["/admin/permissions"]);
 
-    return { success: true, permission };
+    return actionSuccess({ permission });
   } catch (error) {
-    console.error("Error creating conditional permission:", error);
-    return { error: "Failed to create conditional permission" };
+    logActionError("Error creating conditional permission", error, {
+      roleId,
+      resource,
+      action,
+    });
+    return actionFailure("Failed to create conditional permission");
   }
 }
 
 /**
  * Delete a conditional permission
  */
-export async function deleteConditionalPermission(data: DeleteConditionalPermissionInput) {
+export async function deleteConditionalPermission(
+  data: DeleteConditionalPermissionInput
+) {
   await requireAdmin();
 
   const validatedFields = deleteConditionalPermissionSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { id } = validatedFields.data;
@@ -276,12 +312,12 @@ export async function deleteConditionalPermission(data: DeleteConditionalPermiss
       where: { id },
     });
 
-    revalidatePath("/admin/permissions");
+    revalidatePaths(["/admin/permissions"]);
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error deleting conditional permission:", error);
-    return { error: "Failed to delete conditional permission" };
+    logActionError("Error deleting conditional permission", error, { id });
+    return actionFailure("Failed to delete conditional permission");
   }
 }
 
@@ -309,10 +345,10 @@ export async function getTimeBasedAccess(roleId: string) {
       orderBy: [{ resource: "asc" }, { action: "asc" }],
     });
 
-    return { success: true, rules };
+    return actionSuccess({ rules });
   } catch (error) {
-    console.error("Error fetching time-based access:", error);
-    return { error: "Failed to fetch time-based access" };
+    logActionError("Error fetching time-based access", error, { roleId });
+    return actionFailure("Failed to fetch time-based access");
   }
 }
 
@@ -324,12 +360,13 @@ export async function createTimeBasedAccess(data: TimeBasedAccessInput) {
 
   const validatedFields = timeBasedAccessSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
-  const { roleId, resource, action, daysOfWeek, startTime, endTime, timezone } = validatedFields.data;
+  const { roleId, resource, action, daysOfWeek, startTime, endTime, timezone } =
+    validatedFields.data;
 
   try {
     const rule = await prisma.timeBasedAccess.create({
@@ -352,12 +389,16 @@ export async function createTimeBasedAccess(data: TimeBasedAccessInput) {
       },
     });
 
-    revalidatePath("/admin/permissions");
+    revalidatePaths(["/admin/permissions"]);
 
-    return { success: true, rule };
+    return actionSuccess({ rule });
   } catch (error) {
-    console.error("Error creating time-based access:", error);
-    return { error: "Failed to create time-based access" };
+    logActionError("Error creating time-based access", error, {
+      roleId,
+      resource,
+      action,
+    });
+    return actionFailure("Failed to create time-based access");
   }
 }
 
@@ -369,9 +410,9 @@ export async function deleteTimeBasedAccess(data: DeleteTimeBasedAccessInput) {
 
   const validatedFields = deleteTimeBasedAccessSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(
+      validatedFields.error.issues[0]?.message || "Invalid fields"
+    );
   }
 
   const { id } = validatedFields.data;
@@ -381,12 +422,12 @@ export async function deleteTimeBasedAccess(data: DeleteTimeBasedAccessInput) {
       where: { id },
     });
 
-    revalidatePath("/admin/permissions");
+    revalidatePaths(["/admin/permissions"]);
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error deleting time-based access:", error);
-    return { error: "Failed to delete time-based access" };
+    logActionError("Error deleting time-based access", error, { id });
+    return actionFailure("Failed to delete time-based access");
   }
 }
 
@@ -397,7 +438,15 @@ export async function deleteTimeBasedAccess(data: DeleteTimeBasedAccessInput) {
 /**
  * Get all advanced permissions for a role (field, conditional, time-based)
  */
-export async function getAllAdvancedPermissions(roleId: string) {
+export async function getAllAdvancedPermissions(
+  roleId: string
+): Promise<
+  ActionResult<{
+    fieldPermissions: Awaited<ReturnType<typeof prisma.fieldPermission.findMany>>;
+    conditionalPermissions: Awaited<ReturnType<typeof prisma.conditionalPermission.findMany>>;
+    timeBasedAccess: Awaited<ReturnType<typeof prisma.timeBasedAccess.findMany>>;
+  }>
+> {
   await requireAdmin();
 
   try {
@@ -416,14 +465,13 @@ export async function getAllAdvancedPermissions(roleId: string) {
       }),
     ]);
 
-    return {
-      success: true,
+    return actionSuccess({
       fieldPermissions: fieldPerms,
       conditionalPermissions: conditionalPerms,
       timeBasedAccess: timeBasedRules,
-    };
+    });
   } catch (error) {
-    console.error("Error fetching advanced permissions:", error);
-    return { error: "Failed to fetch advanced permissions" };
+    logActionError("Error fetching advanced permissions", error, { roleId });
+    return actionFailure("Failed to fetch advanced permissions");
   }
 }

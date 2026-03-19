@@ -9,6 +9,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { NotificationProvider } from "@/components/notifications/notification-context";
 
 interface DashboardLayoutProps {
   user: {
@@ -29,35 +30,37 @@ export function DashboardLayout({ user, unreadCount = 0, unreadMessageCount = 0,
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <Header user={user} unreadCount={unreadCount} onMenuClick={() => setSidebarOpen(true)} />
+    <NotificationProvider value={{ userId: user.id, unreadCount }}>
+      <div className="min-h-screen bg-background">
+        {/* Header */}
+        <Header user={user} onMenuClick={() => setSidebarOpen(true)} />
 
-      <div className="flex h-[calc(100vh-4rem)]">
-        {/* Desktop Sidebar */}
-        <aside className="hidden w-64 border-r bg-background lg:block">
-          <div className="h-full overflow-y-auto p-4">
-            <Sidebar userRole={user.role.name} unreadMessageCount={unreadMessageCount} />
-          </div>
-        </aside>
-
-        {/* Mobile Sidebar */}
-        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="left" className="w-64 p-0" aria-describedby={undefined}>
-            <SheetHeader className="border-b p-4">
-              <SheetTitle>Navigation</SheetTitle>
-            </SheetHeader>
+        <div className="flex h-[calc(100vh-4rem)]">
+          {/* Desktop Sidebar */}
+          <aside className="hidden w-64 border-r bg-background lg:block">
             <div className="h-full overflow-y-auto p-4">
               <Sidebar userRole={user.role.name} unreadMessageCount={unreadMessageCount} />
             </div>
-          </SheetContent>
-        </Sheet>
+          </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="container mx-auto p-4 sm:p-6 lg:p-8">{children}</div>
-        </main>
+          {/* Mobile Sidebar */}
+          <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+            <SheetContent side="left" className="w-64 p-0" aria-describedby={undefined}>
+              <SheetHeader className="border-b p-4">
+                <SheetTitle>Navigation</SheetTitle>
+              </SheetHeader>
+              <div className="h-full overflow-y-auto p-4">
+                <Sidebar userRole={user.role.name} unreadMessageCount={unreadMessageCount} />
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          {/* Main Content */}
+          <main className="flex-1 overflow-y-auto">
+            <div className="container mx-auto p-4 sm:p-6 lg:p-8">{children}</div>
+          </main>
+        </div>
       </div>
-    </div>
+    </NotificationProvider>
   );
 }

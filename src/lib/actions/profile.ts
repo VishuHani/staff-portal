@@ -1,7 +1,13 @@
 "use server";
 
+import {
+  actionFailure,
+  actionSuccess,
+  logActionError,
+  revalidatePaths,
+  type ActionResult,
+} from "@/lib/utils/action-contract";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "./auth";
 import {
@@ -19,14 +25,26 @@ import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import { getAuditContext } from "@/lib/utils/audit-helpers";
 import { calculateProfileCompletion } from "@/lib/utils/profile-completion";
 
+type FieldErrors = Record<string, string[] | undefined>;
+
+function revalidateProfilePaths(...paths: string[]) {
+  revalidatePath("/", "layout");
+
+  if (paths.length > 0) {
+    revalidatePaths(paths);
+  }
+}
+
 /**
  * Complete user profile (for users with profileCompletedAt = null)
  */
-export async function completeProfile(data: CompleteProfileInput) {
+export async function completeProfile(
+  data: CompleteProfileInput
+): Promise<ActionResult<{ errors: FieldErrors }>> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   // Validate input
@@ -34,7 +52,7 @@ export async function completeProfile(data: CompleteProfileInput) {
 
   if (!validatedFields.success) {
     return {
-      error: "Invalid fields",
+      ...actionFailure("Invalid fields"),
       errors: validatedFields.error.flatten().fieldErrors,
     };
   }
@@ -76,22 +94,24 @@ export async function completeProfile(data: CompleteProfileInput) {
       },
     });
 
-    revalidatePath("/", "layout");
-    return { success: true };
+    revalidateProfilePaths();
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error completing profile:", error);
-    return { error: "Failed to complete profile" };
+    logActionError("profile.completeProfile", error, { userId: user.id });
+    return actionFailure("Failed to complete profile");
   }
 }
 
 /**
  * Update user profile
  */
-export async function updateProfile(data: UpdateProfileInput) {
+export async function updateProfile(
+  data: UpdateProfileInput
+): Promise<ActionResult<{ errors: FieldErrors }>> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   // Validate input
@@ -99,7 +119,7 @@ export async function updateProfile(data: UpdateProfileInput) {
 
   if (!validatedFields.success) {
     return {
-      error: "Invalid fields",
+      ...actionFailure("Invalid fields"),
       errors: validatedFields.error.flatten().fieldErrors,
     };
   }
@@ -181,29 +201,30 @@ export async function updateProfile(data: UpdateProfileInput) {
       ipAddress: auditContext.ipAddress,
     });
 
-    revalidatePath("/", "layout");
-    revalidatePath("/settings/profile");
-    return { success: true };
+    revalidateProfilePaths("/settings/profile");
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error updating profile:", error);
-    return { error: "Failed to update profile" };
+    logActionError("profile.updateProfile", error, { userId: user.id });
+    return actionFailure("Failed to update profile");
   }
 }
 
 /**
  * Upload/update profile image
  */
-export async function uploadProfileImage(formData: FormData) {
+export async function uploadProfileImage(
+  formData: FormData
+): Promise<ActionResult<{ url: string }>> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   const file = formData.get("file") as File;
 
   if (!file) {
-    return { error: "No file provided" };
+    return actionFailure("No file provided");
   }
 
   try {
@@ -217,7 +238,7 @@ export async function uploadProfileImage(formData: FormData) {
 
     // Check if upload was successful
     if ("error" in uploadResult) {
-      return { error: uploadResult.error };
+      return actionFailure(uploadResult.error);
     }
 
     // Update user record
@@ -228,28 +249,27 @@ export async function uploadProfileImage(formData: FormData) {
       },
     });
 
-    revalidatePath("/", "layout");
-    revalidatePath("/settings/profile");
-    return { success: true, url: uploadResult.url };
+    revalidateProfilePaths("/settings/profile");
+    return actionSuccess({ url: uploadResult.url });
   } catch (error: unknown) {
-    console.error("Error uploading profile image:", error);
+    logActionError("profile.uploadProfileImage", error, { userId: user.id });
     const errorMessage = error instanceof Error ? error.message : "Failed to upload image";
-    return { error: errorMessage };
+    return actionFailure(errorMessage);
   }
 }
 
 /**
  * Delete profile image
  */
-export async function deleteProfileImage() {
+export async function deleteProfileImage(): Promise<ActionResult> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   if (!user.profileImage) {
-    return { error: "No profile image to delete" };
+    return actionFailure("No profile image to delete");
   }
 
   try {
@@ -264,13 +284,12 @@ export async function deleteProfileImage() {
       },
     });
 
-    revalidatePath("/", "layout");
-    revalidatePath("/settings/profile");
-    return { success: true };
+    revalidateProfilePaths("/settings/profile");
+    return actionSuccess({});
   } catch (error: unknown) {
-    console.error("Error deleting profile image:", error);
+    logActionError("profile.deleteProfileImage", error, { userId: user.id });
     const errorMessage = error instanceof Error ? error.message : "Failed to delete image";
-    return { error: errorMessage };
+    return actionFailure(errorMessage);
   }
 }
 
@@ -367,6 +386,8 @@ export async function getProfile() {
   return {
     ...fullUser,
     role: fullUser.role.name,
+    customSuperRate:
+      fullUser.customSuperRate !== null ? Number(fullUser.customSuperRate) : null,
     venues: fullUser.venues.map((uv) => ({
       id: uv.venue.id,
       name: uv.venue.name,
@@ -384,18 +405,25 @@ export async function getProfile() {
 /**
  * Add a skill to user profile
  */
-export async function addUserSkill(data: UserSkillInput) {
+export async function addUserSkill(
+  data: UserSkillInput
+): Promise<
+  ActionResult<{
+    skill: Awaited<ReturnType<typeof prisma.userSkill.create>>;
+    errors: FieldErrors;
+  }>
+> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   const validatedFields = userSkillSchema.safeParse(data);
 
   if (!validatedFields.success) {
     return {
-      error: "Invalid fields",
+      ...actionFailure("Invalid fields"),
       errors: validatedFields.error.flatten().fieldErrors,
     };
   }
@@ -408,29 +436,37 @@ export async function addUserSkill(data: UserSkillInput) {
       },
     });
 
-    revalidatePath("/my/profile");
-    return { success: true, skill };
+    revalidatePaths("/my/profile");
+    return actionSuccess({ skill });
   } catch (error: unknown) {
-    console.error("Error adding skill:", error);
-    return { error: "Failed to add skill" };
+    logActionError("profile.addUserSkill", error, { userId: user.id });
+    return actionFailure("Failed to add skill");
   }
 }
 
 /**
  * Update a skill
  */
-export async function updateUserSkill(skillId: string, data: UserSkillInput) {
+export async function updateUserSkill(
+  skillId: string,
+  data: UserSkillInput
+): Promise<
+  ActionResult<{
+    skill: Awaited<ReturnType<typeof prisma.userSkill.update>>;
+    errors: FieldErrors;
+  }>
+> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   const validatedFields = userSkillSchema.safeParse(data);
 
   if (!validatedFields.success) {
     return {
-      error: "Invalid fields",
+      ...actionFailure("Invalid fields"),
       errors: validatedFields.error.flatten().fieldErrors,
     };
   }
@@ -442,7 +478,7 @@ export async function updateUserSkill(skillId: string, data: UserSkillInput) {
     });
 
     if (!existing) {
-      return { error: "Skill not found" };
+      return actionFailure("Skill not found");
     }
 
     const skill = await prisma.userSkill.update({
@@ -450,22 +486,22 @@ export async function updateUserSkill(skillId: string, data: UserSkillInput) {
       data: validatedFields.data,
     });
 
-    revalidatePath("/my/profile");
-    return { success: true, skill };
+    revalidatePaths("/my/profile");
+    return actionSuccess({ skill });
   } catch (error: unknown) {
-    console.error("Error updating skill:", error);
-    return { error: "Failed to update skill" };
+    logActionError("profile.updateUserSkill", error, { userId: user.id, skillId });
+    return actionFailure("Failed to update skill");
   }
 }
 
 /**
  * Delete a skill
  */
-export async function deleteUserSkill(skillId: string) {
+export async function deleteUserSkill(skillId: string): Promise<ActionResult> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   try {
@@ -475,18 +511,18 @@ export async function deleteUserSkill(skillId: string) {
     });
 
     if (!existing) {
-      return { error: "Skill not found" };
+      return actionFailure("Skill not found");
     }
 
     await prisma.userSkill.delete({
       where: { id: skillId },
     });
 
-    revalidatePath("/my/profile");
-    return { success: true };
+    revalidatePaths("/my/profile");
+    return actionSuccess({});
   } catch (error: unknown) {
-    console.error("Error deleting skill:", error);
-    return { error: "Failed to delete skill" };
+    logActionError("profile.deleteUserSkill", error, { userId: user.id, skillId });
+    return actionFailure("Failed to delete skill");
   }
 }
 
@@ -497,18 +533,25 @@ export async function deleteUserSkill(skillId: string) {
 /**
  * Add a certification to user profile
  */
-export async function addUserCertification(data: UserCertificationInput) {
+export async function addUserCertification(
+  data: UserCertificationInput
+): Promise<
+  ActionResult<{
+    certification: Awaited<ReturnType<typeof prisma.userCertification.create>>;
+    errors: FieldErrors;
+  }>
+> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   const validatedFields = userCertificationSchema.safeParse(data);
 
   if (!validatedFields.success) {
     return {
-      error: "Invalid fields",
+      ...actionFailure("Invalid fields"),
       errors: validatedFields.error.flatten().fieldErrors,
     };
   }
@@ -543,11 +586,11 @@ export async function addUserCertification(data: UserCertificationInput) {
       },
     });
 
-    revalidatePath("/my/profile");
-    return { success: true, certification };
+    revalidatePaths("/my/profile");
+    return actionSuccess({ certification });
   } catch (error: unknown) {
-    console.error("Error adding certification:", error);
-    return { error: "Failed to add certification" };
+    logActionError("profile.addUserCertification", error, { userId: user.id });
+    return actionFailure("Failed to add certification");
   }
 }
 
@@ -557,18 +600,23 @@ export async function addUserCertification(data: UserCertificationInput) {
 export async function updateUserCertification(
   certificationId: string,
   data: UserCertificationInput
-) {
+): Promise<
+  ActionResult<{
+    certification: Awaited<ReturnType<typeof prisma.userCertification.update>>;
+    errors: FieldErrors;
+  }>
+> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   const validatedFields = userCertificationSchema.safeParse(data);
 
   if (!validatedFields.success) {
     return {
-      error: "Invalid fields",
+      ...actionFailure("Invalid fields"),
       errors: validatedFields.error.flatten().fieldErrors,
     };
   }
@@ -580,7 +628,7 @@ export async function updateUserCertification(
     });
 
     if (!existing) {
-      return { error: "Certification not found" };
+      return actionFailure("Certification not found");
     }
 
     const { issueDate, expiryDate, documentUrl } = validatedFields.data;
@@ -611,22 +659,24 @@ export async function updateUserCertification(
       },
     });
 
-    revalidatePath("/my/profile");
-    return { success: true, certification };
+    revalidatePaths("/my/profile");
+    return actionSuccess({ certification });
   } catch (error: unknown) {
-    console.error("Error updating certification:", error);
-    return { error: "Failed to update certification" };
+    logActionError("profile.updateUserCertification", error, { userId: user.id, certificationId });
+    return actionFailure("Failed to update certification");
   }
 }
 
 /**
  * Delete a certification
  */
-export async function deleteUserCertification(certificationId: string) {
+export async function deleteUserCertification(
+  certificationId: string
+): Promise<ActionResult> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   try {
@@ -636,18 +686,18 @@ export async function deleteUserCertification(certificationId: string) {
     });
 
     if (!existing) {
-      return { error: "Certification not found" };
+      return actionFailure("Certification not found");
     }
 
     await prisma.userCertification.delete({
       where: { id: certificationId },
     });
 
-    revalidatePath("/my/profile");
-    return { success: true };
+    revalidatePaths("/my/profile");
+    return actionSuccess({});
   } catch (error: unknown) {
-    console.error("Error deleting certification:", error);
-    return { error: "Failed to delete certification" };
+    logActionError("profile.deleteUserCertification", error, { userId: user.id, certificationId });
+    return actionFailure("Failed to delete certification");
   }
 }
 
@@ -658,11 +708,13 @@ export async function deleteUserCertification(certificationId: string) {
 /**
  * Get user's own superannuation settings
  */
-export async function getMySuperSettings() {
+export async function getMySuperSettings(): Promise<
+  ActionResult<{ data: any }>
+> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   try {
@@ -683,13 +735,13 @@ export async function getMySuperSettings() {
     });
 
     if (!userData) {
-      return { error: "User not found" };
+      return actionFailure("User not found");
     }
 
-    return { success: true, data: userData };
+    return actionSuccess({ data: userData });
   } catch (error: unknown) {
-    console.error("Error fetching super settings:", error);
-    return { error: "Failed to fetch superannuation settings" };
+    logActionError("profile.getMySuperSettings", error, { userId: user.id });
+    return actionFailure("Failed to fetch superannuation settings");
   }
 }
 
@@ -703,11 +755,13 @@ export async function updateMySuperSettings(data: {
   superFundMemberNumber: string | null;
   superFundUSI: string | null;
   superFundABN: string | null;
-}) {
+}): Promise<
+  ActionResult<{ data: any }>
+> {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { error: "Unauthorized" };
+    return actionFailure("Unauthorized");
   }
 
   try {
@@ -748,10 +802,10 @@ export async function updateMySuperSettings(data: {
       ipAddress: auditContext.ipAddress,
     });
 
-    revalidatePath("/my/profile");
-    return { success: true, data: updatedUser };
+    revalidatePaths("/my/profile");
+    return actionSuccess({ data: updatedUser });
   } catch (error: unknown) {
-    console.error("Error updating super settings:", error);
-    return { error: "Failed to update superannuation settings" };
+    logActionError("profile.updateMySuperSettings", error, { userId: user.id });
+    return actionFailure("Failed to update superannuation settings");
   }
 }

@@ -3,9 +3,8 @@ import {
   hasPermission,
   isAdmin,
   isManager,
-  type PermissionAction,
-  type PermissionResource,
 } from "@/lib/rbac/permissions";
+import type { PermissionAction, PermissionResource } from "./types";
 
 export type EmailWorkspaceModule =
   | "create"

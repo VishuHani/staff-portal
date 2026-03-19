@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/actions/auth";
 import { PaySettingsClient } from "./pay-settings-client";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { getUserVenueIds } from "@/lib/utils/venue";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -37,6 +38,13 @@ export default async function VenuePaySettingsPage({ params }: PageProps) {
   const hasVenuePayPermission = userWithPermissions.venuePermissions.some(
     (p) => p.permission.action === "manage" && p.permission.resource === "venue_pay_config"
   );
+
+  if (!userIsAdmin) {
+    const userVenueIds = await getUserVenueIds(user.id);
+    if (!userVenueIds.includes(venueId)) {
+      redirect("/unauthorized");
+    }
+  }
 
   // Allow ADMIN, MANAGER, or users with explicit venue pay permission
   if (!userIsAdmin && !userIsManager && !hasVenuePayPermission) {

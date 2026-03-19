@@ -2,13 +2,22 @@
 
 import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
+import type { EmailContentScope as PrismaEmailContentScope } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
-import { canAccessEmailModule, type EmailWorkspaceModule } from "@/lib/rbac/email-workspace";
-import { hasPermission, isAdmin, isManager, type PermissionResource } from "@/lib/rbac/permissions";
+import {
+  canAccessEmailModule,
+  type EmailWorkspaceModule,
+} from "@/lib/rbac/email-workspace";
+import {
+  hasPermission,
+  isAdmin,
+  isManager,
+  type PermissionResource,
+} from "@/lib/rbac/permissions";
 
-export type EmailFolderScope = "PRIVATE" | "TEAM" | "SYSTEM";
+export type EmailFolderScope = PrismaEmailContentScope;
 
 type DatabaseEmailWorkspaceModule =
   | "CREATE_EMAIL"
@@ -99,21 +108,23 @@ export interface DeleteFolderOutput {
   error?: string;
 }
 
-const MODULE_TO_DB: Record<EmailWorkspaceModule, DatabaseEmailWorkspaceModule> = {
-  create: "CREATE_EMAIL",
-  assets: "ASSETS",
-  audience: "AUDIENCE",
-  campaigns: "CAMPAIGNS",
-  reports: "REPORTS",
-};
+const MODULE_TO_DB: Record<EmailWorkspaceModule, DatabaseEmailWorkspaceModule> =
+  {
+    create: "CREATE_EMAIL",
+    assets: "ASSETS",
+    audience: "AUDIENCE",
+    campaigns: "CAMPAIGNS",
+    reports: "REPORTS",
+  };
 
-const DB_TO_MODULE: Record<DatabaseEmailWorkspaceModule, EmailWorkspaceModule> = {
-  CREATE_EMAIL: "create",
-  ASSETS: "assets",
-  AUDIENCE: "audience",
-  CAMPAIGNS: "campaigns",
-  REPORTS: "reports",
-};
+const DB_TO_MODULE: Record<DatabaseEmailWorkspaceModule, EmailWorkspaceModule> =
+  {
+    CREATE_EMAIL: "create",
+    ASSETS: "assets",
+    AUDIENCE: "audience",
+    CAMPAIGNS: "campaigns",
+    REPORTS: "reports",
+  };
 
 const MODULE_RESOURCE_MAP: Record<EmailWorkspaceModule, PermissionResource> = {
   create: "email_create",
@@ -216,7 +227,11 @@ function canReadFolderRow(
     return true;
   }
 
-  if (folder.scope === "TEAM" && folder.venue_id && userVenueIds.includes(folder.venue_id)) {
+  if (
+    folder.scope === "TEAM" &&
+    folder.venue_id &&
+    userVenueIds.includes(folder.venue_id)
+  ) {
     return true;
   }
 
@@ -230,19 +245,26 @@ function isFolderTableMissing(error: unknown): boolean {
     }
 
     if (error.code === "P2010") {
-      const meta = error.meta as { code?: string; message?: string } | undefined;
+      const meta = error.meta as
+        | { code?: string; message?: string }
+        | undefined;
       if (meta?.code === "42P01" || meta?.code === "42703") {
         return true;
       }
 
-      if (typeof meta?.message === "string" && meta.message.includes("email_folders")) {
+      if (
+        typeof meta?.message === "string" &&
+        meta.message.includes("email_folders")
+      ) {
         return true;
       }
     }
   }
 
   const message = String(error);
-  return message.includes("email_folders") && message.includes("does not exist");
+  return (
+    message.includes("email_folders") && message.includes("does not exist")
+  );
 }
 
 function getTableMissingMessage() {
@@ -269,7 +291,9 @@ function isDuplicateFolderNameError(error: unknown): boolean {
     }
 
     if (error.code === "P2010") {
-      const meta = error.meta as { code?: string; message?: string } | undefined;
+      const meta = error.meta as
+        | { code?: string; message?: string }
+        | undefined;
       if (meta?.code === "23505" && typeof meta.message === "string") {
         return meta.message.includes("email_folders_module_parent_name_ci_key");
       }
@@ -343,7 +367,9 @@ async function getFolderById(id: string): Promise<EmailFolderRow | null> {
   return rows[0] || null;
 }
 
-export async function listFolderTree(input: ListFolderTreeInput): Promise<ListFolderTreeOutput> {
+export async function listFolderTree(
+  input: ListFolderTreeInput
+): Promise<ListFolderTreeOutput> {
   try {
     const user = await requireAuth();
 
@@ -407,7 +433,9 @@ export async function listFolderTree(input: ListFolderTreeInput): Promise<ListFo
   }
 }
 
-export async function createFolder(input: CreateFolderInput): Promise<FolderMutationOutput> {
+export async function createFolder(
+  input: CreateFolderInput
+): Promise<FolderMutationOutput> {
   try {
     const user = await requireAuth();
 
@@ -516,7 +544,8 @@ export async function createFolder(input: CreateFolderInput): Promise<FolderMuta
     ) {
       return {
         success: false,
-        error: "A folder with this name already exists in the selected location.",
+        error:
+          "A folder with this name already exists in the selected location.",
       };
     }
 
@@ -570,7 +599,8 @@ export async function createFolder(input: CreateFolderInput): Promise<FolderMuta
     if (isDuplicateFolderNameError(error)) {
       return {
         success: false,
-        error: "A folder with this name already exists in the selected location.",
+        error:
+          "A folder with this name already exists in the selected location.",
       };
     }
 
@@ -588,7 +618,9 @@ export async function createFolder(input: CreateFolderInput): Promise<FolderMuta
   }
 }
 
-export async function renameFolder(input: RenameFolderInput): Promise<FolderMutationOutput> {
+export async function renameFolder(
+  input: RenameFolderInput
+): Promise<FolderMutationOutput> {
   try {
     const user = await requireAuth();
     const name = input.name.trim();
@@ -702,7 +734,9 @@ export async function renameFolder(input: RenameFolderInput): Promise<FolderMuta
   }
 }
 
-export async function moveFolder(input: MoveFolderInput): Promise<FolderMutationOutput> {
+export async function moveFolder(
+  input: MoveFolderInput
+): Promise<FolderMutationOutput> {
   try {
     const user = await requireAuth();
     const folder = await getFolderById(input.id);
@@ -761,7 +795,10 @@ export async function moveFolder(input: MoveFolderInput): Promise<FolderMutation
         };
       }
 
-      if (nextParent.id === folder.id || nextParent.path.startsWith(oldPathPrefix)) {
+      if (
+        nextParent.id === folder.id ||
+        nextParent.path.startsWith(oldPathPrefix)
+      ) {
         return {
           success: false,
           error: "Cannot move a folder into itself or its own descendants.",
@@ -785,7 +822,8 @@ export async function moveFolder(input: MoveFolderInput): Promise<FolderMutation
     ) {
       return {
         success: false,
-        error: "A sibling folder with this name already exists in the destination.",
+        error:
+          "A sibling folder with this name already exists in the destination.",
       };
     }
 
@@ -846,7 +884,8 @@ export async function moveFolder(input: MoveFolderInput): Promise<FolderMutation
     if (isDuplicateFolderNameError(error)) {
       return {
         success: false,
-        error: "A sibling folder with this name already exists in the destination.",
+        error:
+          "A sibling folder with this name already exists in the destination.",
       };
     }
 
@@ -864,7 +903,9 @@ export async function moveFolder(input: MoveFolderInput): Promise<FolderMutation
   }
 }
 
-export async function deleteFolder(input: DeleteFolderInput): Promise<DeleteFolderOutput> {
+export async function deleteFolder(
+  input: DeleteFolderInput
+): Promise<DeleteFolderOutput> {
   try {
     const user = await requireAuth();
     const folder = await getFolderById(input.id);
@@ -900,7 +941,9 @@ export async function deleteFolder(input: DeleteFolderInput): Promise<DeleteFold
       };
     }
 
-    const childCountRows = await prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+    const childCountRows = await prisma.$queryRaw<
+      Array<{ count: bigint }>
+    >(Prisma.sql`
       SELECT COUNT(*)::bigint AS count
       FROM "email_folders"
       WHERE "parentId" = ${folder.id}

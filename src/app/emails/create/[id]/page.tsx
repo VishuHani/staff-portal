@@ -5,13 +5,14 @@ import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
 export default async function EmailsCreateEditPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = await params;
   const user = await requireAuth();
 
   if (!(await canAccessEmailModule(user.id, "create"))) {
     redirect("/dashboard?error=access_denied");
   }
 
-  redirect(`/system/emails/builder/${params.id}`);
+  redirect(`/system/emails/builder/${id}`);
 }

@@ -9,10 +9,15 @@
  * - Professional print-ready format
  */
 
-import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import { formatCurrency, formatHours, formatTime12Hour } from "@/lib/utils/pay-calculator";
-import type { ShiftPayBreakdown, ShiftPayBreakdownWithSuper } from "@/lib/utils/pay-calculator";
+import type { ShiftPayBreakdownWithSuper } from "@/lib/utils/pay-calculator";
+import {
+  createWorkbook,
+  setWorksheetWidths,
+  styleHeaderRow,
+  workbookToBuffer,
+} from "@/lib/utils/excel-workbook";
 
 // ============================================================================
 // TYPES
@@ -120,24 +125,28 @@ export async function exportRosterToExcel(
   data: RosterExportData,
   options: ExportOptions
 ): Promise<Buffer> {
-  const workbook = XLSX.utils.book_new();
+  const workbook = createWorkbook();
   
   // Sheet 1: Roster Overview
-  const overviewData = [
-    { "Roster Name": data.roster.name },
-    { "Venue": data.roster.venueName },
-    { "Period Start": formatDate(data.roster.startDate, options.dateFormat) },
-    { "Period End": formatDate(data.roster.endDate, options.dateFormat) },
-    { "Total Staff": data.summary.totalStaff },
-    { "Total Shifts": data.summary.totalShifts },
-    { "Total Hours": formatHours(data.summary.totalHours) },
-    { "Total Cost": options.includePayRates && data.summary.totalPay 
-      ? formatCurrency(data.summary.totalPay) 
-      : "N/A" },
-  ];
-  
-  const overviewSheet = XLSX.utils.json_to_sheet(overviewData);
-  XLSX.utils.book_append_sheet(workbook, overviewSheet, "Overview");
+  const overviewSheet = workbook.addWorksheet("Overview");
+  overviewSheet.addRow(["Metric", "Value"]);
+  overviewSheet.addRows([
+    ["Roster Name", data.roster.name],
+    ["Venue", data.roster.venueName],
+    ["Period Start", formatDate(data.roster.startDate, options.dateFormat)],
+    ["Period End", formatDate(data.roster.endDate, options.dateFormat)],
+    ["Total Staff", data.summary.totalStaff],
+    ["Total Shifts", data.summary.totalShifts],
+    ["Total Hours", formatHours(data.summary.totalHours)],
+    [
+      "Total Cost",
+      options.includePayRates && data.summary.totalPay
+        ? formatCurrency(data.summary.totalPay)
+        : "N/A",
+    ],
+  ]);
+  styleHeaderRow(overviewSheet);
+  setWorksheetWidths(overviewSheet, [28, 36]);
   
   // Sheet 2: Shift Details
   const shiftHeaders = [
@@ -187,23 +196,30 @@ export async function exportRosterToExcel(
     
     return row;
   });
-  
-  const shiftSheet = XLSX.utils.aoa_to_sheet([shiftHeaders, ...shiftRows]);
-  
-  // Set column widths
-  shiftSheet["!cols"] = [
-    { wch: 12 }, // Date
-    { wch: 20 }, // Staff Name
-    { wch: 25 }, // Email
-    { wch: 10 }, // Start Time
-    { wch: 10 }, // End Time
-    { wch: 10 }, // Break
-    { wch: 8 },  // Hours
-    { wch: 15 }, // Position
-    { wch: 20 }, // Notes
-  ];
-  
-  XLSX.utils.book_append_sheet(workbook, shiftSheet, "Shifts");
+  const shiftSheet = workbook.addWorksheet("Shifts");
+  shiftSheet.addRow(shiftHeaders);
+  shiftSheet.addRows(shiftRows);
+  styleHeaderRow(shiftSheet);
+  setWorksheetWidths(shiftSheet, [
+    12, // Date
+    20, // Staff Name
+    25, // Email
+    10, // Start Time
+    10, // End Time
+    10, // Break
+    8, // Hours
+    15, // Position
+    20, // Notes
+    12, // Base Rate
+    12, // Base Pay
+    10, // OT Hours
+    12, // OT Pay
+    10, // Late Hours
+    12, // Late Pay
+    12, // Gross Pay
+    12, // Super
+    12, // Total Pay
+  ]);
   
   // Sheet 3: Staff Summary (if groupByStaff)
   if (options.groupByStaff) {
@@ -234,20 +250,29 @@ export async function exportRosterToExcel(
           : null;
         row.push(
           staff.totalPay ? formatCurrency(staff.totalPay) : null,
-          avgRate ? formatCurrency(avgRate) : null
-        );
+        avgRate ? formatCurrency(avgRate) : null
+      );
       }
       
       return row;
     });
-    
-    const staffSheet = XLSX.utils.aoa_to_sheet([staffHeaders, ...staffRows]);
-    XLSX.utils.book_append_sheet(workbook, staffSheet, "Staff Summary");
+    const staffSheet = workbook.addWorksheet("Staff Summary");
+    staffSheet.addRow(staffHeaders);
+    staffSheet.addRows(staffRows);
+    styleHeaderRow(staffSheet);
+    setWorksheetWidths(staffSheet, [
+      24, // Staff Name
+      28, // Email
+      18, // Role
+      14, // Shifts Count
+      14, // Total Hours
+      14, // Total Pay
+      16, // Avg Hourly Rate
+    ]);
   }
   
   // Generate buffer
-  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-  return buffer;
+  return workbookToBuffer(workbook);
 }
 
 // ============================================================================

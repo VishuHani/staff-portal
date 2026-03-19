@@ -66,11 +66,13 @@ import {
   hasAnyPermission,
   isAdmin,
   isManager,
+  invalidatePermissionCache,
 } from "@/lib/rbac/permissions";
 
 describe("RBAC Access Control", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidatePermissionCache();
   });
 
   afterEach(() => {
@@ -595,6 +597,45 @@ describe("RBAC Access Control", () => {
       );
 
       consoleError.mockRestore();
+    });
+  });
+
+  describe("permission snapshot caching", () => {
+    it("should reuse the cached permission snapshot across repeated permission checks", async () => {
+      const user = {
+        ...testUsers.user1,
+        role: testRoles.staff,
+      };
+
+      mockPrisma.user.findUnique = vi.fn().mockResolvedValue({
+        ...user,
+        active: true,
+        role: {
+          ...testRoles.staff,
+          rolePermissions: [
+            {
+              permission: {
+                resource: "posts",
+                action: "read",
+              },
+            },
+            {
+              permission: {
+                resource: "posts",
+                action: "create",
+              },
+            },
+          ],
+        },
+        venuePermissions: [],
+      });
+
+      const first = await hasPermission(user.id, "posts", "read");
+      const second = await hasPermission(user.id, "posts", "create");
+
+      expect(first).toBe(true);
+      expect(second).toBe(true);
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
     });
   });
 

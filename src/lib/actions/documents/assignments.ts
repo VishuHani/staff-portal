@@ -2,10 +2,11 @@
 
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/actions/auth";
-import { hasPermission } from "@/lib/rbac/permissions";
+import { hasPermission, isAdmin } from "@/lib/rbac/permissions";
 import { AssignmentType, AssignmentStatus, DocumentType } from "@prisma/client";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { getUserVenueIds } from "@/lib/utils/venue";
+import { revalidatePaths } from "@/lib/utils/action-contract";
 
 // ============================================================================
 // Types
@@ -138,6 +139,10 @@ const createProspectiveAssignmentSchema = z.object({
   }
 );
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 // ============================================================================
 // Permission Check Helper
 // ============================================================================
@@ -155,6 +160,16 @@ async function checkDocumentPermission(
   };
 
   const permissionAction = permissionMap[action] || "read";
+  if (venueId) {
+    const userIsAdmin = await isAdmin(userId);
+    if (!userIsAdmin) {
+      const userVenueIds = await getUserVenueIds(userId);
+      if (!userVenueIds.includes(venueId)) {
+        return false;
+      }
+    }
+  }
+
   return hasPermission(userId, "documents", permissionAction as any, venueId);
 }
 
@@ -316,8 +331,7 @@ export async function createDocumentAssignment(
       },
     });
 
-    revalidatePath(`/system/documents`);
-    revalidatePath(`/my/documents`);
+    revalidatePaths("/system/documents", "/my/documents");
 
     return { success: true, data: assignment as DocumentAssignmentWithRelations };
   } catch (error) {
@@ -393,10 +407,20 @@ export async function listDocumentAssignments(
       return { success: false, error: "Unauthorized" };
     }
 
+    const userIsAdmin = await isAdmin(user.id);
+    const userVenueIds = userIsAdmin ? [] : await getUserVenueIds(user.id);
     const where: any = {};
 
     if (filters.venueId) {
+      if (!userIsAdmin && !userVenueIds.includes(filters.venueId)) {
+        return { success: false, error: "You don't have permission to view assignments for this venue" };
+      }
       where.venueId = filters.venueId;
+    } else if (!userIsAdmin) {
+      if (userVenueIds.length === 0) {
+        return { success: true, data: [] };
+      }
+      where.venueId = { in: userVenueIds };
     }
 
     if (filters.userId) {
@@ -417,17 +441,6 @@ export async function listDocumentAssignments(
 
     if (filters.assignedBy) {
       where.assignedBy = filters.assignedBy;
-    }
-
-    // If no specific userId filter, check permission for venue
-    if (!filters.userId || filters.userId !== user.id) {
-      if (filters.venueId) {
-        const hasReadPermission = await checkDocumentPermission(user.id, "assignment_read", filters.venueId);
-        if (!hasReadPermission) {
-          // User can only see their own assignments
-          where.userId = user.id;
-        }
-      }
     }
 
     const assignments = await prisma.documentAssignment.findMany({
@@ -477,12 +490,22 @@ export async function listMyDocumentAssignments(
       return { success: false, error: "Unauthorized" };
     }
 
+    const userIsAdmin = await isAdmin(user.id);
+    const userVenueIds = userIsAdmin ? [] : await getUserVenueIds(user.id);
+
     const where: any = {
       userId: user.id,
     };
 
     if (filters?.status) {
       where.status = filters.status;
+    }
+
+    if (!userIsAdmin) {
+      if (userVenueIds.length === 0) {
+        return { success: true, data: [] };
+      }
+      where.venueId = { in: userVenueIds };
     }
 
     const assignments = await prisma.documentAssignment.findMany({
@@ -608,8 +631,7 @@ export async function updateDocumentAssignment(
       },
     });
 
-    revalidatePath(`/system/documents`);
-    revalidatePath(`/my/documents`);
+    revalidatePaths("/system/documents", "/my/documents");
 
     return { success: true, data: assignment as DocumentAssignmentWithRelations };
   } catch (error) {
@@ -667,8 +689,7 @@ export async function waiveDocumentAssignment(
       },
     });
 
-    revalidatePath(`/system/documents`);
-    revalidatePath(`/my/documents`);
+    revalidatePaths("/system/documents", "/my/documents");
 
     return { success: true };
   } catch (error) {
@@ -762,10 +783,11 @@ export async function createProspectiveUserAssignment(
     }
 
     const data = validated.data;
+    const normalizedEmail = normalizeEmail(data.email);
 
     // Check if user already exists with this email
     const existingUser = await prisma.user.findUnique({
-      where: { email: data.email.toLowerCase() },
+      where: { email: normalizedEmail },
       include: {
         venues: { where: { venueId: data.venueId } },
       },
@@ -790,9 +812,6 @@ export async function createProspectiveUserAssignment(
     // Get template or bundle version
     let templateVersion: number | null = null;
     let bundleVersion: number | null = null;
-    let templateName = "";
-    let bundleName = "";
-
     if (data.templateId) {
       const template = await prisma.documentTemplate.findUnique({
         where: { id: data.templateId },
@@ -812,7 +831,6 @@ export async function createProspectiveUserAssignment(
       }
 
       templateVersion = template.currentVersion;
-      templateName = template.name;
     }
 
     if (data.bundleId) {
@@ -834,13 +852,12 @@ export async function createProspectiveUserAssignment(
       }
 
       bundleVersion = bundle.currentVersion;
-      bundleName = bundle.name;
     }
 
     // Check for existing assignment for this email
     const existingAssignment = await prisma.documentAssignment.findFirst({
       where: {
-        email: data.email.toLowerCase(),
+        email: normalizedEmail,
         venueId: data.venueId,
         templateId: data.templateId || null,
         bundleId: data.bundleId || null,
@@ -865,9 +882,10 @@ export async function createProspectiveUserAssignment(
     if (data.sendInvitation) {
       const existingInvitation = await prisma.userInvitation.findFirst({
         where: {
-          email: data.email.toLowerCase(),
+          email: normalizedEmail,
           status: "PENDING",
           expiresAt: { gte: new Date() },
+          venueId: data.venueId,
         },
       });
 
@@ -891,7 +909,7 @@ export async function createProspectiveUserAssignment(
 
         const invitation = await prisma.userInvitation.create({
           data: {
-            email: data.email.toLowerCase(),
+            email: normalizedEmail,
             token,
             inviterId: user.id,
             scope: "VENUE",
@@ -921,7 +939,7 @@ export async function createProspectiveUserAssignment(
           });
           
           await sendBrevoEmail({
-            to: data.email.toLowerCase(),
+            to: normalizedEmail,
             subject: emailTemplate.subject,
             htmlContent: emailTemplate.htmlContent,
           });
@@ -939,7 +957,7 @@ export async function createProspectiveUserAssignment(
         templateId: data.templateId || null,
         bundleId: data.bundleId || null,
         userId: null, // Null for prospective users
-        email: data.email.toLowerCase(),
+        email: normalizedEmail,
         venueId: data.venueId,
         assignedBy: user.id,
         invitationId,
@@ -974,14 +992,13 @@ export async function createProspectiveUserAssignment(
         resourceType: "ASSIGNMENT",
         resourceId: assignment.id,
         action: "ASSIGNED",
-        description: `Document assigned to prospective user ${data.email}`,
+        description: `Document assigned to prospective user ${normalizedEmail}`,
         userId: user.id,
         newValue: assignment as any,
       },
     });
 
-    revalidatePath(`/system/documents`);
-    revalidatePath(`/my/documents`);
+    revalidatePaths("/system/documents", "/my/documents");
 
     return { 
       success: true, 
@@ -1000,14 +1017,22 @@ export async function createProspectiveUserAssignment(
  */
 export async function linkDocumentAssignmentsToUser(
   userId: string,
-  email: string
+  email: string,
+  venueId?: string
 ): Promise<{ success: boolean; linkedCount?: number; error?: string }> {
   try {
+    const normalizedEmail = normalizeEmail(email);
+    const userVenueIds = venueId ? [venueId] : await getUserVenueIds(userId);
+    if (userVenueIds.length === 0) {
+      return { success: true, linkedCount: 0 };
+    }
+
     // Find all assignments with this email and no userId
     const assignments = await prisma.documentAssignment.findMany({
       where: {
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         userId: null,
+        venueId: { in: userVenueIds },
       },
     });
 
@@ -1018,8 +1043,9 @@ export async function linkDocumentAssignmentsToUser(
     // Update all assignments to link to the user
     const result = await prisma.documentAssignment.updateMany({
       where: {
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         userId: null,
+        venueId: { in: userVenueIds },
       },
       data: {
         userId,
@@ -1034,7 +1060,7 @@ export async function linkDocumentAssignmentsToUser(
           resourceType: "ASSIGNMENT",
           resourceId: assignment.id,
           action: "UPDATED",
-          description: `Assignment linked to user ${email} upon signup`,
+          description: `Assignment linked to user ${normalizedEmail} upon signup`,
           newValue: { linked: true, userId } as any,
         },
       });
@@ -1085,6 +1111,9 @@ export async function getProspectiveUsers(
       return { success: false, error: "Unauthorized" };
     }
 
+    const userIsAdmin = await isAdmin(user.id);
+    const userVenueIds = userIsAdmin ? [] : await getUserVenueIds(user.id);
+
     // Build where clause for assignments
     const whereClause: any = {
       userId: null,
@@ -1093,15 +1122,17 @@ export async function getProspectiveUsers(
     };
 
     if (venueId) {
-      whereClause.venueId = venueId;
-      // Check permission for specific venue
-      const hasReadPermission = await checkDocumentPermission(user.id, "assignment_read", venueId);
-      if (!hasReadPermission) {
+      if (!userIsAdmin && !userVenueIds.includes(venueId)) {
         return { success: false, error: "You don't have permission to view prospective users" };
       }
+      whereClause.venueId = venueId;
     } else {
-      // For all venues, user needs to be admin or have read permission on at least one venue
-      // We'll filter results based on venues they have access to
+      if (!userIsAdmin) {
+        if (userVenueIds.length === 0) {
+          return { success: true, data: [] };
+        }
+        whereClause.venueId = { in: userVenueIds };
+      }
     }
 
     // Get all assignments for prospective users
@@ -1228,11 +1259,14 @@ export async function resendProspectiveUserInvitation(
     }
 
     // Check for existing pending invitation
+    const normalizedEmail = normalizeEmail(email);
+
     const existingInvitation = await prisma.userInvitation.findFirst({
       where: {
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         status: "PENDING",
         expiresAt: { gte: new Date() },
+        venueId,
       },
     });
 
@@ -1258,7 +1292,7 @@ export async function resendProspectiveUserInvitation(
 
     const invitation = await prisma.userInvitation.create({
       data: {
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         token,
         inviterId: user.id,
         scope: "VENUE",
@@ -1285,7 +1319,7 @@ export async function resendProspectiveUserInvitation(
       });
       
       await sendBrevoEmail({
-        to: email.toLowerCase(),
+        to: normalizedEmail,
         subject: emailTemplate.subject,
         htmlContent: emailTemplate.htmlContent,
       });
@@ -1297,7 +1331,7 @@ export async function resendProspectiveUserInvitation(
     // Update assignments with the new invitation ID
     await prisma.documentAssignment.updateMany({
       where: {
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         venueId,
         invitationId: null,
       },
@@ -1357,8 +1391,7 @@ export async function cancelProspectiveUserAssignment(
       },
     });
 
-    revalidatePath(`/system/documents`);
-    revalidatePath(`/manage/documents`);
+    revalidatePaths("/system/documents", "/manage/documents");
 
     return { success: true };
   } catch (error) {

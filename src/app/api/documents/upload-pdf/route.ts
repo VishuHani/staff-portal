@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { apiError, apiSuccess } from '@/lib/utils/api-response';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -18,34 +19,22 @@ export async function POST(request: NextRequest) {
     const templateId = formData.get('templateId') as string | null;
 
     if (!file) {
-      return NextResponse.json(
-        { error: 'No file provided' },
-        { status: 400 }
-      );
+      return apiError('No file provided', 400);
     }
 
     if (!venueId) {
-      return NextResponse.json(
-        { error: 'Venue ID is required' },
-        { status: 400 }
-      );
+      return apiError('Venue ID is required', 400);
     }
 
     // Validate file type
     if (file.type !== 'application/pdf') {
-      return NextResponse.json(
-        { error: 'Only PDF files are allowed' },
-        { status: 400 }
-      );
+      return apiError('Only PDF files are allowed', 400);
     }
 
     // Validate file size (max 20MB)
     const maxSize = 20 * 1024 * 1024;
     if (file.size > maxSize) {
-      return NextResponse.json(
-        { error: 'File size exceeds 20MB limit' },
-        { status: 400 }
-      );
+      return apiError('File size exceeds 20MB limit', 400);
     }
 
     const timestamp = Date.now();
@@ -71,8 +60,7 @@ export async function POST(request: NextRequest) {
           .from('document-uploads')
           .getPublicUrl(data.path);
 
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           url: urlData.publicUrl,
           path: data.path,
           method: 'supabase',
@@ -106,8 +94,7 @@ export async function POST(request: NextRequest) {
 
         console.log('PDF saved to local filesystem:', localPath);
 
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           url: localUrl,
           path: localPath,
           method: 'local',
@@ -119,22 +106,19 @@ export async function POST(request: NextRequest) {
     }
 
     // If all methods fail, return error with helpful message
-    return NextResponse.json(
-      { 
-        error: 'PDF upload failed. Please ensure the "document-uploads" bucket exists in Supabase Storage.',
-        details: 'The storage bucket "document-uploads" was not found. Please create it in your Supabase dashboard or contact your administrator.',
-      },
-      { status: 500 }
+    return apiError(
+      'PDF upload failed. Please ensure the "document-uploads" bucket exists in Supabase Storage.',
+      500,
+      {
+        details:
+          'The storage bucket "document-uploads" was not found. Please create it in your Supabase dashboard or contact your administrator.',
+      }
     );
 
   } catch (error) {
     console.error('PDF upload error:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to process upload',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    );
+    return apiError('Failed to process upload', 500, {
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 }

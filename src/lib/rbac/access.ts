@@ -8,10 +8,8 @@ import {
   isManager,
   hasVenuePermission,
   getUserEffectivePermissions,
-  type Permission,
-  type PermissionResource,
-  type PermissionAction,
 } from "./permissions";
+import type { Permission, PermissionAction, PermissionResource } from "./types";
 
 // Re-export advanced permission functions for convenient access
 export {

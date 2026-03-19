@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/actions/auth";
 import { hasAnyPermission, isAdmin } from "@/lib/rbac/permissions";
 import { prisma } from "@/lib/prisma";
+import { apiError, apiSuccess } from "@/lib/utils/api-response";
 
 interface BulkAssignmentRequest {
   venueId: string;
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiError("Unauthorized", 401);
     }
 
     const body: BulkAssignmentRequest = await request.json();
@@ -24,10 +25,7 @@ export async function POST(request: NextRequest) {
 
     // Validate required fields
     if (!venueId || (!templateIds.length && !bundleIds.length) || !userIds.length) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+      return apiError("Missing required fields", 400);
     }
 
     // Check permissions
@@ -37,7 +35,7 @@ export async function POST(request: NextRequest) {
     ]);
 
     if (!canAssign && !isUserAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return apiError("Forbidden", 403);
     }
 
     // Verify venue access
@@ -46,7 +44,7 @@ export async function POST(request: NextRequest) {
         where: { userId: user.id, venueId },
       });
       if (!userVenue) {
-        return NextResponse.json({ error: "Venue access denied" }, { status: 403 });
+        return apiError("Venue access denied", 403);
       }
     }
 
@@ -85,15 +83,11 @@ export async function POST(request: NextRequest) {
     const validUserIds = venueUsers.map((vu) => vu.userId);
 
     if (validUserIds.length === 0) {
-      return NextResponse.json(
-        { error: "No valid users found for this venue" },
-        { status: 400 }
-      );
+      return apiError("No valid users found for this venue", 400);
     }
 
     // Create assignments
     const assignments = [];
-    const now = new Date();
     const dueDateParsed = dueDate ? new Date(dueDate) : null;
 
     // Assign individual templates
@@ -193,17 +187,13 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       assignments: assignments,
       count: assignments.length,
       skipped: validUserIds.length * (templates.length + bundles.length) - assignments.length,
     });
   } catch (error) {
     console.error("Error creating bulk assignments:", error);
-    return NextResponse.json(
-      { error: "Failed to create assignments" },
-      { status: 500 }
-    );
+    return apiError("Failed to create assignments");
   }
 }

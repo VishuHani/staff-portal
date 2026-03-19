@@ -1,11 +1,17 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin, requireAnyPermission } from "@/lib/rbac/access";
 import { createClient } from "@/lib/auth/supabase-server";
 import { getUserVenueIds } from "@/lib/utils/venue";
 import { isAdmin } from "@/lib/rbac/permissions";
+import {
+  actionFailure,
+  actionSuccess,
+  logActionError,
+  revalidatePaths,
+  type ActionResult,
+} from "@/lib/utils/action-contract";
 import {
   createUserSchema,
   updateUserSchema,
@@ -26,13 +32,26 @@ import {
 } from "@/lib/services/notifications";
 import { getCurrentUser } from "@/lib/actions/auth";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
-import { NotificationType } from "@prisma/client";
+import { PRISMA_ENUM_VALUES } from "@/types/prisma-enums";
+
+type TeamUsersPayload = Awaited<ReturnType<typeof prisma.user.findMany>>;
+type RolesPayload = Awaited<ReturnType<typeof prisma.role.findMany>>;
+type StoresPayload = Awaited<ReturnType<typeof prisma.venue.findMany>>;
+
+type UserStatsPayload = {
+  total: number;
+  active: number;
+  inactive: number;
+  byRole: Array<{ role: string; count: number }>;
+};
 
 /**
  * Get all users with their roles and stores
  * Admin/Manager with permissions
  */
-export async function getAllUsers() {
+export async function getAllUsers(): Promise<
+  ActionResult<{ users: TeamUsersPayload }>
+> {
   // Allow managers and admins with appropriate permissions
   const currentUser = await requireAnyPermission([
     { resource: "users", action: "view_team" },
@@ -51,7 +70,7 @@ export async function getAllUsers() {
       const venueIds = await getUserVenueIds(currentUser.id);
       if (venueIds.length === 0) {
         // No venues assigned - return empty list
-        return { success: true, users: [] };
+        return actionSuccess({ users: [] });
       }
 
       whereClause = {
@@ -95,10 +114,10 @@ export async function getAllUsers() {
       },
     });
 
-    return { success: true, users };
+    return actionSuccess({ users });
   } catch (error) {
-    console.error("Error fetching users:", error);
-    return { error: "Failed to fetch users" };
+    logActionError("admin.users.getAllUsers", error);
+    return actionFailure("Failed to fetch users");
   }
 }
 
@@ -138,13 +157,13 @@ export async function getUserById(userId: string) {
     });
 
     if (!user) {
-      return { error: "User not found" };
+      return actionFailure("User not found");
     }
 
-    return { success: true, user };
+    return actionSuccess({ user });
   } catch (error) {
-    console.error("Error fetching user:", error);
-    return { error: "Failed to fetch user" };
+    logActionError("admin.users.getUserById", error, { userId });
+    return actionFailure("Failed to fetch user");
   }
 }
 
@@ -153,7 +172,9 @@ export async function getUserById(userId: string) {
  * Get user statistics
  * Admin/Manager with permissions
  */
-export async function getUserStats() {
+export async function getUserStats(): Promise<
+  ActionResult<{ stats: UserStatsPayload }>
+> {
   // Allow managers and admins with appropriate permissions
   const currentUser = await requireAnyPermission([
     { resource: "users", action: "view_team" },
@@ -172,15 +193,14 @@ export async function getUserStats() {
       const venueIds = await getUserVenueIds(currentUser.id);
       if (venueIds.length === 0) {
         // No venues assigned - return empty stats
-        return {
-          success: true,
+        return actionSuccess({
           stats: {
             total: 0,
             active: 0,
             inactive: 0,
             byRole: [],
           },
-        };
+        });
       }
 
       whereClause = {
@@ -210,18 +230,17 @@ export async function getUserStats() {
       count: stat._count,
     }));
 
-    return {
-      success: true,
+    return actionSuccess({
       stats: {
         total,
         active,
         inactive: total - active,
         byRole: roleStats,
       },
-    };
+    });
   } catch (error) {
-    console.error("Error fetching user stats:", error);
-    return { error: "Failed to fetch user statistics" };
+    logActionError("admin.users.getUserStats", error);
+    return actionFailure("Failed to fetch user statistics");
   }
 }
 
@@ -236,9 +255,7 @@ export async function createUser(data: CreateUserInput) {
 
   const validatedFields = createUserSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(validatedFields.error.issues[0]?.message || "Invalid fields");
   }
 
   const { email, password, firstName, lastName, phone, roleId, venueIds, primaryVenueId, active } = validatedFields.data;
@@ -257,7 +274,7 @@ export async function createUser(data: CreateUserInput) {
     });
 
     if (!result.success) {
-      return { error: result.error || "Failed to create user" };
+      return actionFailure(result.error || "Failed to create user");
     }
 
     // Create UserVenue assignments if venueIds are provided
@@ -274,24 +291,7 @@ export async function createUser(data: CreateUserInput) {
     }
 
     // Initialize notification preferences for all notification types (EMAIL + IN_APP enabled by default)
-    const notificationTypes: NotificationType[] = [
-      "NEW_MESSAGE",
-      "MESSAGE_REPLY",
-      "MESSAGE_MENTION",
-      "MESSAGE_REACTION",
-      "POST_MENTION",
-      "POST_PINNED",
-      "POST_DELETED",
-      "TIME_OFF_REQUEST",
-      "TIME_OFF_APPROVED",
-      "TIME_OFF_REJECTED",
-      "TIME_OFF_CANCELLED",
-      "USER_CREATED",
-      "USER_UPDATED",
-      "ROLE_CHANGED",
-      "SYSTEM_ANNOUNCEMENT",
-      "GROUP_REMOVED",
-    ];
+    const notificationTypes = PRISMA_ENUM_VALUES.NotificationType;
 
     try {
       await prisma.notificationPreference.createMany({
@@ -303,7 +303,9 @@ export async function createUser(data: CreateUserInput) {
         })),
       });
     } catch (error) {
-      console.error("Error creating notification preferences:", error);
+      logActionError("admin.users.createUser.notificationPreferences", error, {
+        userId: result.userId,
+      });
       // Don't fail user creation if preference initialization fails
     }
 
@@ -335,7 +337,9 @@ export async function createUser(data: CreateUserInput) {
 
       await notifyUserWelcome(result.userId!, userName);
     } catch (error) {
-      console.error("Error sending welcome notification:", error);
+      logActionError("admin.users.createUser.welcomeNotification", error, {
+        userId: result.userId,
+      });
       // Don't fail user creation if notification fails
     }
 
@@ -357,16 +361,18 @@ export async function createUser(data: CreateUserInput) {
         }),
       });
     } catch (error) {
-      console.error("Error creating audit log:", error);
+      logActionError("admin.users.createUser.auditLog", error, {
+        userId: result.userId,
+      });
       // Don't fail user creation if audit log fails
     }
 
-    revalidatePath("/admin/users");
+    revalidatePaths("/admin/users");
 
-    return { success: true, user };
+    return actionSuccess({ user });
   } catch (error) {
-    console.error("Error creating user:", error);
-    return { error: "Failed to create user" };
+    logActionError("admin.users.createUser", error, { email });
+    return actionFailure("Failed to create user");
   }
 }
 
@@ -379,9 +385,7 @@ export async function updateUser(data: UpdateUserInput) {
 
   const validatedFields = updateUserSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(validatedFields.error.issues[0]?.message || "Invalid fields");
   }
 
   const { userId, email, firstName, lastName, phone, roleId, venueIds, primaryVenueId, active, weekdayRate, saturdayRate, sundayRate } = validatedFields.data;
@@ -394,7 +398,7 @@ export async function updateUser(data: UpdateUserInput) {
     });
 
     if (!currentUser) {
-      return { error: "User not found" };
+      return actionFailure("User not found");
     }
 
     // Check if email is already taken by another user
@@ -409,7 +413,7 @@ export async function updateUser(data: UpdateUserInput) {
       });
 
       if (existingUser) {
-        return { error: "Email already in use" };
+        return actionFailure("Email already in use");
       }
     }
 
@@ -488,7 +492,7 @@ export async function updateUser(data: UpdateUserInput) {
         }
       }
     } catch (error) {
-      console.error("Error sending user update notification:", error);
+      logActionError("admin.users.updateUser.notifications", error, { userId });
       // Don't fail the update if notification fails
     }
 
@@ -517,17 +521,16 @@ export async function updateUser(data: UpdateUserInput) {
         }),
       });
     } catch (error) {
-      console.error("Error creating audit log:", error);
+      logActionError("admin.users.updateUser.auditLog", error, { userId });
       // Don't fail the update if audit log fails
     }
 
-    revalidatePath("/admin/users");
-    revalidatePath(`/admin/users/${userId}`);
+    revalidatePaths("/admin/users", `/admin/users/${userId}`);
 
-    return { success: true, user };
+    return actionSuccess({ user });
   } catch (error) {
-    console.error("Error updating user:", error);
-    return { error: "Failed to update user" };
+    logActionError("admin.users.updateUser", error, { userId: data.userId });
+    return actionFailure("Failed to update user");
   }
 }
 
@@ -540,9 +543,7 @@ export async function deleteUser(data: DeleteUserInput) {
 
   const validatedFields = deleteUserSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(validatedFields.error.issues[0]?.message || "Invalid fields");
   }
 
   const { userId } = validatedFields.data;
@@ -555,7 +556,7 @@ export async function deleteUser(data: DeleteUserInput) {
     });
 
     if (!userToDelete) {
-      return { error: "User not found" };
+      return actionFailure("User not found");
     }
 
     // Delete from our database (cascade will handle related records)
@@ -580,16 +581,16 @@ export async function deleteUser(data: DeleteUserInput) {
         }),
       });
     } catch (error) {
-      console.error("Error creating audit log:", error);
+      logActionError("admin.users.deleteUser.auditLog", error, { userId });
       // Don't fail deletion if audit log fails
     }
 
-    revalidatePath("/admin/users");
+    revalidatePaths("/admin/users");
 
-    return { success: true };
+    return actionSuccess({});
   } catch (error) {
-    console.error("Error deleting user:", error);
-    return { error: "Failed to delete user" };
+    logActionError("admin.users.deleteUser", error, { userId: data.userId });
+    return actionFailure("Failed to delete user");
   }
 }
 
@@ -602,9 +603,7 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
 
   const validatedFields = toggleUserActiveSchema.safeParse(data);
   if (!validatedFields.success) {
-    return {
-      error: validatedFields.error.issues[0]?.message || "Invalid fields",
-    };
+    return actionFailure(validatedFields.error.issues[0]?.message || "Invalid fields");
   }
 
   const { userId } = validatedFields.data;
@@ -616,7 +615,7 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
     });
 
     if (!user) {
-      return { error: "User not found" };
+      return actionFailure("User not found");
     }
 
     const newActiveStatus = !user.active;
@@ -642,7 +641,7 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
         await notifyUserDeactivated(userId, admin.id, adminName);
       }
     } catch (error) {
-      console.error("Error sending user status notification:", error);
+      logActionError("admin.users.toggleUserActive.notifications", error, { userId });
       // Don't fail the toggle if notification fails
     }
 
@@ -657,17 +656,16 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
         newValue: JSON.stringify({ active: newActiveStatus }),
       });
     } catch (error) {
-      console.error("Error creating audit log:", error);
+      logActionError("admin.users.toggleUserActive.auditLog", error, { userId });
       // Don't fail the toggle if audit log fails
     }
 
-    revalidatePath("/admin/users");
-    revalidatePath(`/admin/users/${userId}`);
+    revalidatePaths("/admin/users", `/admin/users/${userId}`);
 
-    return { success: true, user: updatedUser };
+    return actionSuccess({ user: updatedUser });
   } catch (error) {
-    console.error("Error toggling user active status:", error);
-    return { error: "Failed to toggle user status" };
+    logActionError("admin.users.toggleUserActive", error, { userId: data.userId });
+    return actionFailure("Failed to toggle user status");
   }
 }
 
@@ -675,7 +673,9 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
  * Get all roles
  * Admin/Manager with permissions
  */
-export async function getAllRoles() {
+export async function getAllRoles(): Promise<
+  ActionResult<{ roles: RolesPayload }>
+> {
   // Allow managers and admins with appropriate permissions
   await requireAnyPermission([
     { resource: "users", action: "view_team" },
@@ -689,10 +689,10 @@ export async function getAllRoles() {
       },
     });
 
-    return { success: true, roles };
+    return actionSuccess({ roles });
   } catch (error) {
-    console.error("Error fetching roles:", error);
-    return { error: "Failed to fetch roles" };
+    logActionError("admin.users.getAllRoles", error);
+    return actionFailure("Failed to fetch roles");
   }
 }
 
@@ -700,7 +700,9 @@ export async function getAllRoles() {
  * Get all stores
  * Admin/Manager with permissions
  */
-export async function getAllStores() {
+export async function getAllStores(): Promise<
+  ActionResult<{ stores: StoresPayload }>
+> {
   // Allow managers and admins with appropriate permissions
   const currentUser = await requireAnyPermission([
     { resource: "users", action: "view_team" },
@@ -721,7 +723,7 @@ export async function getAllStores() {
       const venueIds = await getUserVenueIds(currentUser.id);
       if (venueIds.length === 0) {
         // No venues assigned - return empty list
-        return { success: true, stores: [] };
+        return actionSuccess({ stores: [] });
       }
 
       whereClause = {
@@ -739,9 +741,9 @@ export async function getAllStores() {
       },
     });
 
-    return { success: true, stores };
+    return actionSuccess({ stores });
   } catch (error) {
-    console.error("Error fetching stores:", error);
-    return { error: "Failed to fetch stores" };
+    logActionError("admin.users.getAllStores", error);
+    return actionFailure("Failed to fetch stores");
   }
 }

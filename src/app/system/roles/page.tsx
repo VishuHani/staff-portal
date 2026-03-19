@@ -12,16 +12,16 @@ export default async function AdminRolesPage() {
     getAllPermissions(),
   ]);
 
-  if ("error" in rolesResult || "error" in permissionsResult) {
+  if (rolesResult.error || permissionsResult.error) {
     redirect("/dashboard?error=forbidden");
   }
 
-  const { roles } = rolesResult;
-  const { permissions } = permissionsResult;
+  const roles = rolesResult.roles ?? [];
+  const permissions = permissionsResult.permissions ?? [];
 
   return (
     <DashboardLayout user={user}>
-      <RolesPageClient roles={roles} permissions={permissions} />
+      <RolesPageClient roles={roles as any} permissions={permissions as any} />
     </DashboardLayout>
   );
 }

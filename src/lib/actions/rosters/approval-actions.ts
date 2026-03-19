@@ -10,7 +10,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
 import { hasPermission } from "@/lib/rbac/permissions";
-import { revalidatePath } from "next/cache";
 import { RosterStatus, NotificationType } from "@prisma/client";
 import { createNotification } from "@/lib/services/notifications";
 import { format } from "date-fns";
@@ -24,6 +23,12 @@ import {
   validateRosterForPublish,
   type ValidationIssue,
 } from "@/lib/rosters/validation-service";
+import {
+  actionFailure,
+  actionSuccess,
+  logActionError,
+  revalidatePaths,
+} from "@/lib/utils/action-contract";
 
 // ============================================================================
 // TYPES
@@ -175,7 +180,7 @@ export async function finalizeRoster(
     // Check permission
     const canManageRosters = await hasPermission(user.id, "rosters", "create");
     if (!canManageRosters) {
-      return { success: false, error: "You don't have permission to manage rosters" };
+      return actionFailure("You don't have permission to manage rosters");
     }
 
     // Get the roster
@@ -191,26 +196,25 @@ export async function finalizeRoster(
     });
 
     if (!roster) {
-      return { success: false, error: "Roster not found" };
+      return actionFailure("Roster not found");
     }
 
     // Check access
     const hasAccess = await checkRosterAccess(user.id, user.role.name, roster);
     if (!hasAccess) {
-      return { success: false, error: "You don't have access to this roster" };
+      return actionFailure("You don't have access to this roster");
     }
 
     // Verify it's in DRAFT or PENDING_REVIEW status (legacy)
     if (roster.status !== RosterStatus.DRAFT && roster.status !== RosterStatus.PENDING_REVIEW) {
-      return {
-        success: false,
-        error: `Roster is already ${roster.status.toLowerCase()}. Only draft rosters can be finalized.`,
-      };
+      return actionFailure(
+        `Roster is already ${roster.status.toLowerCase()}. Only draft rosters can be finalized.`
+      );
     }
 
     // Check if roster has any assigned shifts
     if (roster.shifts.length === 0) {
-      return { success: false, error: "Cannot finalize a roster with no assigned shifts" };
+      return actionFailure("Cannot finalize a roster with no assigned shifts");
     }
 
     // Run full validation unless skipped
@@ -226,8 +230,9 @@ export async function finalizeRoster(
     // If there are blocking errors, prevent finalization
     if (validationResult.hasBlockingErrors) {
       return {
-        success: false,
-        error: "Cannot finalize roster due to validation errors. Please fix the issues and try again.",
+        ...actionFailure(
+          "Cannot finalize roster due to validation errors. Please fix the issues and try again."
+        ),
         validation: {
           valid: validationResult.valid,
           hasBlockingErrors: validationResult.hasBlockingErrors,
@@ -283,13 +288,14 @@ export async function finalizeRoster(
       return updated;
     });
 
-    revalidatePath(`/manage/rosters/${rosterId}`);
-    revalidatePath(`/system/rosters/${rosterId}`);
-    revalidatePath("/manage/rosters");
-    revalidatePath("/system/rosters");
+    revalidatePaths(
+      `/manage/rosters/${rosterId}`,
+      `/system/rosters/${rosterId}`,
+      "/manage/rosters",
+      "/system/rosters"
+    );
 
-    return {
-      success: true,
+    return actionSuccess({
       roster: { id: updatedRoster.id, status: updatedRoster.status },
       hasConflicts,
       conflictCount,
@@ -299,10 +305,10 @@ export async function finalizeRoster(
         issues: validationResult.issues,
         summary: validationResult.summary,
       },
-    };
+    });
   } catch (error) {
-    console.error("Error finalizing roster:", error);
-    return { success: false, error: "Failed to finalize roster" };
+    logActionError("rosters.approval.finalizeRoster", error, { rosterId });
+    return actionFailure("Failed to finalize roster");
   }
 }
 
@@ -321,7 +327,7 @@ export async function publishRoster(rosterId: string): Promise<ApprovalResult> {
     // Check permission
     const canPublish = await hasPermission(user.id, "rosters", "publish");
     if (!canPublish) {
-      return { success: false, error: "You don't have permission to publish rosters" };
+      return actionFailure("You don't have permission to publish rosters");
     }
 
     // Get the roster with shifts and assigned staff
@@ -343,27 +349,24 @@ export async function publishRoster(rosterId: string): Promise<ApprovalResult> {
     });
 
     if (!roster) {
-      return { success: false, error: "Roster not found" };
+      return actionFailure("Roster not found");
     }
 
     // Check access
     const hasAccess = await checkRosterAccess(user.id, user.role.name, roster);
     if (!hasAccess) {
-      return { success: false, error: "You don't have access to this roster" };
+      return actionFailure("You don't have access to this roster");
     }
 
     // Verify it's in APPROVED status (finalized)
     if (roster.status !== RosterStatus.APPROVED) {
       if (roster.status === RosterStatus.DRAFT) {
-        return { success: false, error: "Please finalize the roster before publishing" };
+        return actionFailure("Please finalize the roster before publishing");
       }
       if (roster.status === RosterStatus.PUBLISHED) {
-        return { success: false, error: "Roster is already published" };
+        return actionFailure("Roster is already published");
       }
-      return {
-        success: false,
-        error: `Cannot publish roster with status: ${roster.status}`,
-      };
+      return actionFailure(`Cannot publish roster with status: ${roster.status}`);
     }
 
     // Get unique staff IDs who have shifts
@@ -578,20 +581,21 @@ export async function publishRoster(rosterId: string): Promise<ApprovalResult> {
       }
     }
 
-    revalidatePath(`/manage/rosters/${rosterId}`);
-    revalidatePath(`/system/rosters/${rosterId}`);
-    revalidatePath("/manage/rosters");
-    revalidatePath("/system/rosters");
-    revalidatePath("/my/rosters");
+    revalidatePaths(
+      `/manage/rosters/${rosterId}`,
+      `/system/rosters/${rosterId}`,
+      "/manage/rosters",
+      "/system/rosters",
+      "/my/rosters"
+    );
 
-    return { 
-      success: true, 
+    return actionSuccess({
       roster: { id: updatedRoster.id, status: updatedRoster.status },
       notifiedCount: staffIds.length,
-    };
+    });
   } catch (error) {
-    console.error("Error publishing roster:", error);
-    return { success: false, error: "Failed to publish roster" };
+    logActionError("rosters.approval.publishRoster", error, { rosterId });
+    return actionFailure("Failed to publish roster");
   }
 }
 
@@ -613,7 +617,7 @@ export async function revertToDraft(
     // Check permission
     const canManageRosters = await hasPermission(user.id, "rosters", "edit");
     if (!canManageRosters) {
-      return { success: false, error: "You don't have permission to manage rosters" };
+      return actionFailure("You don't have permission to manage rosters");
     }
 
     const roster = await prisma.roster.findUnique({
@@ -624,22 +628,22 @@ export async function revertToDraft(
     });
 
     if (!roster) {
-      return { success: false, error: "Roster not found" };
+      return actionFailure("Roster not found");
     }
 
     // Check access
     const hasAccess = await checkRosterAccess(user.id, user.role.name, roster);
     if (!hasAccess) {
-      return { success: false, error: "You don't have access to this roster" };
+      return actionFailure("You don't have access to this roster");
     }
 
     // Can revert from APPROVED or PUBLISHED
     if (roster.status === RosterStatus.DRAFT) {
-      return { success: false, error: "Roster is already a draft" };
+      return actionFailure("Roster is already a draft");
     }
 
     if (roster.status === RosterStatus.ARCHIVED) {
-      return { success: false, error: "Cannot revert an archived roster" };
+      return actionFailure("Cannot revert an archived roster");
     }
 
     const previousStatus = roster.status;
@@ -677,16 +681,18 @@ export async function revertToDraft(
       return updated;
     });
 
-    revalidatePath(`/manage/rosters/${rosterId}`);
-    revalidatePath(`/system/rosters/${rosterId}`);
-    revalidatePath("/manage/rosters");
-    revalidatePath("/system/rosters");
-    revalidatePath("/my/rosters");
+    revalidatePaths(
+      `/manage/rosters/${rosterId}`,
+      `/system/rosters/${rosterId}`,
+      "/manage/rosters",
+      "/system/rosters",
+      "/my/rosters"
+    );
 
-    return { success: true, roster: { id: updatedRoster.id, status: updatedRoster.status } };
+    return actionSuccess({ roster: { id: updatedRoster.id, status: updatedRoster.status } });
   } catch (error) {
-    console.error("Error reverting roster to draft:", error);
-    return { success: false, error: "Failed to revert roster to draft" };
+    logActionError("rosters.approval.revertToDraft", error, { rosterId });
+    return actionFailure("Failed to revert roster to draft");
   }
 }
 
@@ -722,10 +728,9 @@ export async function approveRoster(
     return finalizeRoster(rosterId, comments);
   }
 
-  return {
-    success: true,
-    roster: { id: rosterId, status: roster?.status || RosterStatus.APPROVED }
-  };
+  return actionSuccess({
+    roster: { id: rosterId, status: roster?.status || RosterStatus.APPROVED },
+  });
 }
 
 /**
@@ -814,10 +819,10 @@ export async function getFinalizedRosters(): Promise<{
       };
     });
 
-    return { success: true, rosters: result };
+    return actionSuccess({ rosters: result });
   } catch (error) {
-    console.error("Error fetching finalized rosters:", error);
-    return { success: false, error: "Failed to fetch finalized rosters" };
+    logActionError("rosters.approval.getFinalizedRosters", error);
+    return actionFailure("Failed to fetch finalized rosters");
   }
 }
 
@@ -946,10 +951,10 @@ export async function getApprovalHistory(rosterId: string): Promise<{
       };
     });
 
-    return { success: true, history };
+    return actionSuccess({ history });
   } catch (error) {
-    console.error("Error fetching approval history:", error);
-    return { success: false, error: "Failed to fetch approval history" };
+    logActionError("rosters.approval.getApprovalHistory", error, { rosterId });
+    return actionFailure("Failed to fetch approval history");
   }
 }
 
@@ -981,9 +986,9 @@ export async function getPendingApprovalsCount(): Promise<{
       },
     });
 
-    return { success: true, count };
+    return actionSuccess({ count });
   } catch (error) {
-    console.error("Error counting finalized rosters:", error);
-    return { success: false, error: "Failed to count finalized rosters" };
+    logActionError("rosters.approval.getPendingApprovalsCount", error);
+    return actionFailure("Failed to count finalized rosters");
   }
 }

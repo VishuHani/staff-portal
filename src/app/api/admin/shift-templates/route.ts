@@ -1,29 +1,32 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { createClient } from "@/lib/auth/supabase-server";
 import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/rbac/permissions";
+import { apiError, apiSuccess } from "@/lib/utils/api-response";
 
 // GET /api/admin/shift-templates - List shift templates for a venue
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiError("Unauthorized", 401);
     }
 
     const { searchParams } = new URL(request.url);
     const venueId = searchParams.get("venueId");
 
     if (!venueId) {
-      return NextResponse.json({ error: "Venue ID is required" }, { status: 400 });
+      return apiError("Venue ID is required", 400);
     }
 
     // Check permissions
     const canManage = await hasPermission(user.id, "venues", "manage", venueId);
     if (!canManage) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return apiError("Forbidden", 403);
     }
 
     const shiftTemplates = await prisma.shiftTemplate.findMany({
@@ -36,10 +39,10 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(shiftTemplates);
+    return apiSuccess({ shiftTemplates });
   } catch (error) {
     console.error("Error fetching shift templates:", error);
-    return NextResponse.json({ error: "Failed to fetch shift templates" }, { status: 500 });
+    return apiError("Failed to fetch shift templates");
   }
 }
 
@@ -47,23 +50,37 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiError("Unauthorized", 401);
     }
 
     const body = await request.json();
-    const { venueId, name, description, color, startTime, endTime, breakMinutes, autoCalculateBreak, position, daysOfWeek, displayOrder } = body;
+    const {
+      venueId,
+      name,
+      description,
+      color,
+      startTime,
+      endTime,
+      breakMinutes,
+      autoCalculateBreak,
+      position,
+      daysOfWeek,
+      displayOrder,
+    } = body;
 
     if (!venueId || !name || !startTime || !endTime) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+      return apiError("Missing required fields", 400);
     }
 
     // Check permissions
     const canManage = await hasPermission(user.id, "venues", "manage", venueId);
     if (!canManage) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return apiError("Forbidden", 403);
     }
 
     const shiftTemplate = await prisma.shiftTemplate.create({
@@ -83,9 +100,9 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(shiftTemplate, { status: 201 });
+    return apiSuccess({ shiftTemplate }, { status: 201 });
   } catch (error) {
     console.error("Error creating shift template:", error);
-    return NextResponse.json({ error: "Failed to create shift template" }, { status: 500 });
+    return apiError("Failed to create shift template");
   }
 }

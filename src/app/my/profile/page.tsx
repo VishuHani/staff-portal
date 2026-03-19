@@ -23,12 +23,15 @@ export default async function MyProfilePage() {
     getUnreadCount({ userId: user.id }),
     getUnreadMessageCount(),
   ]);
+  const unreadMessageCount = messageCountResult.success
+    ? (messageCountResult.count ?? 0)
+    : 0;
 
   return (
     <DashboardLayout
       user={user}
       unreadCount={unreadResult.count || 0}
-      unreadMessageCount={messageCountResult.count || 0}
+      unreadMessageCount={unreadMessageCount}
     >
       <ProfilePageClient profile={profile} />
     </DashboardLayout>

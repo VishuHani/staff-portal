@@ -12,6 +12,7 @@ import { auth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Decimal } from "@prisma/client/runtime/library";
+import { getUserVenueIds } from "@/lib/utils/venue";
 
 // ============================================================================
 // SCHEMAS
@@ -130,6 +131,13 @@ async function checkPayConfigAccess(venueId: string) {
 
   if (!isAdmin && !isVenueManager) {
     return { authorized: false, error: "Not authorized to manage pay configuration" };
+  }
+
+  if (!isAdmin) {
+    const userVenueIds = await getUserVenueIds(session.user.id);
+    if (!userVenueIds.includes(venueId)) {
+      return { authorized: false, error: "Not authorized to manage pay configuration" };
+    }
   }
 
   return { authorized: true, userId: session.user.id };

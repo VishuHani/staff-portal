@@ -65,6 +65,7 @@ import {
 } from "lucide-react";
 import { deleteEmail, duplicateEmail, saveEmailAsTemplate } from "@/lib/actions/emails";
 import { listFolderTree, type EmailFolderNode } from "@/lib/actions/email-workspace/folders";
+import { sanitizeEmailHtmlFragment } from "@/lib/services/email/sanitization";
 import { toast } from "sonner";
 import type { EmailWithRelations } from "@/types/email-campaign";
 
@@ -508,7 +509,7 @@ export function EmailBuilderClient({
             {previewDialog.email && (
               <div 
                 className="p-4"
-                dangerouslySetInnerHTML={{ __html: previewDialog.email.htmlContent }}
+                dangerouslySetInnerHTML={{ __html: sanitizeEmailHtmlFragment(previewDialog.email.htmlContent) }}
               />
             )}
           </div>

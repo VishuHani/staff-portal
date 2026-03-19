@@ -6,6 +6,7 @@
  */
 
 import { PDFDocument, PDFImage, rgb, StandardFonts, degrees } from 'pdf-lib';
+import { fetchProtectedBinaryUrl } from '@/lib/security/protected-fetch';
 import {
   PDFFieldValue,
   PDFGenerationOptions,
@@ -352,9 +353,11 @@ export async function generateSubmissionPDF(
   options?: Partial<PDFGenerationOptions>
 ): Promise<PDFGenerationResult> {
   try {
-    // Fetch the template PDF
-    const response = await fetch(templatePdfUrl);
-    const pdfData = await response.arrayBuffer();
+    // Fetch the template PDF through guarded URL controls
+    const pdfData = await fetchProtectedBinaryUrl(templatePdfUrl, {
+      maxBytes: 12 * 1024 * 1024,
+      timeoutMs: 15_000,
+    });
     
     // Convert form data to field values
     const fieldValues: PDFFieldValue[] = Object.entries(formData)

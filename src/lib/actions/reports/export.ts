@@ -3,7 +3,12 @@
 import { requireAuth, canAccess } from "@/lib/rbac/access";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx";
+import {
+  createWorkbook,
+  setWorksheetWidths,
+  styleHeaderRow,
+  workbookToBuffer,
+} from "@/lib/utils/excel-workbook";
 import ical, { ICalCalendar } from "ical-generator";
 import { format, parseISO } from "date-fns";
 
@@ -30,7 +35,7 @@ export interface ExportOptions {
  * Export report to CSV format
  */
 export async function exportToCSV(data: any, reportType: ReportType) {
-  const user = await requireAuth();
+  await requireAuth();
 
   // Check permission
   const hasAccess = await canAccess("reports", "export_team");
@@ -193,7 +198,7 @@ function generateCalendarCSV(data: any): string {
  * Export report to Excel format with multiple sheets
  */
 export async function exportToExcel(data: any, reportType: ReportType) {
-  const user = await requireAuth();
+  await requireAuth();
 
   // Check permission
   const hasAccess = await canAccess("reports", "export_team");
@@ -202,7 +207,7 @@ export async function exportToExcel(data: any, reportType: ReportType) {
   }
 
   try {
-    const workbook = XLSX.utils.book_new();
+    const workbook = createWorkbook();
 
     switch (reportType) {
       case "matrix":
@@ -225,7 +230,7 @@ export async function exportToExcel(data: any, reportType: ReportType) {
     }
 
     // Convert workbook to buffer
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+    const buffer = await workbookToBuffer(workbook);
     const base64 = buffer.toString("base64");
 
     return {
@@ -239,7 +244,7 @@ export async function exportToExcel(data: any, reportType: ReportType) {
   }
 }
 
-function generateMatrixExcel(workbook: XLSX.WorkBook, data: any) {
+function generateMatrixExcel(workbook: ReturnType<typeof createWorkbook>, data: any) {
   const { users, dates, matrix } = data;
 
   // Main data sheet
@@ -262,21 +267,19 @@ function generateMatrixExcel(workbook: XLSX.WorkBook, data: any) {
     rows.push(row);
   });
 
-  const worksheet = XLSX.utils.aoa_to_sheet(rows);
-
-  // Set column widths
-  worksheet["!cols"] = [
-    { wch: 20 }, // Staff Member
-    { wch: 25 }, // Email
-    { wch: 15 }, // Role
-    { wch: 20 }, // Venues
-    ...dates.map(() => ({ wch: 12 })), // Dates
-  ];
-
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Availability Matrix");
+  const worksheet = workbook.addWorksheet("Availability Matrix");
+  worksheet.addRows(rows);
+  styleHeaderRow(worksheet);
+  setWorksheetWidths(worksheet, [
+    20, // Staff Member
+    25, // Email
+    15, // Role
+    20, // Venues
+    ...dates.map(() => 12), // Dates
+  ]);
 }
 
-function generateCoverageExcel(workbook: XLSX.WorkBook, data: any) {
+function generateCoverageExcel(workbook: ReturnType<typeof createWorkbook>, data: any) {
   const { dailyCoverage, summary } = data;
 
   // Summary sheet
@@ -290,9 +293,10 @@ function generateCoverageExcel(workbook: XLSX.WorkBook, data: any) {
     ["Low Availability", `${summary.lowAvailability.count} on ${format(parseISO(summary.lowAvailability.date), "MMM dd")}`],
   ];
 
-  const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-  summarySheet["!cols"] = [{ wch: 25 }, { wch: 40 }];
-  XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+  const summarySheet = workbook.addWorksheet("Summary");
+  summarySheet.addRows(summaryData);
+  styleHeaderRow(summarySheet, 3);
+  setWorksheetWidths(summarySheet, [25, 40]);
 
   // Daily coverage sheet
   const coverageData = [
@@ -307,12 +311,13 @@ function generateCoverageExcel(workbook: XLSX.WorkBook, data: any) {
     ]),
   ];
 
-  const coverageSheet = XLSX.utils.aoa_to_sheet(coverageData);
-  coverageSheet["!cols"] = [{ wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }];
-  XLSX.utils.book_append_sheet(workbook, coverageSheet, "Daily Coverage");
+  const coverageSheet = workbook.addWorksheet("Daily Coverage");
+  coverageSheet.addRows(coverageData);
+  styleHeaderRow(coverageSheet);
+  setWorksheetWidths(coverageSheet, [15, 12, 15, 12, 12, 15]);
 }
 
-function generateConflictsExcel(workbook: XLSX.WorkBook, data: any) {
+function generateConflictsExcel(workbook: ReturnType<typeof createWorkbook>, data: any) {
   const { conflicts, stats } = data;
 
   // Summary sheet
@@ -332,9 +337,10 @@ function generateConflictsExcel(workbook: XLSX.WorkBook, data: any) {
     ["Overlapping Time-Off", stats.byType.overlappingTimeOff],
   ];
 
-  const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-  summarySheet["!cols"] = [{ wch: 25 }, { wch: 15 }];
-  XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+  const summarySheet = workbook.addWorksheet("Summary");
+  summarySheet.addRows(summaryData);
+  styleHeaderRow(summarySheet, 3);
+  setWorksheetWidths(summarySheet, [25, 15]);
 
   // Conflicts sheet
   const conflictsData = [
@@ -352,14 +358,15 @@ function generateConflictsExcel(workbook: XLSX.WorkBook, data: any) {
     ]),
   ];
 
-  const conflictsSheet = XLSX.utils.aoa_to_sheet(conflictsData);
-  conflictsSheet["!cols"] = [
-    { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 18 }, { wch: 25 }, { wch: 40 }, { wch: 20 }, { wch: 10 }, { wch: 10 }
-  ];
-  XLSX.utils.book_append_sheet(workbook, conflictsSheet, "Conflicts");
+  const conflictsSheet = workbook.addWorksheet("Conflicts");
+  conflictsSheet.addRows(conflictsData);
+  styleHeaderRow(conflictsSheet);
+  setWorksheetWidths(conflictsSheet, [
+    15, 10, 10, 18, 25, 40, 20, 10, 10,
+  ]);
 }
 
-function generateGapsExcel(workbook: XLSX.WorkBook, data: any) {
+function generateGapsExcel(workbook: ReturnType<typeof createWorkbook>, data: any) {
   const { gaps } = data;
 
   const gapsData = [
@@ -375,12 +382,13 @@ function generateGapsExcel(workbook: XLSX.WorkBook, data: any) {
     ]),
   ];
 
-  const worksheet = XLSX.utils.aoa_to_sheet(gapsData);
-  worksheet["!cols"] = [{ wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Staffing Gaps");
+  const worksheet = workbook.addWorksheet("Staffing Gaps");
+  worksheet.addRows(gapsData);
+  styleHeaderRow(worksheet, 3);
+  setWorksheetWidths(worksheet, [15, 12, 15, 15, 10]);
 }
 
-function generateCalendarExcel(workbook: XLSX.WorkBook, data: any) {
+function generateCalendarExcel(workbook: ReturnType<typeof createWorkbook>, data: any) {
   generateMatrixExcel(workbook, data);
 }
 
@@ -392,7 +400,7 @@ function generateCalendarExcel(workbook: XLSX.WorkBook, data: any) {
  * Export report to PDF format
  */
 export async function exportToPDF(data: any, reportType: ReportType) {
-  const user = await requireAuth();
+  await requireAuth();
 
   // Check permission
   const hasAccess = await canAccess("reports", "export_team");
@@ -564,7 +572,7 @@ function generateCalendarPDF(doc: jsPDF, data: any) {
  * Export availability to iCal format
  */
 export async function exportToICal(data: any) {
-  const user = await requireAuth();
+  await requireAuth();
 
   // Check permission
   const hasAccess = await canAccess("reports", "export_team");
@@ -635,7 +643,7 @@ export async function exportToICal(data: any) {
  * Universal export function - routes to specific format handler
  */
 export async function exportReport(options: ExportOptions) {
-  const user = await requireAuth();
+  await requireAuth();
 
   // Check permission
   const hasAccess = await canAccess("reports", "export_team");

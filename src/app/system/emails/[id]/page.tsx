@@ -13,13 +13,14 @@ export const metadata = {
 export default async function CampaignDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = await params;
   const user = await requireAuth();
   const isUserAdmin = await isAdmin(user.id);
 
   const campaign = await prisma.emailCampaign.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       creator: {
         select: { id: true, firstName: true, lastName: true, email: true },

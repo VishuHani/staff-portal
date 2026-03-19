@@ -63,11 +63,16 @@ export default async function ManageUsersPage() {
     redirect("/dashboard?error=forbidden");
   }
 
-  const { users: teamUsers } = usersResult;
-  const { stats } = statsResult;
-  const { roles } = rolesResult;
-  const { stores } = storesResult;
-  const { venues } = venuesResult;
+  const teamUsers = usersResult.users ?? [];
+  const stats = statsResult.stats ?? {
+    total: 0,
+    active: 0,
+    inactive: 0,
+    byRole: [],
+  };
+  const roles = rolesResult.roles ?? [];
+  const stores = storesResult.stores ?? [];
+  const venues = venuesResult.venues ?? [];
 
   // Serialize users to convert Decimal fields to numbers
   const serializedUsers = teamUsers.map(serializeUser);

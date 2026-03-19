@@ -2,8 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess } from "@/lib/rbac/access";
-import { getAccessibleChannelIds } from "@/lib/utils/venue";
+import { requireAuth, canAccess, canAccessAdmin } from "@/lib/rbac/access";
+import { getAccessibleChannelIds, getUserVenueIds } from "@/lib/utils/venue";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import { getAuditContext } from "@/lib/utils/audit-helpers";
 import {
@@ -36,6 +36,11 @@ async function getManagerVenueIds(userId: string): Promise<string[] | null> {
     return user.venues.map((uv) => uv.venue.id);
   }
   return null;
+}
+
+async function getOwnedVenueIds(userId: string): Promise<string[]> {
+  const venueIds = await getUserVenueIds(userId);
+  return venueIds;
 }
 
 /**
@@ -123,12 +128,20 @@ export async function getChannels(filters?: FilterChannelsInput) {
  * Get a single channel by ID
  */
 export async function getChannelById(id: string) {
-  await requireAuth();
+  const user = await requireAuth();
 
   try {
+    const isAdmin = await canAccessAdmin();
+    const userVenueIds = isAdmin ? [] : await getOwnedVenueIds(user.id);
+
     const channel = await prisma.channel.findUnique({
       where: { id },
       include: {
+        venues: {
+          select: {
+            venueId: true,
+          },
+        },
         _count: {
           select: {
             posts: true,
@@ -139,6 +152,16 @@ export async function getChannelById(id: string) {
 
     if (!channel) {
       return { error: "Channel not found" };
+    }
+
+    if (!isAdmin && !channel.isPublic) {
+      const hasVenueAccess = channel.venues.some((venue) =>
+        userVenueIds.includes(venue.venueId)
+      );
+
+      if (!hasVenueAccess) {
+        return { error: "Channel not found" };
+      }
     }
 
     return { success: true, channel };
@@ -171,6 +194,9 @@ export async function createChannel(data: CreateChannelInput) {
     validatedFields.data;
 
   try {
+    const userVenueIds = await getOwnedVenueIds(user.id);
+    const userIsAdmin = await canAccessAdmin();
+
     // If user is a manager, validate and restrict venue assignments
     const managerVenueIds = await getManagerVenueIds(user.id);
     if (managerVenueIds && managerVenueIds.length > 0) {
@@ -191,6 +217,25 @@ export async function createChannel(data: CreateChannelInput) {
         }
       }
     }
+
+    if (!userIsAdmin) {
+      if (userVenueIds.length === 0) {
+        return { error: "You don't have permission to create channels" };
+      }
+
+      if (!venueIds || venueIds.length === 0) {
+        venueIds = userVenueIds;
+      } else {
+        const invalidVenueIds = venueIds.filter((venueId) => !userVenueIds.includes(venueId));
+        if (invalidVenueIds.length > 0) {
+          return {
+            error: "You don't have permission to create channels for venues you do not own",
+          };
+        }
+      }
+    }
+
+    venueIds = venueIds ? [...new Set(venueIds)] : venueIds;
 
     // Check if channel name already exists
     const existing = await prisma.channel.findUnique({
@@ -278,15 +323,39 @@ export async function updateChannel(data: UpdateChannelInput) {
     // Check if channel exists
     const existing = await prisma.channel.findUnique({
       where: { id },
+      include: {
+        venues: {
+          select: {
+            venueId: true,
+          },
+        },
+      },
     });
 
     if (!existing) {
       return { error: "Channel not found" };
     }
 
+    const userIsAdmin = await canAccessAdmin();
+    const userVenueIds = userIsAdmin ? [] : await getOwnedVenueIds(user.id);
+
+    if (!userIsAdmin) {
+      if (userVenueIds.length === 0) {
+        return { error: "Channel not found" };
+      }
+
+      const hasVenueAccess =
+        existing.isPublic ||
+        existing.venues.some((venue) => userVenueIds.includes(venue.venueId));
+
+      if (!hasVenueAccess) {
+        return { error: "Channel not found" };
+      }
+    }
+
     // If user is a manager, validate venue assignments
     const managerVenueIds = await getManagerVenueIds(user.id);
-    if (managerVenueIds && managerVenueIds.length > 0 && venueIds) {
+    if (!userIsAdmin && managerVenueIds && managerVenueIds.length > 0 && venueIds) {
       // Validate that all provided venueIds are within manager's venues
       const invalidVenueIds = venueIds.filter(
         (venueId) => !managerVenueIds.includes(venueId)
@@ -297,6 +366,16 @@ export async function updateChannel(data: UpdateChannelInput) {
             "As a manager, you can only assign channels to your assigned venue(s)",
         };
       }
+    }
+
+    if (!userIsAdmin && venueIds) {
+      const invalidVenueIds = venueIds.filter((venueId) => !userVenueIds.includes(venueId));
+      if (invalidVenueIds.length > 0) {
+        return {
+          error: "Channel can only be assigned to venues you own",
+        };
+      }
+      venueIds = [...new Set(venueIds)];
     }
 
     // If updating name, check for duplicates
@@ -387,10 +466,29 @@ export async function archiveChannel(data: ArchiveChannelInput) {
   try {
     const existingChannel = await prisma.channel.findUnique({
       where: { id },
+      include: {
+        venues: {
+          select: {
+            venueId: true,
+          },
+        },
+      },
     });
 
     if (!existingChannel) {
       return { error: "Channel not found" };
+    }
+
+    const userIsAdmin = await canAccessAdmin();
+    if (!userIsAdmin) {
+      const userVenueIds = await getOwnedVenueIds(user.id);
+      const hasVenueAccess =
+        existingChannel.isPublic ||
+        existingChannel.venues.some((venue) => userVenueIds.includes(venue.venueId));
+
+      if (!hasVenueAccess) {
+        return { error: "Channel not found" };
+      }
     }
 
     const channel = await prisma.channel.update({
@@ -455,6 +553,11 @@ export async function deleteChannel(data: DeleteChannelInput) {
     const channel = await prisma.channel.findUnique({
       where: { id },
       include: {
+        venues: {
+          select: {
+            venueId: true,
+          },
+        },
         _count: {
           select: {
             posts: true,
@@ -465,6 +568,18 @@ export async function deleteChannel(data: DeleteChannelInput) {
 
     if (!channel) {
       return { error: "Channel not found" };
+    }
+
+    const userIsAdmin = await canAccessAdmin();
+    if (!userIsAdmin) {
+      const userVenueIds = await getOwnedVenueIds(user.id);
+      const hasVenueAccess =
+        channel.isPublic ||
+        channel.venues.some((venue) => userVenueIds.includes(venue.venueId));
+
+      if (!hasVenueAccess) {
+        return { error: "Channel not found" };
+      }
     }
 
     if (channel._count.posts > 0) {

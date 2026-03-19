@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -17,10 +16,10 @@ import {
   cancelEmailCampaign,
   requestCampaignApproval,
   sendEmailCampaign,
+  type EmailCampaignListItem,
 } from "@/lib/actions/email-campaigns";
 import { listFolderTree, type EmailFolderNode } from "@/lib/actions/email-workspace/folders";
 import type {
-  EmailCampaign,
   CampaignStatus,
   CampaignApprovalStatus,
   EmailType,
@@ -42,6 +41,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
+
+const CAMPAIGN_PAGE_SIZE = 25;
 
 interface Venue {
   id: string;
@@ -102,26 +103,33 @@ function flattenFolderOptions(
 }
 
 export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps) {
-  const router = useRouter();
-  const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
+  void roles;
+  const [campaigns, setCampaigns] = useState<EmailCampaignListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [venueFilter, setVenueFilter] = useState<string>("all");
   const [folderFilter, setFolderFilter] = useState<string>("all");
   const [folderOptions, setFolderOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedCampaign, setSelectedCampaign] = useState<EmailCampaign | null>(null);
+  const [selectedCampaign, setSelectedCampaign] = useState<EmailCampaignListItem | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadCampaigns();
-  }, [statusFilter, typeFilter, venueFilter, folderFilter]);
-
-  useEffect(() => {
-    void loadFolders();
-  }, []);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: CAMPAIGN_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+    hasMore: false,
+  });
+  const [summary, setSummary] = useState({
+    drafts: 0,
+    scheduled: 0,
+    sent: 0,
+    totalRecipients: 0,
+  });
 
   const loadFolders = async () => {
     try {
@@ -136,43 +144,70 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
     }
   };
 
-  const loadCampaigns = async () => {
-    setLoading(true);
-    try {
-      const filters: Record<string, unknown> = {};
-      if (statusFilter !== "all") {
-        filters.status = statusFilter as CampaignStatus;
-      }
-      if (typeFilter !== "all") {
-        filters.emailType = typeFilter as EmailType;
-      }
-      if (venueFilter !== "all") {
-        filters.venueId = venueFilter;
-      }
-      if (folderFilter !== "all" && folderFilter !== "none") {
-        filters.folderId = folderFilter;
-      }
-      if (search) {
-        filters.search = search;
-      }
+  const loadCampaigns = useCallback(
+    async (requestedPage = page) => {
+      setLoading(true);
+      try {
+        const filters: Record<string, unknown> = {
+          page: requestedPage,
+          limit: CAMPAIGN_PAGE_SIZE,
+        };
+        if (statusFilter !== "all") {
+          filters.status = statusFilter as CampaignStatus;
+        }
+        if (typeFilter !== "all") {
+          filters.emailType = typeFilter as EmailType;
+        }
+        if (venueFilter !== "all") {
+          filters.venueId = venueFilter;
+        }
+        if (folderFilter !== "all") {
+          filters.folderId = folderFilter;
+        }
+        if (appliedSearch) {
+          filters.search = appliedSearch;
+        }
 
-      const result = await getEmailCampaigns(filters);
-      if (result.success && result.campaigns) {
-        const mappedCampaigns =
-          folderFilter === "none"
-            ? result.campaigns.filter((campaign) => !campaign.folderId)
-            : result.campaigns;
-        setCampaigns(mappedCampaigns);
-      } else {
-        toast.error(result.error || "Failed to load campaigns");
+        const result = await getEmailCampaigns(filters);
+        if (result.success && result.campaigns) {
+          setCampaigns(result.campaigns);
+          setSummary(
+            result.summary || {
+              drafts: 0,
+              scheduled: 0,
+              sent: 0,
+              totalRecipients: 0,
+            }
+          );
+          setPagination(
+            result.pagination || {
+              page: requestedPage,
+              limit: CAMPAIGN_PAGE_SIZE,
+              total: result.total || 0,
+              totalPages: 1,
+              hasMore: false,
+            }
+          );
+        } else {
+          toast.error(result.error || "Failed to load campaigns");
+        }
+      } catch (error) {
+        console.error("Error loading campaigns:", error);
+        toast.error("Failed to load campaigns");
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error("Error loading campaigns:", error);
-      toast.error("Failed to load campaigns");
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [appliedSearch, folderFilter, page, statusFilter, typeFilter, venueFilter]
+  );
+
+  useEffect(() => {
+    void loadFolders();
+  }, []);
+
+  useEffect(() => {
+    void loadCampaigns(page);
+  }, [loadCampaigns, page]);
 
   const handleDelete = async () => {
     if (!selectedCampaign) return;
@@ -196,7 +231,7 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
     }
   };
 
-  const handleCancel = async (campaign: EmailCampaign) => {
+  const handleCancel = async (campaign: EmailCampaignListItem) => {
     setActionLoading(campaign.id);
     try {
       const result = await cancelEmailCampaign(campaign.id);
@@ -214,7 +249,7 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
     }
   };
 
-  const handleSendNow = async (campaign: EmailCampaign) => {
+  const handleSendNow = async (campaign: EmailCampaignListItem) => {
     if (!confirm("Are you sure you want to send this campaign now? This action cannot be undone.")) {
       return;
     }
@@ -236,7 +271,7 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
     }
   };
 
-  const handleRequestApproval = async (campaign: EmailCampaign) => {
+  const handleRequestApproval = async (campaign: EmailCampaignListItem) => {
     setActionLoading(campaign.id);
     try {
       const result = await requestCampaignApproval(campaign.id);
@@ -272,17 +307,13 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
     </Badge>
   );
 
-  const getStats = () => {
-    const total = campaigns.length;
-    const drafts = campaigns.filter(c => c.status === "DRAFT").length;
-    const scheduled = campaigns.filter(c => c.status === "SCHEDULED").length;
-    const sent = campaigns.filter(c => c.status === "SENT").length;
-    const totalRecipients = campaigns.reduce((sum, c) => sum + c.recipientCount, 0);
-    
-    return { total, drafts, scheduled, sent, totalRecipients };
+  const stats = {
+    total: pagination.total,
+    drafts: summary.drafts,
+    scheduled: summary.scheduled,
+    sent: summary.sent,
+    totalRecipients: summary.totalRecipients,
   };
-
-  const stats = getStats();
 
   return (
     <div className="space-y-6">
@@ -353,13 +384,24 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                   placeholder="Search campaigns..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && loadCampaigns()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      setAppliedSearch(search);
+                      setPage(1);
+                    }
+                  }}
                   className="pl-8"
                 />
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Select value={venueFilter} onValueChange={setVenueFilter}>
+              <Select
+                value={venueFilter}
+                onValueChange={(value) => {
+                  setPage(1);
+                  setVenueFilter(value);
+                }}
+              >
                 <SelectTrigger className="w-[150px]">
                   <SelectValue placeholder="Venue" />
                 </SelectTrigger>
@@ -372,7 +414,13 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select
+                value={statusFilter}
+                onValueChange={(value) => {
+                  setPage(1);
+                  setStatusFilter(value);
+                }}
+              >
                 <SelectTrigger className="w-[150px]">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
@@ -384,7 +432,13 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                   <SelectItem value="CANCELLED">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <Select
+                value={typeFilter}
+                onValueChange={(value) => {
+                  setPage(1);
+                  setTypeFilter(value);
+                }}
+              >
                 <SelectTrigger className="w-[150px]">
                   <SelectValue placeholder="Type" />
                 </SelectTrigger>
@@ -394,7 +448,13 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                   <SelectItem value="MARKETING">Marketing</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={folderFilter} onValueChange={setFolderFilter}>
+              <Select
+                value={folderFilter}
+                onValueChange={(value) => {
+                  setPage(1);
+                  setFolderFilter(value);
+                }}
+              >
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Folder" />
                 </SelectTrigger>
@@ -408,7 +468,13 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant="outline" onClick={loadCampaigns}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAppliedSearch(search);
+                  setPage(1);
+                }}
+              >
                 Search
               </Button>
             </div>
@@ -539,6 +605,32 @@ export function ManagerEmailsClient({ venues, roles }: ManagerEmailsClientProps)
           )}
         </CardContent>
       </Card>
+
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3">
+          <div className="text-sm text-muted-foreground">
+            Page {pagination.page} of {pagination.totalPages} · {pagination.total} campaigns
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={pagination.page <= 1 || loading}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((current) => Math.min(pagination.totalPages, current + 1))}
+              disabled={!pagination.hasMore || loading}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Delete Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

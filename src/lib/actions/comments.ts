@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess, canAccessVenue } from "@/lib/rbac/access";
-import { getSharedVenueUsers } from "@/lib/utils/venue";
+import { getSharedVenueUsers, getAccessibleChannelIds } from "@/lib/utils/venue";
 import {
   createCommentSchema,
   updateCommentSchema,
@@ -35,6 +35,20 @@ export async function getCommentsByPostId(postId: string) {
   const user = await requireAuth();
 
   try {
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      select: { channelId: true },
+    });
+
+    if (!post) {
+      return { error: "Post not found" };
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(post.channelId)) {
+      return { error: "Post not found" };
+    }
+
     // Get all comments for the post
     const allComments = await prisma.comment.findMany({
       where: { postId },
@@ -139,6 +153,11 @@ export async function createComment(data: CreateCommentInput) {
       return { error: "Post not found" };
     }
 
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(post.channelId)) {
+      return { error: "Post not found" };
+    }
+
     if (post.channel.archived) {
       return { error: "Channel is archived" };
     }
@@ -165,10 +184,19 @@ export async function createComment(data: CreateCommentInput) {
               id: true,
             },
           },
+          post: {
+            select: {
+              id: true,
+            },
+          },
         },
       });
 
       if (!parentComment) {
+        return { error: "Parent comment not found" };
+      }
+
+      if (parentComment.postId !== postId) {
         return { error: "Parent comment not found" };
       }
     }
@@ -287,9 +315,21 @@ export async function updateComment(data: UpdateCommentInput) {
     // Check if comment exists and user owns it
     const existingComment = await prisma.comment.findUnique({
       where: { id },
+      include: {
+        post: {
+          select: {
+            channelId: true,
+          },
+        },
+      },
     });
 
     if (!existingComment) {
+      return { error: "Comment not found" };
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(existingComment.post.channelId)) {
       return { error: "Comment not found" };
     }
 
@@ -353,10 +393,16 @@ export async function deleteComment(data: DeleteCommentInput) {
       where: { id },
       include: {
         post: {
-          include: {
+          select: {
+            channelId: true,
             channel: {
-              include: {
-                venues: true,
+              select: {
+                isPublic: true,
+                venues: {
+                  select: {
+                    venueId: true,
+                  },
+                },
               },
             },
           },
@@ -365,6 +411,11 @@ export async function deleteComment(data: DeleteCommentInput) {
     });
 
     if (!existingComment) {
+      return { error: "Comment not found" };
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(existingComment.post.channelId)) {
       return { error: "Comment not found" };
     }
 
@@ -439,6 +490,11 @@ export async function getPostParticipants(postId: string) {
     });
 
     if (!post) {
+      return { error: "Post not found" };
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(post.channelId)) {
       return { error: "Post not found" };
     }
 

@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { createClient } from "@/lib/auth/supabase-server";
 import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/rbac/permissions";
+import { apiError, apiSuccess } from "@/lib/utils/api-response";
 
 // PUT /api/admin/staff/[id]/pay-rates - Update staff pay rates
 export async function PUT(
@@ -14,7 +15,7 @@ export async function PUT(
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiError("Unauthorized", 401);
     }
 
     const body = await request.json();
@@ -27,7 +28,7 @@ export async function PUT(
     });
 
     if (!staffMember) {
-      return NextResponse.json({ error: "Staff member not found" }, { status: 404 });
+      return apiError("Staff member not found", 404);
     }
 
     // Check if user has permission to manage any of the staff member's venues
@@ -41,7 +42,7 @@ export async function PUT(
     }
 
     if (!canManage) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return apiError("Forbidden", 403);
     }
 
     const updatedMember = await prisma.user.update({
@@ -56,9 +57,9 @@ export async function PUT(
       },
     });
 
-    return NextResponse.json(updatedMember);
+    return apiSuccess(updatedMember);
   } catch (error) {
     console.error("Error updating staff pay rates:", error);
-    return NextResponse.json({ error: "Failed to update staff pay rates" }, { status: 500 });
+    return apiError("Failed to update staff pay rates");
   }
 }

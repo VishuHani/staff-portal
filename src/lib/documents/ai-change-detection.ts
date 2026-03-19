@@ -9,6 +9,7 @@
  */
 
 import OpenAI from "openai";
+import { fetchProtectedBinaryUrl } from "@/lib/security/protected-fetch";
 import {
   CHANGE_DETECTION_SYSTEM_PROMPT,
   generateChangeDetectionPrompt,
@@ -408,21 +409,15 @@ export async function comparePDFsFromURL(
   options: ChangeDetectionOptions = {}
 ): Promise<PDFComparisonResult> {
   // Fetch both PDFs
-  const [originalResponse, newResponse] = await Promise.all([
-    fetch(originalUrl),
-    fetch(newUrl),
-  ]);
-
-  if (!originalResponse.ok) {
-    throw new Error(`Failed to fetch original PDF: ${originalResponse.statusText}`);
-  }
-  if (!newResponse.ok) {
-    throw new Error(`Failed to fetch new PDF: ${newResponse.statusText}`);
-  }
-
   const [originalData, newData] = await Promise.all([
-    originalResponse.arrayBuffer(),
-    newResponse.arrayBuffer(),
+    fetchProtectedBinaryUrl(originalUrl, {
+      maxBytes: 12 * 1024 * 1024,
+      timeoutMs: 15_000,
+    }),
+    fetchProtectedBinaryUrl(newUrl, {
+      maxBytes: 12 * 1024 * 1024,
+      timeoutMs: 15_000,
+    }),
   ]);
 
   return comparePDFDocuments(originalData, newData, options);

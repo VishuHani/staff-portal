@@ -196,7 +196,7 @@ export function useDashboardRealtime({
       } else if (status === "CHANNEL_ERROR") {
         console.error("[Dashboard Realtime] Channel error:", channelName);
         handleChannelError();
-      } else if (status === "REATTACHING") {
+      } else if (status === "TIMED_OUT") {
         console.log("[Dashboard Realtime] Reconnecting to channel...");
         setConnectionState("reconnecting");
       }

@@ -1,5 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/auth/supabase-server';
+import { hasPermission } from '@/lib/rbac/permissions';
+import { documentUploadRateLimiter } from '@/lib/utils/public-rate-limit';
+import { apiError, apiSuccess } from '@/lib/utils/api-response';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -17,6 +21,35 @@ import { join } from 'path';
  */
 export async function POST(request: NextRequest) {
   try {
+    const ipAddress =
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      request.headers.get('x-real-ip') ||
+      'unknown';
+
+    const rateLimit = await documentUploadRateLimiter.check(ipAddress);
+    if (!rateLimit.allowed) {
+      const response = apiError(
+        rateLimit.reason || 'Rate limit exceeded. Please try again later.',
+        429
+      );
+
+      if (rateLimit.retryAfter) {
+        response.headers.set('Retry-After', String(rateLimit.retryAfter));
+      }
+
+      return response;
+    }
+
+    const authClient = await createClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await authClient.auth.getUser();
+
+    if (userError || !user) {
+      return apiError('Unauthorized', 401);
+    }
+
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const venueId = formData.get('venueId') as string;
@@ -24,35 +57,31 @@ export async function POST(request: NextRequest) {
     const uploadType = formData.get('type') as string || 'template';
 
     if (!file) {
-      return NextResponse.json(
-        { error: 'No file provided' },
-        { status: 400 }
-      );
+      return apiError('No file provided', 400);
     }
 
     if (!venueId) {
-      return NextResponse.json(
-        { error: 'Venue ID is required' },
-        { status: 400 }
-      );
+      return apiError('Venue ID is required', 400);
+    }
+
+    const canUpload = await hasPermission(user.id, 'documents', 'create', venueId);
+    if (!canUpload) {
+      return apiError('Forbidden', 403);
     }
 
     // Validate file type based on upload type
     const allowedTypes = getAllowedTypes(uploadType);
     if (!allowedTypes.includes(file.type)) {
-      return NextResponse.json(
-        { error: `File type ${file.type} is not allowed. Allowed types: ${allowedTypes.join(', ')}` },
-        { status: 400 }
+      return apiError(
+        `File type ${file.type} is not allowed. Allowed types: ${allowedTypes.join(', ')}`,
+        400
       );
     }
 
     // Validate file size (max 20MB for PDFs, 10MB for images)
     const maxSize = file.type === 'application/pdf' ? 20 * 1024 * 1024 : 10 * 1024 * 1024;
     if (file.size > maxSize) {
-      return NextResponse.json(
-        { error: `File size exceeds ${maxSize / (1024 * 1024)}MB limit` },
-        { status: 400 }
-      );
+      return apiError(`File size exceeds ${maxSize / (1024 * 1024)}MB limit`, 400);
     }
 
     const timestamp = Date.now();
@@ -78,8 +107,7 @@ export async function POST(request: NextRequest) {
           .from('document-uploads')
           .getPublicUrl(data.path);
 
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           url: urlData.publicUrl,
           path: data.path,
           method: 'supabase',
@@ -116,8 +144,7 @@ export async function POST(request: NextRequest) {
 
         console.log('Document saved to local filesystem:', localPath);
 
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           url: localUrl,
           path: localPath,
           method: 'local',
@@ -132,23 +159,20 @@ export async function POST(request: NextRequest) {
     }
 
     // If all methods fail, return error with helpful message
-    return NextResponse.json(
-      { 
-        error: 'Document upload failed. Please ensure the "document-uploads" bucket exists in Supabase Storage.',
-        details: 'The storage bucket "document-uploads" was not found. Please create it in your Supabase dashboard or contact your administrator.',
-      },
-      { status: 500 }
+    return apiError(
+      'Document upload failed. Please ensure the "document-uploads" bucket exists in Supabase Storage.',
+      500,
+      {
+        details:
+          'The storage bucket "document-uploads" was not found. Please create it in your Supabase dashboard or contact your administrator.',
+      }
     );
 
   } catch (error) {
     console.error('Document upload error:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to process upload',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    );
+    return apiError('Failed to process upload', 500, {
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 }
 

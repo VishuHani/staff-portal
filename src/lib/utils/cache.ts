@@ -121,18 +121,27 @@ class InMemoryCache {
 // Initialize cache
 const inMemoryCache = new InMemoryCache();
 const hasUpstashConfig = !!(env.rateLimit.redisUrl && env.rateLimit.redisToken);
+const isProductionBuild = process.env.NEXT_PHASE === "phase-production-build";
+
+if (env.isProduction && !hasUpstashConfig && !isProductionBuild) {
+  throw new Error(
+    "Production cache backend is not configured. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN before starting production."
+  );
+}
 
 // Cleanup every 5 minutes
-setInterval(() => {
+const cleanupInterval = setInterval(() => {
   const cleaned = inMemoryCache.cleanup();
   if (cleaned > 0) {
     console.log(`[Cache] Cleaned ${cleaned} expired entries`);
   }
 }, 5 * 60 * 1000);
 
+cleanupInterval.unref?.();
+
 // Log cache type on initialization
-if (hasUpstashConfig) {
-  console.log("✅ Cache: Using Upstash Redis (Production)");
+if (env.isProduction) {
+  console.log("✅ Cache: Production backend configuration detected");
 } else {
   console.log(
     "⚠️  Cache: Using in-memory store (Development only - resets on server restart)"

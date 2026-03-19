@@ -46,10 +46,12 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/rbac/access", () => ({
   requireAuth: vi.fn(),
   canAccess: vi.fn(),
+  canAccessVenue: vi.fn(),
 }));
 
 vi.mock("@/lib/utils/venue", () => ({
   getSharedVenueUsers: vi.fn(),
+  getAccessibleChannelIds: vi.fn(),
 }));
 
 vi.mock("@/lib/services/notifications", () => ({
@@ -66,16 +68,19 @@ import {
   getMyComments,
 } from "@/lib/actions/comments";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess } from "@/lib/rbac/access";
-import { getSharedVenueUsers } from "@/lib/utils/venue";
+import { requireAuth, canAccess, canAccessVenue } from "@/lib/rbac/access";
+import { getSharedVenueUsers, getAccessibleChannelIds } from "@/lib/utils/venue";
 import { revalidatePath } from "next/cache";
 import { notifyPostMention, notifyMessageReply } from "@/lib/services/notifications";
 
 describe("Comments Actions - Venue Filtering", () => {
+  const channelId = "clnchannel12345678";
   let mockPrisma: any;
   let mockRequireAuth: any;
   let mockCanAccess: any;
+  let mockCanAccessVenue: any;
   let mockGetSharedVenueUsers: any;
+  let mockGetAccessibleChannelIds: any;
   let mockNotifyPostMention: any;
   let mockNotifyMessageReply: any;
 
@@ -84,9 +89,13 @@ describe("Comments Actions - Venue Filtering", () => {
     mockPrisma = prisma;
     mockRequireAuth = requireAuth as any;
     mockCanAccess = canAccess as any;
+    mockCanAccessVenue = canAccessVenue as any;
     mockGetSharedVenueUsers = getSharedVenueUsers as any;
+    mockGetAccessibleChannelIds = getAccessibleChannelIds as any;
     mockNotifyPostMention = notifyPostMention as any;
     mockNotifyMessageReply = notifyMessageReply as any;
+    mockGetAccessibleChannelIds.mockResolvedValue(["channel-1", "clnchannel12345678"]);
+    mockCanAccessVenue.mockResolvedValue(false);
   });
 
   // ==========================================================================
@@ -95,6 +104,13 @@ describe("Comments Actions - Venue Filtering", () => {
   describe("getCommentsByPostId()", () => {
     const postId = "clnpost1234567890abc";
     const channelId = "clnchannel12345678";
+
+    beforeEach(() => {
+      mockPrisma.post.findUnique.mockResolvedValue({
+        channelId,
+      });
+      mockGetAccessibleChannelIds.mockResolvedValue([channelId]);
+    });
 
     it("should return hierarchical comments structure", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user1);
@@ -326,6 +342,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user2.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       const mockComment = {
@@ -358,6 +379,35 @@ describe("Comments Actions - Venue Filtering", () => {
       expect(result.comment).toBeDefined();
       expect(result.comment?.content).toBe(validContent);
       expect(revalidatePath).toHaveBeenCalledWith("/posts");
+    });
+
+    it("should deny commenting on a post in another venue", async () => {
+      mockRequireAuth.mockResolvedValue(testUsers.user1);
+      mockCanAccess.mockResolvedValue(true);
+      mockGetSharedVenueUsers.mockResolvedValue([
+        testUsers.user1.id,
+        testUsers.user2.id,
+      ]);
+      mockGetAccessibleChannelIds.mockResolvedValue(["some-other-channel"]);
+
+      mockPrisma.post.findUnique.mockResolvedValue({
+        id: postId,
+        channelId,
+        author: { id: testUsers.user2.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
+      });
+
+      const result = await createComment({
+        postId,
+        content: validContent,
+      });
+
+      expect(result.error).toBe("Post not found");
+      expect(mockPrisma.comment.create).not.toHaveBeenCalled();
     });
 
     it("should check permission to create comments", async () => {
@@ -407,6 +457,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user2.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       mockPrisma.comment.findUnique.mockResolvedValue({
@@ -452,6 +507,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user2.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       mockPrisma.comment.findUnique.mockResolvedValue(null);
@@ -480,6 +540,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user2.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       mockPrisma.user.findMany.mockResolvedValue([
@@ -538,6 +603,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user1.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       // User 3 not in shared venues, so won't be returned
@@ -580,6 +650,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user3.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       mockPrisma.comment.findUnique.mockResolvedValue({
@@ -631,6 +706,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user2.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       const mockComment = {
@@ -674,6 +754,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user1.id }, // Same as commenter
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       const mockComment = {
@@ -711,6 +796,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user2.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       mockPrisma.comment.create.mockRejectedValue(new Error("Database error"));
@@ -738,6 +828,9 @@ describe("Comments Actions - Venue Filtering", () => {
         id: commentId,
         userId: testUsers.user1.id,
         content: "Original content",
+        post: {
+          channelId,
+        },
       });
 
       const mockUpdatedComment = {
@@ -776,6 +869,9 @@ describe("Comments Actions - Venue Filtering", () => {
         id: commentId,
         userId: testUsers.user2.id, // Different user
         content: "Original content",
+        post: {
+          channelId,
+        },
       });
 
       const result = await updateComment({
@@ -816,6 +912,9 @@ describe("Comments Actions - Venue Filtering", () => {
         id: commentId,
         userId: testUsers.user1.id,
         content: "Original content",
+        post: {
+          channelId,
+        },
       });
 
       const mockUpdatedComment = {
@@ -859,6 +958,9 @@ describe("Comments Actions - Venue Filtering", () => {
         id: commentId,
         userId: testUsers.user1.id,
         content: "Original content",
+        post: {
+          channelId,
+        },
       });
 
       mockPrisma.comment.update.mockRejectedValue(new Error("Database error"));
@@ -885,6 +987,12 @@ describe("Comments Actions - Venue Filtering", () => {
       mockPrisma.comment.findUnique.mockResolvedValue({
         id: commentId,
         userId: testUsers.user1.id,
+        post: {
+          channelId,
+          channel: {
+            venues: [{ venueId: testVenues.venueA.id }],
+          },
+        },
       });
 
       mockPrisma.comment.delete.mockResolvedValue({
@@ -900,13 +1008,42 @@ describe("Comments Actions - Venue Filtering", () => {
       expect(revalidatePath).toHaveBeenCalledWith("/posts");
     });
 
+    it("should deny deleting a comment when the post belongs to another venue", async () => {
+      mockRequireAuth.mockResolvedValue(testUsers.user1);
+      mockCanAccess.mockResolvedValue(false);
+      mockGetAccessibleChannelIds.mockResolvedValue(["some-other-channel"]);
+
+      mockPrisma.comment.findUnique.mockResolvedValue({
+        id: commentId,
+        userId: testUsers.user1.id,
+        post: {
+          channelId,
+          channel: {
+            venues: [{ venueId: testVenues.venueA.id }],
+          },
+        },
+      });
+
+      const result = await deleteComment({ id: commentId });
+
+      expect(result.error).toBe("Comment not found");
+      expect(mockPrisma.comment.delete).not.toHaveBeenCalled();
+    });
+
     it("should allow manager to delete any comment", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user3); // Manager
       mockCanAccess.mockResolvedValue(true); // Has manage permission
+      mockCanAccessVenue.mockResolvedValue(true);
 
       mockPrisma.comment.findUnique.mockResolvedValue({
         id: commentId,
         userId: testUsers.user1.id, // Different user
+        post: {
+          channelId,
+          channel: {
+            venues: [{ venueId: testVenues.venueA.id }],
+          },
+        },
       });
 
       mockPrisma.comment.delete.mockResolvedValue({
@@ -916,15 +1053,27 @@ describe("Comments Actions - Venue Filtering", () => {
       const result = await deleteComment({ id: commentId });
 
       expect(result.success).toBe(true);
+      expect(mockCanAccessVenue).toHaveBeenCalledWith(
+        "posts",
+        "moderate",
+        testVenues.venueA.id
+      );
     });
 
     it("should not allow staff to delete other user's comments", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user1); // Staff
       mockCanAccess.mockResolvedValue(false); // No manage permission
+      mockCanAccessVenue.mockResolvedValue(false);
 
       mockPrisma.comment.findUnique.mockResolvedValue({
         id: commentId,
         userId: testUsers.user2.id, // Different user
+        post: {
+          channelId,
+          channel: {
+            venues: [{ venueId: testVenues.venueA.id }],
+          },
+        },
       });
 
       const result = await deleteComment({ id: commentId });
@@ -949,6 +1098,12 @@ describe("Comments Actions - Venue Filtering", () => {
       mockPrisma.comment.findUnique.mockResolvedValue({
         id: commentId,
         userId: testUsers.user1.id,
+        post: {
+          channelId,
+          channel: {
+            venues: [{ venueId: testVenues.venueA.id }],
+          },
+        },
       });
 
       mockPrisma.comment.delete.mockResolvedValue({
@@ -971,6 +1126,12 @@ describe("Comments Actions - Venue Filtering", () => {
       mockPrisma.comment.findUnique.mockResolvedValue({
         id: commentId,
         userId: testUsers.user1.id,
+        post: {
+          channelId,
+          channel: {
+            venues: [{ venueId: testVenues.venueA.id }],
+          },
+        },
       });
 
       mockPrisma.comment.delete.mockRejectedValue(new Error("Database error"));
@@ -998,6 +1159,7 @@ describe("Comments Actions - Venue Filtering", () => {
     it("should return participants from shared venues only", async () => {
       // User 1 in Venue A and B
       mockRequireAuth.mockResolvedValue(testUsers.user1);
+      mockGetAccessibleChannelIds.mockResolvedValue(["channel-1"]);
 
       // User 1 shares venues with user2 and user3
       mockGetSharedVenueUsers.mockResolvedValue([
@@ -1008,6 +1170,7 @@ describe("Comments Actions - Venue Filtering", () => {
 
       const mockPost = {
         id: postId,
+        channelId: "channel-1",
         author: {
           id: testUsers.user2.id,
           email: "user2@example.com",
@@ -1040,6 +1203,7 @@ describe("Comments Actions - Venue Filtering", () => {
 
     it("should exclude current user from participants", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user1);
+      mockGetAccessibleChannelIds.mockResolvedValue(["channel-1"]);
 
       mockGetSharedVenueUsers.mockResolvedValue([
         testUsers.user1.id,
@@ -1048,6 +1212,7 @@ describe("Comments Actions - Venue Filtering", () => {
 
       const mockPost = {
         id: postId,
+        channelId: "channel-1",
         author: {
           id: testUsers.user1.id, // Current user is author
           email: "user1@example.com",
@@ -1080,6 +1245,7 @@ describe("Comments Actions - Venue Filtering", () => {
     it("should not return participants from other venues", async () => {
       // User 2 only in Venue B
       mockRequireAuth.mockResolvedValue(testUsers.user2);
+      mockGetAccessibleChannelIds.mockResolvedValue(["channel-1"]);
 
       // User 2 only shares Venue B with user1
       mockGetSharedVenueUsers.mockResolvedValue([
@@ -1089,6 +1255,7 @@ describe("Comments Actions - Venue Filtering", () => {
 
       const mockPost = {
         id: postId,
+        channelId: "channel-1",
         author: {
           id: testUsers.user1.id,
           email: "user1@example.com",
@@ -1121,6 +1288,7 @@ describe("Comments Actions - Venue Filtering", () => {
     it("should return error when post author not in shared venues", async () => {
       // User 2 only in Venue B
       mockRequireAuth.mockResolvedValue(testUsers.user2);
+      mockGetAccessibleChannelIds.mockResolvedValue(["channel-1"]);
 
       // User 2 only shares Venue B with user1
       mockGetSharedVenueUsers.mockResolvedValue([
@@ -1130,6 +1298,7 @@ describe("Comments Actions - Venue Filtering", () => {
 
       const mockPost = {
         id: postId,
+        channelId: "channel-1",
         author: {
           id: testUsers.user3.id, // User 3 in Venue A only
           email: "user3@example.com",
@@ -1150,6 +1319,7 @@ describe("Comments Actions - Venue Filtering", () => {
     it("should return error for non-existent post", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user1);
       mockGetSharedVenueUsers.mockResolvedValue([testUsers.user1.id]);
+      mockGetAccessibleChannelIds.mockResolvedValue(["channel-1"]);
       mockPrisma.post.findUnique.mockResolvedValue(null);
 
       const result = await getPostParticipants("non-existent-post");
@@ -1159,6 +1329,7 @@ describe("Comments Actions - Venue Filtering", () => {
 
     it("should return unique participants (no duplicates)", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user1);
+      mockGetAccessibleChannelIds.mockResolvedValue(["channel-1"]);
 
       mockGetSharedVenueUsers.mockResolvedValue([
         testUsers.user1.id,
@@ -1167,6 +1338,7 @@ describe("Comments Actions - Venue Filtering", () => {
 
       const mockPost = {
         id: postId,
+        channelId: "channel-1",
         author: {
           id: testUsers.user2.id,
           email: "user2@example.com",
@@ -1207,6 +1379,7 @@ describe("Comments Actions - Venue Filtering", () => {
     it("should handle database errors gracefully", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user1);
       mockGetSharedVenueUsers.mockResolvedValue([testUsers.user1.id]);
+      mockGetAccessibleChannelIds.mockResolvedValue(["channel-1"]);
       mockPrisma.post.findUnique.mockRejectedValue(new Error("Database error"));
 
       const result = await getPostParticipants(postId);
@@ -1350,6 +1523,11 @@ describe("Comments Actions - Venue Filtering", () => {
         id: postId,
         channelId,
         author: { id: testUsers.user3.id },
+        channel: {
+          archived: false,
+          permissions: null,
+          members: [{ role: "CREATOR" }],
+        },
       });
 
       const result = await createComment({
@@ -1363,15 +1541,16 @@ describe("Comments Actions - Venue Filtering", () => {
     });
 
     it("should not allow viewing comments if post author is not in shared venues", async () => {
-      // This is handled at the UI level - getCommentsByPostId doesn't do venue filtering
-      // It relies on the post being accessible first
       mockRequireAuth.mockResolvedValue(testUsers.user2);
+      mockGetAccessibleChannelIds.mockResolvedValue([channelId]);
+      mockPrisma.post.findUnique.mockResolvedValue({
+        channelId,
+      });
       mockPrisma.comment.findMany.mockResolvedValue([]);
 
       const result = await getCommentsByPostId(postId);
 
       expect(result.success).toBe(true);
-      // Venue filtering should happen at post level, not comment level
     });
 
     it("should not return participants from other venues in getPostParticipants", async () => {
@@ -1385,6 +1564,7 @@ describe("Comments Actions - Venue Filtering", () => {
 
       const mockPost = {
         id: postId,
+        channelId,
         author: {
           id: testUsers.user1.id,
           email: "user1@example.com",

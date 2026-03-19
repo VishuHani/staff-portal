@@ -1,6 +1,9 @@
 import { Prisma } from "@prisma/client";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { emailWebhookRateLimiter } from "@/lib/utils/public-rate-limit";
+import { apiError, apiSuccess } from "@/lib/utils/api-response";
 
 type BrevoWebhookBody = {
   event?: string;
@@ -46,9 +49,99 @@ async function safeUpdateUserPreference(
   }
 }
 
+function verifyWebhookSignature(rawBody: string, request: NextRequest): boolean {
+  const signatureSecret =
+    process.env.BREVO_WEBHOOK_SIGNATURE_SECRET || process.env.BREVO_WEBHOOK_SECRET;
+
+  if (!signatureSecret) {
+    return false;
+  }
+
+  const signatureHeader =
+    request.headers.get("x-brevo-signature") ||
+    request.headers.get("x-webhook-signature");
+
+  if (!signatureHeader) {
+    return false;
+  }
+
+  const expectedSignature = crypto
+    .createHmac("sha256", signatureSecret)
+    .update(rawBody)
+    .digest("hex");
+
+  const normalizedProvided = signatureHeader.trim().toLowerCase();
+  const normalizedExpected = expectedSignature.toLowerCase();
+
+  if (normalizedProvided.length !== normalizedExpected.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(normalizedProvided),
+    Buffer.from(normalizedExpected)
+  );
+}
+
+function verifyWebhookToken(request: NextRequest): boolean {
+  const expectedToken = process.env.BREVO_WEBHOOK_TOKEN;
+  if (!expectedToken) {
+    return false;
+  }
+
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader) {
+    return false;
+  }
+
+  const providedToken = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader;
+
+  return providedToken === expectedToken;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as BrevoWebhookBody;
+    const ipAddress =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
+    const rateLimit = await emailWebhookRateLimiter.check(ipAddress);
+    if (!rateLimit.allowed) {
+      const response = apiError(
+        rateLimit.reason || "Rate limit exceeded. Please try again later.",
+        429
+      );
+
+      if (rateLimit.retryAfter) {
+        response.headers.set("Retry-After", String(rateLimit.retryAfter));
+      }
+
+      return response;
+    }
+
+    const isProduction = process.env.NODE_ENV === "production";
+    const hasTokenVerifier = !!process.env.BREVO_WEBHOOK_TOKEN;
+    const hasSignatureVerifier = !!(
+      process.env.BREVO_WEBHOOK_SIGNATURE_SECRET || process.env.BREVO_WEBHOOK_SECRET
+    );
+
+    if (isProduction && !hasTokenVerifier && !hasSignatureVerifier) {
+      return apiError("Webhook verification is not configured", 503);
+    }
+
+    const rawBody = await request.text();
+
+    if (hasTokenVerifier && !verifyWebhookToken(request)) {
+      return apiError("Invalid webhook authorization token", 401);
+    }
+
+    if (!hasTokenVerifier && hasSignatureVerifier && !verifyWebhookSignature(rawBody, request)) {
+      return apiError("Invalid webhook signature", 401);
+    }
+
+    const body = JSON.parse(rawBody) as BrevoWebhookBody;
 
     // Verify webhook signature in production if available.
     const eventType = body.event;
@@ -56,10 +149,7 @@ export async function POST(request: NextRequest) {
     const email = body.email;
 
     if (!eventType || !messageId || !email) {
-      return NextResponse.json(
-        { status: "error", error: "Missing required webhook fields" },
-        { status: 400 }
-      );
+      return apiError("Missing required webhook fields", 400);
     }
 
     await prisma.emailWebhookEvent.create({
@@ -104,10 +194,10 @@ export async function POST(request: NextRequest) {
       data: { processed: true, processedAt: new Date() },
     });
 
-    return NextResponse.json({ status: "ok" });
+    return apiSuccess({ status: "ok" });
   } catch (error) {
     console.error("Error processing Brevo webhook:", error);
-    return NextResponse.json({ status: "error" }, { status: 500 });
+    return apiError("Error processing Brevo webhook");
   }
 }
 

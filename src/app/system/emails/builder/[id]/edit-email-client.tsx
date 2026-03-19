@@ -59,6 +59,7 @@ import {
   sendEmailBuilderTest,
 } from "@/lib/actions/emails";
 import { generateEmail, improveEmail } from "@/lib/actions/email-ai";
+import { buildEmailPreviewSrcDoc, escapeHtml } from "@/lib/services/email/sanitization";
 import { toast } from "sonner";
 import type { EmailType, EmailWithRelations } from "@/types/email-campaign";
 
@@ -116,84 +117,6 @@ ${content}
   </div>
 </body>
 </html>`;
-
-const PREVIEW_STYLE_TAG_ID = "email-preview-normalizer";
-const PREVIEW_NORMALIZE_CSS = `
-  html, body {
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #f8fafc !important;
-  }
-  body {
-    -webkit-font-smoothing: antialiased;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-  img, svg, video, canvas {
-    max-width: 100% !important;
-    height: auto !important;
-  }
-  table {
-    width: 100% !important;
-    max-width: 100% !important;
-    border-collapse: collapse !important;
-  }
-  td, th {
-    max-width: 100% !important;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-  *[width] {
-    max-width: 100% !important;
-  }
-  @media (max-width: 600px) {
-    .container, [class*="container"] {
-      width: 100% !important;
-      max-width: 100% !important;
-    }
-    body, td, p, a, li, span {
-      font-size: 16px !important;
-      line-height: 1.5 !important;
-    }
-  }
-`;
-
-function buildPreviewSrcDoc(html: string): string {
-  const content = html.trim();
-  if (!content) {
-    return defaultHtmlTemplate("<p style=\"padding: 24px;\">No content yet.</p>", "Preview");
-  }
-
-  if (content.includes(PREVIEW_STYLE_TAG_ID)) {
-    return content;
-  }
-
-  const styleTag = `<style id="${PREVIEW_STYLE_TAG_ID}">${PREVIEW_NORMALIZE_CSS}</style>`;
-
-  if (/<head[\s>]/i.test(content)) {
-    return content.replace(/<\/head>/i, `${styleTag}</head>`);
-  }
-
-  if (/<html[\s>]/i.test(content)) {
-    return content.replace(
-      /<html[^>]*>/i,
-      (match) =>
-        `${match}<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />${styleTag}</head>`
-    );
-  }
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  ${styleTag}
-</head>
-<body>
-${content}
-</body>
-</html>`;
-}
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -532,7 +455,7 @@ export function EditEmailClient({
     return defaultHtmlTemplate(blockHtml, subject);
   }, [blocks, htmlCode, activeTab, subject]);
 
-  const previewHtml = useMemo(() => buildPreviewSrcDoc(generatedHtml), [generatedHtml]);
+  const previewHtml = useMemo(() => buildEmailPreviewSrcDoc(generatedHtml), [generatedHtml]);
 
   const selectedBlockData = useMemo(
     () => blocks.find((block) => block.id === selectedBlock) ?? null,

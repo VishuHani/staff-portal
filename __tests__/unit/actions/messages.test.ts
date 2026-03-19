@@ -40,6 +40,31 @@ vi.mock("@/lib/utils/venue", () => ({
     mockGetSharedVenueUsers(userId, options),
 }));
 
+const mockNotifyNewDirectMessage = vi.fn();
+const mockNotifyMessageMention = vi.fn();
+const mockNotifyMessageReaction = vi.fn();
+vi.mock("@/lib/services/notifications", () => ({
+  notifyNewDirectMessage: (...args: any[]) => mockNotifyNewDirectMessage(...args),
+  notifyMessageMention: (...args: any[]) => mockNotifyMessageMention(...args),
+  notifyMessageReaction: (...args: any[]) => mockNotifyMessageReaction(...args),
+}));
+
+const mockCombinedRateLimit = vi.fn();
+vi.mock("@/lib/utils/rate-limiter", () => ({
+  messageRateLimiter: {},
+  combinedRateLimit: (...args: any[]) => mockCombinedRateLimit(...args),
+}));
+
+vi.mock("@/lib/utils/encryption", () => ({
+  encryptForStorage: (content: string) => `enc:${content}`,
+  decryptFromStorage: (content: string) =>
+    typeof content === "string" && content.startsWith("enc:")
+      ? content.slice(4)
+      : content,
+  isEncrypted: (content: string) =>
+    typeof content === "string" && content.startsWith("enc:"),
+}));
+
 // Mock Prisma client
 const mockPrisma = vi.hoisted(() => ({
   message: {
@@ -93,6 +118,7 @@ describe("Message Actions - Venue Filtering", () => {
       if (!user.active) throw new Error("NEXT_REDIRECT: /login?error=inactive");
       return user;
     });
+    mockCombinedRateLimit.mockResolvedValue({ allowed: true });
   });
 
   // ==========================================================================
@@ -425,14 +451,14 @@ describe("Message Actions - Venue Filtering", () => {
       mockGetCurrentUser.mockResolvedValue(mockUser);
       mockCanAccess.mockResolvedValue(true);
 
-      const longContent = "a".repeat(2001); // Exceeds MAX_MESSAGE_LENGTH (2000)
+      const longContent = "a".repeat(10001); // Exceeds MAX_MESSAGE_LENGTH (10000)
 
       const result = await sendMessage({
         conversationId,
         content: longContent,
       });
 
-      expect(result.error).toContain("must not exceed 2000 characters");
+      expect(result.error).toContain("10000");
     });
 
     it("should handle media URLs correctly", async () => {
@@ -554,20 +580,14 @@ describe("Message Actions - Venue Filtering", () => {
       });
 
       mockPrisma.conversation.update.mockResolvedValue({});
-      mockPrisma.notification.create.mockResolvedValue({});
+      mockNotifyNewDirectMessage.mockResolvedValue({});
 
       await sendMessage({
         conversationId,
         content: "Test notification",
       });
 
-      expect(mockPrisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          userId: testUsers.user2.id,
-          type: "NEW_MESSAGE",
-          title: "New message",
-        }),
-      });
+      expect(mockNotifyNewDirectMessage).toHaveBeenCalled();
     });
 
     it("should not create notifications for muted conversations", async () => {
@@ -606,7 +626,7 @@ describe("Message Actions - Venue Filtering", () => {
         content: "Muted message",
       });
 
-      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      expect(mockNotifyNewDirectMessage).not.toHaveBeenCalled();
     });
 
     it("should return error when user lacks permission", async () => {
@@ -679,6 +699,11 @@ describe("Message Actions - Venue Filtering", () => {
         senderId: mockUser.id,
         content: "Original content",
         createdAt: fiveMinutesAgo,
+        updatedAt: fiveMinutesAgo,
+        editedAt: null,
+        conversationId: "cltestconvupdate1aa",
+        isEncrypted: false,
+        editHistory: null,
       });
 
       const updatedMessage = {
@@ -760,7 +785,7 @@ describe("Message Actions - Venue Filtering", () => {
     it("should validate content length", async () => {
       mockGetCurrentUser.mockResolvedValue(mockUser);
 
-      const longContent = "a".repeat(2001);
+      const longContent = "a".repeat(10001);
 
       const result = await updateMessage({
         id: messageId,
@@ -768,7 +793,7 @@ describe("Message Actions - Venue Filtering", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error).toContain("2000");
+      expect(result.error).toContain("10000");
     });
 
     it("should return error for non-existent message", async () => {
@@ -823,8 +848,11 @@ describe("Message Actions - Venue Filtering", () => {
       const result = await deleteMessage({ id: messageId });
 
       expect(result.success).toBe(true);
-      expect(mockPrisma.message.delete).toHaveBeenCalledWith({
+      expect(mockPrisma.message.update).toHaveBeenCalledWith({
         where: { id: messageId },
+        data: expect.objectContaining({
+          deletedBy: mockUser.id,
+        }),
       });
     });
 
@@ -860,7 +888,7 @@ describe("Message Actions - Venue Filtering", () => {
         senderId: mockUser.id,
       });
 
-      mockPrisma.message.delete.mockRejectedValue(new Error("Database error"));
+      mockPrisma.message.update.mockRejectedValue(new Error("Database error"));
 
       const result = await deleteMessage({ id: messageId });
 
@@ -906,12 +934,13 @@ describe("Message Actions - Venue Filtering", () => {
       expect(result.success).toBe(true);
       expect(mockPrisma.message.update).toHaveBeenCalledWith({
         where: { id: messageId },
-        data: {
+        data: expect.objectContaining({
           readBy: {
             push: mockUser.id,
           },
           readAt: expect.any(Date),
-        },
+          deliveryStatus: "READ",
+        }),
       });
     });
 
@@ -945,6 +974,7 @@ describe("Message Actions - Venue Filtering", () => {
         conversationId,
         senderId: testUsers.user2.id,
         readBy: [mockUser.id], // Already read
+        deliveryStatus: "READ",
       });
 
       mockPrisma.conversationParticipant.findFirst.mockResolvedValue({
@@ -1122,6 +1152,7 @@ describe("Message Actions - Venue Filtering", () => {
         where: {
           conversationId,
           senderId: { not: mockUser.id },
+          deletedAt: null,
           createdAt: {
             gt: lastReadAt,
           },
@@ -1144,14 +1175,35 @@ describe("Message Actions - Venue Filtering", () => {
       ];
 
       mockPrisma.conversationParticipant.findMany.mockResolvedValue(participants);
-      mockPrisma.message.count
-        .mockResolvedValueOnce(3) // conv-1
-        .mockResolvedValueOnce(2); // conv-2
+      mockPrisma.message.findMany.mockResolvedValue([
+        {
+          conversationId: "conv-1",
+          createdAt: new Date(Date.now() - 1800000),
+        },
+        {
+          conversationId: "conv-1",
+          createdAt: new Date(Date.now() - 600000),
+        },
+        {
+          conversationId: "conv-2",
+          createdAt: new Date(Date.now() - 3600000),
+        },
+        {
+          conversationId: "conv-2",
+          createdAt: new Date(Date.now() - 1000),
+        },
+        {
+          conversationId: "conv-2",
+          createdAt: new Date(Date.now() - 500),
+        },
+      ]);
 
       const result = await getUnreadMessageCount();
 
       expect(result.success).toBe(true);
       expect(result.count).toBe(5); // 3 + 2
+      expect(mockPrisma.message.count).not.toHaveBeenCalled();
+      expect(mockPrisma.message.findMany).toHaveBeenCalledTimes(1);
     });
 
     it("should return error when user is not participant", async () => {

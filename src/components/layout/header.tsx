@@ -26,11 +26,10 @@ interface HeaderProps {
       name: string;
     };
   };
-  unreadCount?: number;
   onMenuClick?: () => void;
 }
 
-export function Header({ user, unreadCount = 0, onMenuClick }: HeaderProps) {
+export function Header({ user, onMenuClick }: HeaderProps) {
   const displayName = user.firstName && user.lastName
     ? `${user.firstName} ${user.lastName}`
     : user.email;
@@ -69,7 +68,7 @@ export function Header({ user, unreadCount = 0, onMenuClick }: HeaderProps) {
         <ThemeToggle />
 
         {/* Notifications */}
-        <NotificationDropdown userId={user.id} unreadCount={unreadCount} />
+        <NotificationDropdown />
 
         {/* User Menu */}
         <DropdownMenu>

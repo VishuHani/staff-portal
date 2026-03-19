@@ -84,6 +84,24 @@ describe("Posts Actions", () => {
     mockCanAccess = canAccess as any;
     mockGetSharedVenueUsers = getSharedVenueUsers as any;
     mockGetAccessibleChannelIds = getAccessibleChannelIds as any;
+    mockGetAccessibleChannelIds.mockResolvedValue([
+      "channel-1",
+      "cln1234567890abcdefgh",
+      "clnchannel12345678",
+      "clnchannel1234567890",
+      "clnpost1234567890abc",
+    ]);
+    mockPrisma.channel.findUnique.mockImplementation(({ where }: any) =>
+      Promise.resolve({
+        id: where.id,
+        name: "General",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
+        isPublic: false,
+        venues: [],
+      })
+    );
   });
 
   // ==========================================================================
@@ -150,9 +168,19 @@ describe("Posts Actions", () => {
       expect(mockPrisma.post.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            authorId: {
-              in: [testUsers.user1.id, testUsers.user2.id, testUsers.user3.id],
-            },
+            channelId: { in: [channelId] },
+            OR: expect.arrayContaining([
+              { authorId: testUsers.user1.id },
+              {
+                authorId: {
+                  in: [
+                    testUsers.user1.id,
+                    testUsers.user2.id,
+                    testUsers.user3.id,
+                  ],
+                },
+              },
+            ]),
           }),
         })
       );
@@ -168,7 +196,7 @@ describe("Posts Actions", () => {
       expect(mockPrisma.post.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            channelId,
+            channelId: { in: [channelId] },
           }),
         })
       );
@@ -205,24 +233,21 @@ describe("Posts Actions", () => {
       await getPosts();
 
       // Should NOT include user3 (only in Venue A)
-      expect(mockPrisma.post.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            authorId: {
-              in: [testUsers.user1.id, testUsers.user2.id],
-            },
-          }),
-        })
-      );
-
       const call = mockPrisma.post.findMany.mock.calls[0][0];
-      expect(call.where.authorId.in).not.toContain(testUsers.user3.id);
+      const sharedAuthorClause = call.where.OR.find(
+        (clause: any) => clause.authorId?.in
+      );
+      expect(sharedAuthorClause.authorId.in).toEqual(
+        expect.arrayContaining([testUsers.user1.id, testUsers.user2.id])
+      );
+      expect(sharedAuthorClause.authorId.in).not.toContain(testUsers.user3.id);
     });
 
     it("should return empty array for user with no venues", async () => {
       // User 5 has no venues
       mockRequireAuth.mockResolvedValue(testUsers.user5);
       mockGetSharedVenueUsers.mockResolvedValue([]);
+      mockGetAccessibleChannelIds.mockResolvedValue([]);
       mockPrisma.post.findMany.mockResolvedValue([]);
 
       const result = await getPosts();
@@ -234,7 +259,11 @@ describe("Posts Actions", () => {
       expect(mockPrisma.post.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            authorId: { in: [] },
+            channelId: { in: [] },
+            OR: expect.arrayContaining([
+              { authorId: testUsers.user5.id },
+              { authorId: { in: [] } },
+            ]),
           }),
         })
       );
@@ -255,10 +284,12 @@ describe("Posts Actions", () => {
         createPostFixture({
           id: "post-1",
           authorId: testUsers.user2.id, // Venue B
+          channelId: "channel-1",
         }),
         createPostFixture({
           id: "post-2",
           authorId: testUsers.user3.id, // Venue A
+          channelId: "channel-1",
         }),
       ];
 
@@ -338,7 +369,7 @@ describe("Posts Actions", () => {
       const result = await getPosts();
 
       expect(result.error).toBe("Failed to fetch posts");
-      expect(result.success).toBeUndefined();
+      expect(result.success).toBe(false);
     });
 
     it("should include comments and reactions counts", async () => {
@@ -383,6 +414,7 @@ describe("Posts Actions", () => {
         ...createPostFixture({
           id: postId,
           authorId: testUsers.user3.id,
+          channelId: "channel-1",
         }),
         author: {
           id: testUsers.user3.id,
@@ -431,7 +463,44 @@ describe("Posts Actions", () => {
       const result = await getPostById(postId);
 
       expect(result.error).toBe("Post not found");
-      expect(result.success).toBeUndefined();
+      expect(result.success).toBe(false);
+    });
+
+    it("should deny access when the channel itself is outside the user's venues", async () => {
+      mockRequireAuth.mockResolvedValue(testUsers.user1);
+      mockGetSharedVenueUsers.mockResolvedValue([
+        testUsers.user1.id,
+        testUsers.user3.id,
+      ]);
+      mockGetAccessibleChannelIds.mockResolvedValue(["channel-allowed"]);
+
+      mockPrisma.post.findUnique.mockResolvedValue({
+        ...createPostFixture({
+          id: postId,
+          authorId: testUsers.user3.id,
+          channelId: "channel-denied",
+        }),
+        author: {
+          id: testUsers.user3.id,
+          email: "user3@example.com",
+          firstName: "User",
+          lastName: "Three",
+          profileImage: null,
+          role: { name: "MANAGER" },
+        },
+        channel: {
+          id: "channel-denied",
+          name: "Venue A Channel",
+          color: "#3B82F6",
+          icon: "💬",
+        },
+        comments: [],
+        reactions: [],
+      });
+
+      const result = await getPostById(postId);
+
+      expect(result.error).toBe("Post not found");
     });
 
     it("should return error for non-existent post", async () => {
@@ -449,7 +518,11 @@ describe("Posts Actions", () => {
       mockGetSharedVenueUsers.mockResolvedValue([testUsers.user1.id]);
 
       const mockPost = {
-        ...createPostFixture({ id: postId, authorId: testUsers.user1.id }),
+        ...createPostFixture({
+          id: postId,
+          authorId: testUsers.user1.id,
+          channelId: "channel-1",
+        }),
         author: {
           id: testUsers.user1.id,
           email: "test@example.com",
@@ -484,7 +557,11 @@ describe("Posts Actions", () => {
       mockGetSharedVenueUsers.mockResolvedValue([testUsers.user1.id]);
 
       const mockPost = {
-        ...createPostFixture({ id: postId, authorId: testUsers.user1.id }),
+        ...createPostFixture({
+          id: postId,
+          authorId: testUsers.user1.id,
+          channelId: "channel-1",
+        }),
         author: {
           id: testUsers.user1.id,
           email: "test@example.com",
@@ -540,6 +617,8 @@ describe("Posts Actions", () => {
         id: channelId,
         name: "General",
         archived: false,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
       });
 
       const mockPost = {
@@ -598,6 +677,8 @@ describe("Posts Actions", () => {
         id: channelId,
         name: "Archived",
         archived: true,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
       });
 
       const result = await createPost({
@@ -605,7 +686,7 @@ describe("Posts Actions", () => {
         content: validContent,
       });
 
-      expect(result.error).toBe("Cannot post to an archived channel");
+      expect(result.error).toBe("Channel is archived");
     });
 
     it("should validate content is not empty", async () => {
@@ -642,6 +723,8 @@ describe("Posts Actions", () => {
         id: channelId,
         name: "General",
         archived: false,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
       });
 
       const mediaUrls = [
@@ -707,6 +790,8 @@ describe("Posts Actions", () => {
         id: channelId,
         name: "General",
         archived: false,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
       });
 
       mockPrisma.post.create.mockRejectedValue(new Error("Database error"));
@@ -733,6 +818,7 @@ describe("Posts Actions", () => {
       mockPrisma.post.findUnique.mockResolvedValue({
         id: postId,
         authorId: testUsers.user1.id,
+        channelId: "channel-1",
         content: "Original content",
       });
 
@@ -777,6 +863,7 @@ describe("Posts Actions", () => {
       mockPrisma.post.findUnique.mockResolvedValue({
         id: postId,
         authorId: testUsers.user2.id, // Different user
+        channelId: "channel-1",
         content: "Original content",
       });
 
@@ -830,6 +917,7 @@ describe("Posts Actions", () => {
       mockPrisma.post.findUnique.mockResolvedValue({
         id: postId,
         authorId: testUsers.user1.id,
+        channelId: "channel-1",
         content: "Original content",
       });
 
@@ -858,6 +946,14 @@ describe("Posts Actions", () => {
       mockPrisma.post.findUnique.mockResolvedValue({
         id: postId,
         authorId: testUsers.user1.id,
+        channelId: "channel-1",
+      });
+
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
       });
 
       mockPrisma.post.delete.mockResolvedValue({
@@ -884,6 +980,14 @@ describe("Posts Actions", () => {
       mockPrisma.post.findUnique.mockResolvedValue({
         id: postId,
         authorId: testUsers.user1.id, // Different user
+        channelId: "channel-1",
+      });
+
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MODERATOR" }],
       });
 
       mockPrisma.post.delete.mockResolvedValue({
@@ -906,11 +1010,12 @@ describe("Posts Actions", () => {
       mockPrisma.post.findUnique.mockResolvedValue({
         id: postId,
         authorId: testUsers.user3.id, // User 3 in Venue A only
+        channelId: "clnforeignchannel",
       });
 
       const result = await deletePost({ id: postId });
 
-      expect(result.error).toBe("Post not found");
+      expect(result.error).toBe("Channel not found");
     });
 
     it("should not allow staff to delete other user's posts", async () => {
@@ -924,11 +1029,19 @@ describe("Posts Actions", () => {
       mockPrisma.post.findUnique.mockResolvedValue({
         id: postId,
         authorId: testUsers.user2.id, // Different user
+        channelId: "channel-1",
+      });
+
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
       });
 
       const result = await deletePost({ id: postId });
 
-      expect(result.error).toBe("You don't have permission to delete this post");
+      expect(result.error).toBe("You don't have permission to perform this action in this channel");
     });
 
     it("should return error for non-existent post", async () => {
@@ -949,6 +1062,14 @@ describe("Posts Actions", () => {
       mockPrisma.post.findUnique.mockResolvedValue({
         id: postId,
         authorId: testUsers.user1.id,
+        channelId: "channel-1",
+      });
+
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
       });
 
       mockPrisma.post.delete.mockResolvedValue({
@@ -972,6 +1093,14 @@ describe("Posts Actions", () => {
       mockPrisma.post.findUnique.mockResolvedValue({
         id: postId,
         authorId: testUsers.user1.id,
+        channelId: "channel-1",
+      });
+
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
       });
 
       mockPrisma.post.delete.mockRejectedValue(new Error("Database error"));
@@ -992,10 +1121,23 @@ describe("Posts Actions", () => {
       mockRequireAuth.mockResolvedValue(testUsers.user3); // Manager
       mockCanAccess.mockResolvedValue(true); // Has manage permission
 
+      mockPrisma.post.findUnique.mockResolvedValue({
+        id: postId,
+        channelId: "channel-1",
+      });
+
       const mockPost = {
         id: postId,
+        channelId: "channel-1",
         pinned: true,
       };
+
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MODERATOR" }],
+      });
 
       mockPrisma.post.update.mockResolvedValue(mockPost);
 
@@ -1013,10 +1155,23 @@ describe("Posts Actions", () => {
       mockRequireAuth.mockResolvedValue(testUsers.user3); // Manager
       mockCanAccess.mockResolvedValue(true);
 
+      mockPrisma.post.findUnique.mockResolvedValue({
+        id: postId,
+        channelId: "channel-1",
+      });
+
       const mockPost = {
         id: postId,
+        channelId: "channel-1",
         pinned: false,
       };
+
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MODERATOR" }],
+      });
 
       mockPrisma.post.update.mockResolvedValue(mockPost);
 
@@ -1032,18 +1187,44 @@ describe("Posts Actions", () => {
     it("should not allow staff to pin posts", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user1); // Staff
       mockCanAccess.mockResolvedValue(false); // No manage permission
+      mockPrisma.post.findUnique.mockResolvedValue({
+        id: postId,
+        channelId: "channel-1",
+      });
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MEMBER" }],
+      });
 
       const result = await pinPost({
         id: postId,
         pinned: true,
       });
 
-      expect(result.error).toBe("You don't have permission to pin posts");
+      expect(result.error).toBe("You don't have permission to perform this action in this channel");
     });
 
     it("should return error for non-existent post", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user3); // Manager
       mockCanAccess.mockResolvedValue(true);
+
+      mockPrisma.post.findUnique.mockResolvedValue({
+        id: postId,
+        channelId: "channel-1",
+      });
+
+      mockPrisma.post.findUnique.mockResolvedValue({
+        id: postId,
+        channelId: "channel-1",
+      });
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MODERATOR" }],
+      });
 
       mockPrisma.post.update.mockRejectedValue(new Error("Record not found"));
 
@@ -1058,6 +1239,22 @@ describe("Posts Actions", () => {
     it("should handle database errors gracefully", async () => {
       mockRequireAuth.mockResolvedValue(testUsers.user3);
       mockCanAccess.mockResolvedValue(true);
+
+      mockPrisma.post.findUnique.mockResolvedValue({
+        id: postId,
+        channelId: "channel-1",
+      });
+
+      mockPrisma.post.findUnique.mockResolvedValue({
+        id: postId,
+        channelId: "channel-1",
+      });
+      mockPrisma.channel.findUnique.mockResolvedValue({
+        id: "channel-1",
+        archived: false,
+        permissions: null,
+        members: [{ role: "MODERATOR" }],
+      });
 
       mockPrisma.post.update.mockRejectedValue(new Error("Database error"));
 
@@ -1101,8 +1298,16 @@ describe("Posts Actions", () => {
       });
 
       // Verify venue filtering
-      expect(mockPrisma.post.count).toHaveBeenCalledWith({
+      expect(mockPrisma.post.count).toHaveBeenNthCalledWith(1, {
         where: {
+          channelId: {
+            in: expect.arrayContaining([
+              "channel-1",
+              "cln1234567890abcdefgh",
+              "clnchannel12345678",
+              "clnpost1234567890abc",
+            ]),
+          },
           authorId: {
             in: [testUsers.user1.id, testUsers.user2.id, testUsers.user3.id],
           },

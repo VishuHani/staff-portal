@@ -1,4 +1,9 @@
 import { prisma } from "@/lib/prisma";
+import type {
+  Permission,
+  PermissionAction,
+  PermissionResource,
+} from "./types";
 
 /**
  * ============================================================================
@@ -36,157 +41,123 @@ import { prisma } from "@/lib/prisma";
  *    - Cross-venue access control
  */
 
-/**
- * Permission Resources - All application areas that can be controlled
- *
- * Organized by category:
- * - Core: users, roles, stores, venues, positions
- * - Scheduling: availability, timeoff, rosters, schedules
- * - Communication: posts, comments, reactions, messages, conversations, channels
- * - Intelligence: ai, reports
- * - System: audit, notifications, announcements, settings, media, dashboard, profile
- */
-export type PermissionResource =
-  // Core Resources
-  | "users"
-  | "roles"
-  | "stores"
-  | "venues"
-  | "positions"
-  // Scheduling Resources
-  | "availability"
-  | "timeoff"
-  | "rosters"
-  | "schedules"
-  // Communication Resources
-  | "posts"
-  | "comments"
-  | "reactions"
-  | "messages"
-  | "conversations"
-  | "channels"
-  // Intelligence Resources
-  | "ai"
-  | "reports"
-  // Email Workspace Resources
-  | "email_workspace"
-  | "email_create"
-  | "email_assets"
-  | "email_audience"
-  | "email_campaigns"
-  | "email_reports"
-  // System Resources
-  | "audit"
-  | "notifications"
-  | "announcements"
-  | "settings"
-  | "media"
-  | "dashboard"
-  | "profile"
-  | "admin"
-  // Invitation Resources
-  | "invites"
-  | "onboarding"
-  // Document Management Resources
-  | "documents";
+export type { Permission, PermissionAction, PermissionResource } from "./types";
 
-/**
- * Permission Actions - Operations that can be performed on resources
- *
- * Categories:
- * 1. Basic CRUD: create, read, update, delete
- * 2. Scope-based: view_own, view_team, view_all, edit_own, edit_team, edit_all
- * 3. Ownership: delete_own, delete_all
- * 4. Workflow: approve, reject, cancel, publish
- * 5. Data Operations: export, import, export_team, export_all
- * 6. Content: moderate, pin, archive, restore
- * 7. Assignment: assign, unassign
- * 8. Communication: send
- * 9. Bulk Operations: bulk_create, bulk_update, bulk_delete
- * 10. Admin: manage_*, impersonate, deactivate, reactivate
- * 11. Sensitive: view_sensitive
- * 12. AI: view_ai, use_ai, manage_ai
- */
-export type PermissionAction =
-  // Basic CRUD
-  | "create"
-  | "read"
-  | "update"
-  | "delete"
-  | "edit"
-  | "manage"
-  // View Scopes
-  | "view"
-  | "view_own"
-  | "view_team"
-  | "view_all"
-  | "view_sensitive"  // Access to sensitive fields (pay rates, SSN, etc.)
-  // Edit Scopes
-  | "edit_own"
-  | "edit_team"
-  | "edit_all"
-  // Delete Scopes
-  | "delete_own"
-  | "delete_all"
-  // Workflow Actions
-  | "approve"
-  | "reject"
-  | "cancel"
-  | "publish"
-  | "submit"
-  | "recall"
-  | "finalize"
-  | "schedule"
-  // Data Operations
-  | "export"
-  | "export_team"
-  | "export_all"
-  | "export_anonymized"
-  | "import"
-  | "import_own"
-  | "import_team"
-  | "import_all"
-  // Content Moderation
-  | "moderate"
-  | "pin"
-  | "unpin"
-  | "archive"
-  | "restore"
-  // Assignment
-  | "assign"
-  | "unassign"
-  // Communication
-  | "send"
-  // Bulk Operations
-  | "bulk_create"
-  | "bulk_update"
-  | "bulk_delete"
-  | "bulk_assign"
-  // Admin Actions
-  | "manage_users"
-  | "manage_roles"
-  | "manage_stores"
-  | "manage_permissions"
-  | "manage_settings"
-  | "manage_positions"
-  | "manage_hours"
-  | "view_audit_logs"
-  | "impersonate"
-  | "deactivate"
-  | "reactivate"
-  // AI Actions
-  | "view_ai"
-  | "use_ai"
-  | "manage_ai"
-  // Copy/Duplicate
-  | "copy"
-  | "duplicate"
-  // Invitation Actions
-  | "resend";
+type PermissionSnapshot = {
+  active: boolean;
+  roleName: string;
+  rolePermissions: Permission[];
+  venuePermissions: Array<{
+    venueId: string;
+    permission: Permission;
+  }>;
+};
 
-export interface Permission {
-  resource: PermissionResource;
-  action: PermissionAction;
+const PERMISSION_CACHE_TTL_MS = 60 * 1000;
+const permissionSnapshotCache = new Map<
+  string,
+  { value: PermissionSnapshot; expiresAt: number }
+>();
+const permissionSnapshotInFlight = new Map<
+  string,
+  Promise<PermissionSnapshot | null>
+>();
+
+function toPermission(resource: string, action: string): Permission {
+  return {
+    resource: resource as PermissionResource,
+    action: action as PermissionAction,
+  };
+}
+
+async function getPermissionSnapshot(
+  userId: string
+): Promise<PermissionSnapshot | null> {
+  const cached = permissionSnapshotCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const inFlight = permissionSnapshotInFlight.get(userId);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const request = prisma.user
+    .findUnique({
+      where: { id: userId },
+      select: {
+        active: true,
+        role: {
+          select: {
+            name: true,
+            rolePermissions: {
+              select: {
+                permission: {
+                  select: {
+                    resource: true,
+                    action: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        venuePermissions: {
+          select: {
+            venueId: true,
+            permission: {
+              select: {
+                resource: true,
+                action: true,
+              },
+            },
+          },
+        },
+      },
+    })
+    .then((user) => {
+      if (!user || !user.active) {
+        return null;
+      }
+
+      const snapshot: PermissionSnapshot = {
+        active: user.active,
+        roleName: user.role?.name || "STAFF",
+        rolePermissions: (user.role?.rolePermissions || []).map((rp) =>
+          toPermission(rp.permission.resource, rp.permission.action)
+        ),
+        venuePermissions: (user.venuePermissions || []).map((vp) => ({
+          venueId: vp.venueId,
+          permission: toPermission(
+            vp.permission.resource,
+            vp.permission.action
+          ),
+        })),
+      };
+
+      permissionSnapshotCache.set(userId, {
+        value: snapshot,
+        expiresAt: Date.now() + PERMISSION_CACHE_TTL_MS,
+      });
+
+      return snapshot;
+    })
+    .finally(() => {
+      permissionSnapshotInFlight.delete(userId);
+    });
+
+  permissionSnapshotInFlight.set(userId, request);
+  return request;
+}
+
+export function invalidatePermissionCache(userId?: string) {
+  if (userId) {
+    permissionSnapshotCache.delete(userId);
+    return;
+  }
+
+  permissionSnapshotCache.clear();
 }
 
 /**
@@ -210,49 +181,27 @@ export async function hasPermission(
   venueId?: string
 ): Promise<boolean> {
   try {
-    // Check if user is admin first (admin bypass)
-    if (await isAdmin(userId)) {
-      return true;
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        role: {
-          include: {
-            rolePermissions: {
-              include: {
-                permission: true,
-              },
-            },
-          },
-        },
-        venuePermissions: {
-          include: {
-            permission: true,
-          },
-        },
-      },
-    });
-
-    if (!user || !user.active) {
+    const snapshot = await getPermissionSnapshot(userId);
+    if (!snapshot) {
       return false;
     }
 
-    // Check role permissions (global/default permissions)
-    const hasRolePermission = user.role.rolePermissions.some(
-      (rp) =>
-        rp.permission.resource === resource &&
-        rp.permission.action === action
+    if (snapshot.roleName === "ADMIN") {
+      return true;
+    }
+
+    const hasRolePermission = snapshot.rolePermissions.some(
+      (permission) =>
+        permission.resource === resource && permission.action === action
     );
 
     // If venueId is provided, also check venue-specific permissions
     if (venueId) {
-      const hasVenuePermission = user.venuePermissions.some(
-        (vp) =>
-          vp.permission.resource === resource &&
-          vp.permission.action === action &&
-          vp.venueId === venueId
+      const hasVenuePermission = snapshot.venuePermissions.some(
+        (entry) =>
+          entry.venueId === venueId &&
+          entry.permission.resource === resource &&
+          entry.permission.action === action
       );
 
       // User has permission if they have it via role OR via venue-specific grant
@@ -277,10 +226,22 @@ export async function hasAllPermissions(
   userId: string,
   permissions: Permission[]
 ): Promise<boolean> {
-  const checks = await Promise.all(
-    permissions.map((p) => hasPermission(userId, p.resource, p.action))
+  const snapshot = await getPermissionSnapshot(userId);
+  if (!snapshot) {
+    return false;
+  }
+
+  if (snapshot.roleName === "ADMIN") {
+    return true;
+  }
+
+  return permissions.every((permission) =>
+    snapshot.rolePermissions.some(
+      (candidate) =>
+        candidate.resource === permission.resource &&
+        candidate.action === permission.action
+    )
   );
-  return checks.every((check) => check === true);
 }
 
 /**
@@ -293,10 +254,22 @@ export async function hasAnyPermission(
   userId: string,
   permissions: Permission[]
 ): Promise<boolean> {
-  const checks = await Promise.all(
-    permissions.map((p) => hasPermission(userId, p.resource, p.action))
+  const snapshot = await getPermissionSnapshot(userId);
+  if (!snapshot) {
+    return false;
+  }
+
+  if (snapshot.roleName === "ADMIN") {
+    return true;
+  }
+
+  return permissions.some((permission) =>
+    snapshot.rolePermissions.some(
+      (candidate) =>
+        candidate.resource === permission.resource &&
+        candidate.action === permission.action
+    )
   );
-  return checks.some((check) => check === true);
 }
 
 /**
@@ -307,29 +280,12 @@ export async function hasAnyPermission(
  */
 export async function getUserPermissions(userId: string): Promise<Permission[]> {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        role: {
-          include: {
-            rolePermissions: {
-              include: {
-                permission: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!user) {
+    const snapshot = await getPermissionSnapshot(userId);
+    if (!snapshot) {
       return [];
     }
 
-    return user.role.rolePermissions.map((rp) => ({
-      resource: rp.permission.resource as PermissionResource,
-      action: rp.permission.action as PermissionAction,
-    }));
+    return snapshot.rolePermissions;
   } catch (error) {
     console.error("Error getting user permissions:", error);
     return [];
@@ -349,48 +305,23 @@ export async function getUserEffectivePermissions(
   venueId?: string
 ): Promise<Permission[]> {
   try {
+    const snapshot = await getPermissionSnapshot(userId);
+    if (!snapshot) {
+      return [];
+    }
+
     // Admin has all permissions
-    if (await isAdmin(userId)) {
+    if (snapshot.roleName === "ADMIN") {
       // Return all possible permissions (admin bypass means they have everything)
       return [];
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        role: {
-          include: {
-            rolePermissions: {
-              include: {
-                permission: true,
-              },
-            },
-          },
-        },
-        venuePermissions: {
-          where: venueId ? { venueId } : undefined,
-          include: {
-            permission: true,
-          },
-        },
-      },
-    });
-
-    if (!user) {
-      return [];
-    }
-
-    // Collect role permissions
-    const rolePerms = user.role.rolePermissions.map((rp) => ({
-      resource: rp.permission.resource as PermissionResource,
-      action: rp.permission.action as PermissionAction,
-    }));
-
-    // Collect venue permissions if venueId provided
-    const venuePerms = user.venuePermissions.map((vp) => ({
-      resource: vp.permission.resource as PermissionResource,
-      action: vp.permission.action as PermissionAction,
-    }));
+    const rolePerms = snapshot.rolePermissions;
+    const venuePerms = venueId
+      ? snapshot.venuePermissions
+          .filter((vp) => vp.venueId === venueId)
+          .map((vp) => vp.permission)
+      : snapshot.venuePermissions.map((vp) => vp.permission);
 
     // Combine and deduplicate
     const allPerms = [...rolePerms, ...venuePerms];
@@ -433,28 +364,14 @@ export async function hasVenuePermission(
  */
 export async function isManager(userId: string): Promise<boolean> {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        role: {
-          include: {
-            rolePermissions: {
-              include: {
-                permission: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!user || !user.active) {
+    const snapshot = await getPermissionSnapshot(userId);
+    if (!snapshot) {
       return false;
     }
 
     // Check if user has any manage permission
-    return user.role.rolePermissions.some(
-      (rp) => rp.permission.action === "manage"
+    return snapshot.rolePermissions.some(
+      (permission) => permission.action === "manage"
     );
   } catch (error) {
     console.error("Error checking manager status:", error);
@@ -474,18 +391,8 @@ export async function isManager(userId: string): Promise<boolean> {
  */
 export async function isAdmin(userId: string): Promise<boolean> {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        role: true,
-      },
-    });
-
-    if (!user || !user.active) {
-      return false;
-    }
-
-    return user.role.name === "ADMIN";
+    const snapshot = await getPermissionSnapshot(userId);
+    return snapshot?.roleName === "ADMIN";
   } catch (error) {
     console.error("Error checking admin status:", error);
     return false;

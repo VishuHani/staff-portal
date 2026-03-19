@@ -10,6 +10,7 @@ import {
   type RemoveReactionInput,
 } from "@/lib/schemas/posts";
 import { notifyMessageReaction } from "@/lib/services/notifications";
+import { getAccessibleChannelIds } from "@/lib/utils/venue";
 
 /**
  * Get reactions for a post
@@ -18,6 +19,20 @@ export async function getReactionsByPostId(postId: string) {
   const user = await requireAuth();
 
   try {
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      select: { channelId: true },
+    });
+
+    if (!post) {
+      return { error: "Post not found" };
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(post.channelId)) {
+      return { error: "Post not found" };
+    }
+
     const reactions = await prisma.reaction.findMany({
       where: { postId },
       include: {
@@ -103,6 +118,11 @@ export async function addReaction(data: AddReactionInput) {
       return { error: "Post not found" };
     }
 
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(post.channelId)) {
+      return { error: "Post not found" };
+    }
+
     // Check if user already reacted with this emoji
     const existingReaction = await prisma.reaction.findUnique({
       where: {
@@ -163,6 +183,20 @@ export async function removeReaction(data: RemoveReactionInput) {
   const { postId, emoji } = validatedFields.data;
 
   try {
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      select: { channelId: true },
+    });
+
+    if (!post) {
+      return { error: "Post not found" };
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(post.channelId)) {
+      return { error: "Post not found" };
+    }
+
     // Find the reaction
     const reaction = await prisma.reaction.findUnique({
       where: {
@@ -209,6 +243,20 @@ export async function toggleReaction(data: AddReactionInput) {
   const { postId, emoji } = validatedFields.data;
 
   try {
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      select: { channelId: true },
+    });
+
+    if (!post) {
+      return { error: "Post not found" };
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(post.channelId)) {
+      return { error: "Post not found" };
+    }
+
     // Check if reaction exists
     const existingReaction = await prisma.reaction.findUnique({
       where: {
@@ -284,6 +332,26 @@ export async function getReactionsByCommentId(commentId: string) {
   const user = await requireAuth();
 
   try {
+    const comment = await prisma.comment.findUnique({
+      where: { id: commentId },
+      select: {
+        post: {
+          select: {
+            channelId: true,
+          },
+        },
+      },
+    });
+
+    if (!comment) {
+      return { error: "Comment not found" };
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(comment.post.channelId)) {
+      return { error: "Comment not found" };
+    }
+
     const reactions = await prisma.reaction.findMany({
       where: { commentId },
       include: {
@@ -354,10 +422,20 @@ export async function toggleCommentReaction(data: { commentId: string; emoji: st
             id: true,
           },
         },
+        post: {
+          select: {
+            channelId: true,
+          },
+        },
       },
     });
 
     if (!comment) {
+      return { error: "Comment not found" };
+    }
+
+    const accessibleChannelIds = await getAccessibleChannelIds(user.id);
+    if (!accessibleChannelIds.includes(comment.post.channelId)) {
       return { error: "Comment not found" };
     }
 

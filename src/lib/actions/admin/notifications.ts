@@ -11,7 +11,7 @@ import {
   type SystemAnnouncementInput,
   type NotificationStatsFilter,
 } from "@/lib/schemas/admin/notifications";
-import { NotificationType } from "@prisma/client";
+import { PRISMA_ENUM_VALUES } from "@/types/prisma-enums";
 
 /**
  * Get notification statistics for admin dashboard
@@ -95,30 +95,19 @@ export async function getNotificationStatistics(
     });
 
     // By category (group types into categories)
-    const messageTypes: NotificationType[] = [
-      "NEW_MESSAGE",
-      "MESSAGE_REPLY",
-      "MESSAGE_MENTION",
-      "MESSAGE_REACTION",
-    ];
-    const postTypes: NotificationType[] = [
-      "POST_MENTION",
-      "POST_PINNED",
-      "POST_DELETED",
-    ];
-    const timeOffTypes: NotificationType[] = [
-      "TIME_OFF_REQUEST",
-      "TIME_OFF_APPROVED",
-      "TIME_OFF_REJECTED",
-      "TIME_OFF_CANCELLED",
-    ];
-    const systemTypes: NotificationType[] = [
-      "USER_CREATED",
-      "USER_UPDATED",
-      "ROLE_CHANGED",
-      "SYSTEM_ANNOUNCEMENT",
-      "GROUP_REMOVED",
-    ];
+    const notificationTypeValues = PRISMA_ENUM_VALUES.NotificationType;
+    const messageTypes = notificationTypeValues.filter((type) =>
+      ["NEW_MESSAGE", "MESSAGE_REPLY", "MESSAGE_MENTION", "MESSAGE_REACTION"].includes(type)
+    );
+    const postTypes = notificationTypeValues.filter((type) =>
+      ["POST_MENTION", "POST_PINNED", "POST_DELETED"].includes(type)
+    );
+    const timeOffTypes = notificationTypeValues.filter((type) =>
+      ["TIME_OFF_REQUEST", "TIME_OFF_APPROVED", "TIME_OFF_REJECTED", "TIME_OFF_CANCELLED"].includes(type)
+    );
+    const systemTypes = notificationTypeValues.filter((type) =>
+      ["USER_CREATED", "USER_UPDATED", "ROLE_CHANGED", "SYSTEM_ANNOUNCEMENT", "GROUP_REMOVED"].includes(type)
+    );
 
     const byCategory = {
       messages: byType

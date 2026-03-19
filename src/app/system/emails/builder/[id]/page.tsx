@@ -6,6 +6,14 @@ import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { EditEmailClient } from "./edit-email-client";
 
+function normalizeJsonRecord(value: Prisma.JsonValue | null): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
 export default async function EditEmailPage({ 
   params 
 }: { 
@@ -54,6 +62,11 @@ export default async function EditEmailPage({
     redirect("/system/emails/builder");
   }
 
+  const emailForClient = {
+    ...email,
+    designJson: normalizeJsonRecord(email.designJson),
+  };
+
   // Get templates for starting point
   const whereClause: Prisma.EmailWhereInput = { isTemplate: true };
   if (user.role.name !== "ADMIN") {
@@ -88,7 +101,7 @@ export default async function EditEmailPage({
   return (
     <DashboardLayout user={user}>
       <EditEmailClient
-        email={email}
+        email={emailForClient}
         templates={templates}
         venues={venues}
         isAdmin={user.role.name === "ADMIN"}

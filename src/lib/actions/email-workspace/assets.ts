@@ -1,13 +1,21 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import type {
+  EmailAssetKind as PrismaEmailAssetKind,
+  EmailContentScope as PrismaEmailContentScope,
+} from "@prisma/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
 import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
-import { hasPermission, isAdmin, type PermissionAction } from "@/lib/rbac/permissions";
+import {
+  hasPermission,
+  isAdmin,
+  type PermissionAction,
+} from "@/lib/rbac/permissions";
 import {
   buildAssetIndexTags,
   extractAssetEnrichment,
@@ -18,11 +26,15 @@ import {
   validateFolderAssignment,
 } from "@/lib/email-workspace/folder-access";
 
-type EmailAssetKind = "IMAGE" | "GIF" | "VIDEO" | "FILE";
-type EmailContentScope = "PRIVATE" | "TEAM" | "SYSTEM";
+type EmailAssetKind = PrismaEmailAssetKind;
+type EmailContentScope = PrismaEmailContentScope;
 
-type EmailAssetCreateData = Parameters<typeof prisma.emailAsset.create>[0]["data"];
-type EmailAssetUpdateData = Parameters<typeof prisma.emailAsset.update>[0]["data"];
+type EmailAssetCreateData = Parameters<
+  typeof prisma.emailAsset.create
+>[0]["data"];
+type EmailAssetUpdateData = Parameters<
+  typeof prisma.emailAsset.update
+>[0]["data"];
 type EmailAssetWhereInput = NonNullable<
   NonNullable<Parameters<typeof prisma.emailAsset.findMany>[0]>["where"]
 >;
@@ -143,7 +155,8 @@ async function ensureEmailAssetBucket() {
     };
   }
 
-  const { data: buckets, error: listError } = await adminClient.storage.listBuckets();
+  const { data: buckets, error: listError } =
+    await adminClient.storage.listBuckets();
   if (listError) {
     return {
       success: false as const,
@@ -151,7 +164,9 @@ async function ensureEmailAssetBucket() {
     };
   }
 
-  const bucketExists = buckets?.some((bucket) => bucket.name === EMAIL_ASSET_BUCKET);
+  const bucketExists = buckets?.some(
+    (bucket) => bucket.name === EMAIL_ASSET_BUCKET
+  );
   if (bucketExists) {
     return {
       success: true as const,
@@ -159,10 +174,13 @@ async function ensureEmailAssetBucket() {
     };
   }
 
-  const { error: createError } = await adminClient.storage.createBucket(EMAIL_ASSET_BUCKET, {
-    public: true,
-    fileSizeLimit: EMAIL_ASSET_MAX_FILE_SIZE,
-  });
+  const { error: createError } = await adminClient.storage.createBucket(
+    EMAIL_ASSET_BUCKET,
+    {
+      public: true,
+      fileSizeLimit: EMAIL_ASSET_MAX_FILE_SIZE,
+    }
+  );
 
   if (createError) {
     return {
@@ -221,7 +239,9 @@ function isAssetsSchemaMissingError(error: unknown): boolean {
     }
 
     if (error.code === "P2010") {
-      const meta = error.meta as { code?: string; message?: string } | undefined;
+      const meta = error.meta as
+        | { code?: string; message?: string }
+        | undefined;
       if (meta?.code === "42P01" || meta?.code === "42703") {
         return true;
       }
@@ -299,7 +319,11 @@ function canReadAsset(
     return true;
   }
 
-  if (asset.scope === "TEAM" && asset.venueId && userVenueIds.includes(asset.venueId)) {
+  if (
+    asset.scope === "TEAM" &&
+    asset.venueId &&
+    userVenueIds.includes(asset.venueId)
+  ) {
     return true;
   }
 
@@ -369,7 +393,10 @@ function getResolvedScopeAndVenue(input: {
     };
   }
 
-  if (input.requestedVenueId && !input.userVenueIds.includes(input.requestedVenueId)) {
+  if (
+    input.requestedVenueId &&
+    !input.userVenueIds.includes(input.requestedVenueId)
+  ) {
     return {
       scope: "PRIVATE",
       venueId: null,
@@ -481,9 +508,18 @@ function parseAssetSearch(search: string): {
   durationMin?: number;
   durationMax?: number;
 } {
-  const width = { min: undefined as number | undefined, max: undefined as number | undefined };
-  const height = { min: undefined as number | undefined, max: undefined as number | undefined };
-  const duration = { min: undefined as number | undefined, max: undefined as number | undefined };
+  const width = {
+    min: undefined as number | undefined,
+    max: undefined as number | undefined,
+  };
+  const height = {
+    min: undefined as number | undefined,
+    max: undefined as number | undefined,
+  };
+  const duration = {
+    min: undefined as number | undefined,
+    max: undefined as number | undefined,
+  };
   const tagTerms: string[] = [];
   const textTerms: string[] = [];
 
@@ -523,7 +559,10 @@ function parseAssetSearch(search: string): {
       continue;
     }
 
-    const durationComparator = parseSearchComparator(lower.replace(/^duration/, "d"), "d");
+    const durationComparator = parseSearchComparator(
+      lower.replace(/^duration/, "d"),
+      "d"
+    );
     if (durationComparator) {
       duration.min = durationComparator.min ?? duration.min;
       duration.max = durationComparator.max ?? duration.max;
@@ -589,10 +628,27 @@ export async function listEmailAssets(
       const search = input.search.trim();
       const parsedSearch = parseAssetSearch(search);
       const searchOr: EmailAssetWhereInput[] = [
-        { name: { contains: parsedSearch.text || search, mode: "insensitive" } },
-        { mimeType: { contains: parsedSearch.text || search, mode: "insensitive" } },
-        { storagePath: { contains: parsedSearch.text || search, mode: "insensitive" } },
-        { altText: { contains: parsedSearch.text || search, mode: "insensitive" } },
+        {
+          name: { contains: parsedSearch.text || search, mode: "insensitive" },
+        },
+        {
+          mimeType: {
+            contains: parsedSearch.text || search,
+            mode: "insensitive",
+          },
+        },
+        {
+          storagePath: {
+            contains: parsedSearch.text || search,
+            mode: "insensitive",
+          },
+        },
+        {
+          altText: {
+            contains: parsedSearch.text || search,
+            mode: "insensitive",
+          },
+        },
       ];
 
       if (parsedSearch.tagTerms.length > 0) {
@@ -649,7 +705,8 @@ export async function listEmailAssets(
       whereClauses.push({ kind: input.kind });
     }
 
-    const where: EmailAssetWhereInput = whereClauses.length > 0 ? { AND: whereClauses } : {};
+    const where: EmailAssetWhereInput =
+      whereClauses.length > 0 ? { AND: whereClauses } : {};
     const take = Math.max(1, Math.min(input.take ?? 100, 250));
 
     const assets = await prisma.emailAsset.findMany({
@@ -751,13 +808,18 @@ export async function createEmailAsset(
       }
     }
 
-    const resolvedStoragePath = input.storagePath?.trim() || inferStoragePath(trimmedStorageUrl);
+    const resolvedStoragePath =
+      input.storagePath?.trim() || inferStoragePath(trimmedStorageUrl);
     const resolvedWidth =
-      typeof input.width === "number" && Number.isFinite(input.width) && input.width > 0
+      typeof input.width === "number" &&
+      Number.isFinite(input.width) &&
+      input.width > 0
         ? Math.floor(input.width)
         : null;
     const resolvedHeight =
-      typeof input.height === "number" && Number.isFinite(input.height) && input.height > 0
+      typeof input.height === "number" &&
+      Number.isFinite(input.height) &&
+      input.height > 0
         ? Math.floor(input.height)
         : null;
     const resolvedDuration =
@@ -791,7 +853,8 @@ export async function createEmailAsset(
       durationSec: resolvedDuration,
       thumbnailUrl: input.thumbnailUrl?.trim() || null,
       altText: input.altText?.trim() || null,
-      metadataJson: (input.metadataJson || null) as Prisma.InputJsonValue | null,
+      metadataJson: (input.metadataJson ||
+        null) as Prisma.InputJsonValue | null,
       tags: normalizedTags,
       scope: scopeResolution.scope,
       venueId: scopeResolution.venueId,
@@ -847,7 +910,9 @@ export async function createEmailAsset(
   }
 }
 
-export async function uploadEmailAsset(formData: FormData): Promise<EmailAssetMutationOutput> {
+export async function uploadEmailAsset(
+  formData: FormData
+): Promise<EmailAssetMutationOutput> {
   let uploadedPath: string | null = null;
   let uploadedThumbnailPath: string | null = null;
   let storageConfigured = false;
@@ -908,7 +973,8 @@ export async function uploadEmailAsset(formData: FormData): Promise<EmailAssetMu
     storageConfigured = true;
 
     const originalName = fileValue.name.trim() || `asset-${Date.now()}`;
-    const safeOriginalName = sanitizeFilename(originalName) || `asset-${Date.now()}`;
+    const safeOriginalName =
+      sanitizeFilename(originalName) || `asset-${Date.now()}`;
     const storagePath = `${EMAIL_ASSET_UPLOAD_PREFIX}/${user.id}/${randomUUID()}-${safeOriginalName}`;
     uploadedPath = storagePath;
     const tagsValue = formData.get("tags");
@@ -958,14 +1024,20 @@ export async function uploadEmailAsset(formData: FormData): Promise<EmailAssetMu
 
     const {
       data: { publicUrl },
-    } = bucket.client.storage.from(EMAIL_ASSET_BUCKET).getPublicUrl(storagePath);
+    } = bucket.client.storage
+      .from(EMAIL_ASSET_BUCKET)
+      .getPublicUrl(storagePath);
 
     const nameValue = formData.get("name");
     const scopeValue = formData.get("scope");
     const folderValue = formData.get("folderId");
     let thumbnailUrl: string | undefined;
 
-    if (enrichment.thumbnailBuffer && enrichment.thumbnailExtension && enrichment.thumbnailContentType) {
+    if (
+      enrichment.thumbnailBuffer &&
+      enrichment.thumbnailExtension &&
+      enrichment.thumbnailContentType
+    ) {
       const thumbnailPath = `thumbnails/${user.id}/${randomUUID()}.${enrichment.thumbnailExtension}`;
       const thumbnailUpload = await bucket.client.storage
         .from(EMAIL_ASSET_BUCKET)
@@ -978,7 +1050,9 @@ export async function uploadEmailAsset(formData: FormData): Promise<EmailAssetMu
         uploadedThumbnailPath = thumbnailPath;
         const {
           data: { publicUrl: thumbnailPublicUrl },
-        } = bucket.client.storage.from(EMAIL_ASSET_BUCKET).getPublicUrl(thumbnailPath);
+        } = bucket.client.storage
+          .from(EMAIL_ASSET_BUCKET)
+          .getPublicUrl(thumbnailPath);
         thumbnailUrl = thumbnailPublicUrl;
       }
     }
@@ -1000,19 +1074,27 @@ export async function uploadEmailAsset(formData: FormData): Promise<EmailAssetMu
       metadataJson: enrichment.metadataJson,
       tags: enrichment.indexTags,
       scope:
-        scopeValue === "PRIVATE" || scopeValue === "TEAM" || scopeValue === "SYSTEM"
+        scopeValue === "PRIVATE" ||
+        scopeValue === "TEAM" ||
+        scopeValue === "SYSTEM"
           ? scopeValue
           : "PRIVATE",
       folderId:
-        typeof folderValue === "string" && folderValue.trim() && folderValue !== "none"
+        typeof folderValue === "string" &&
+        folderValue.trim() &&
+        folderValue !== "none"
           ? folderValue
           : undefined,
     });
 
     if (!createResult.success) {
-      await bucket.client.storage.from(EMAIL_ASSET_BUCKET).remove([storagePath]);
+      await bucket.client.storage
+        .from(EMAIL_ASSET_BUCKET)
+        .remove([storagePath]);
       if (uploadedThumbnailPath) {
-        await bucket.client.storage.from(EMAIL_ASSET_BUCKET).remove([uploadedThumbnailPath]);
+        await bucket.client.storage
+          .from(EMAIL_ASSET_BUCKET)
+          .remove([uploadedThumbnailPath]);
       }
       return createResult;
     }
@@ -1024,9 +1106,13 @@ export async function uploadEmailAsset(formData: FormData): Promise<EmailAssetMu
     if (uploadedPath && storageConfigured) {
       const adminClient = createAdminStorageClient();
       if (adminClient) {
-        await adminClient.storage.from(EMAIL_ASSET_BUCKET).remove([uploadedPath]);
+        await adminClient.storage
+          .from(EMAIL_ASSET_BUCKET)
+          .remove([uploadedPath]);
         if (uploadedThumbnailPath) {
-          await adminClient.storage.from(EMAIL_ASSET_BUCKET).remove([uploadedThumbnailPath]);
+          await adminClient.storage
+            .from(EMAIL_ASSET_BUCKET)
+            .remove([uploadedThumbnailPath]);
         }
       }
     }
@@ -1143,7 +1229,10 @@ export async function updateEmailAsset(
         data: updateData as EmailAssetUpdateData,
       });
     } catch (updateError) {
-      if (updateData.folderId !== undefined && isAssetsSchemaMissingError(updateError)) {
+      if (
+        updateData.folderId !== undefined &&
+        isAssetsSchemaMissingError(updateError)
+      ) {
         delete updateData.folderId;
         updated = await prisma.emailAsset.update({
           where: { id: input.id },
@@ -1216,7 +1305,11 @@ export async function deleteEmailAsset(
     }
 
     const isAdminUser = await isAdmin(user.id);
-    if (!isAdminUser && existing.ownerId !== user.id && existing.scope === "SYSTEM") {
+    if (
+      !isAdminUser &&
+      existing.ownerId !== user.id &&
+      existing.scope === "SYSTEM"
+    ) {
       return {
         success: false,
         error: "Only admins can delete system-scoped assets.",
@@ -1234,13 +1327,18 @@ export async function deleteEmailAsset(
           .from(EMAIL_ASSET_BUCKET)
           .remove([existing.storagePath]);
         if (removeResult.error) {
-          console.warn("Failed to remove uploaded email asset from storage:", removeResult.error);
+          console.warn(
+            "Failed to remove uploaded email asset from storage:",
+            removeResult.error
+          );
         }
       }
     }
 
     if (existing.thumbnailUrl) {
-      const thumbnailPath = extractStoragePathFromPublicUrl(existing.thumbnailUrl);
+      const thumbnailPath = extractStoragePathFromPublicUrl(
+        existing.thumbnailUrl
+      );
       if (thumbnailPath) {
         const adminClient = createAdminStorageClient();
         if (adminClient) {
@@ -1248,7 +1346,10 @@ export async function deleteEmailAsset(
             .from(EMAIL_ASSET_BUCKET)
             .remove([thumbnailPath]);
           if (removeThumbResult.error) {
-            console.warn("Failed to remove email asset thumbnail from storage:", removeThumbResult.error);
+            console.warn(
+              "Failed to remove email asset thumbnail from storage:",
+              removeThumbResult.error
+            );
           }
         }
       }

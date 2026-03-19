@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/actions/auth";
 import { repairChainActiveFlags, diagnoseChainIntegrity } from "@/lib/actions/rosters";
+import { apiError, apiSuccess } from "@/lib/utils/api-response";
 
 /**
  * GET /api/admin/repair-roster-chains
@@ -10,26 +10,22 @@ export async function GET() {
   try {
     const user = await getCurrentUser();
     if (!user || user.role.name !== "ADMIN") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      return apiError("Unauthorized", 403);
     }
 
     const result = await diagnoseChainIntegrity();
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 500 });
+      return apiError(result.error || "Failed to diagnose chain integrity");
     }
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       issueCount: result.issues?.length || 0,
       issues: result.issues,
     });
   } catch (error) {
     console.error("Error diagnosing chain integrity:", error);
-    return NextResponse.json(
-      { error: "Failed to diagnose chain integrity" },
-      { status: 500 }
-    );
+    return apiError("Failed to diagnose chain integrity");
   }
 }
 
@@ -41,17 +37,16 @@ export async function POST() {
   try {
     const user = await getCurrentUser();
     if (!user || user.role.name !== "ADMIN") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      return apiError("Unauthorized", 403);
     }
 
     const result = await repairChainActiveFlags();
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 500 });
+      return apiError(result.error || "Failed to repair chains");
     }
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       repairedCount: result.repaired,
       details: result.details,
       message: result.repaired
@@ -60,9 +55,6 @@ export async function POST() {
     });
   } catch (error) {
     console.error("Error repairing chain active flags:", error);
-    return NextResponse.json(
-      { error: "Failed to repair chains" },
-      { status: 500 }
-    );
+    return apiError("Failed to repair chains");
   }
 }

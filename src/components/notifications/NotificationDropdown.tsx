@@ -16,6 +16,9 @@ import { NotificationBadge } from "./NotificationBadge";
 import { toast } from "sonner";
 import type { NotificationType } from "@prisma/client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { sanitizeAppPath } from "@/lib/services/email/sanitization";
+import { useOptionalNotificationContext } from "./notification-context";
 
 interface Notification {
   id: string;
@@ -29,15 +32,26 @@ interface Notification {
 }
 
 interface NotificationDropdownProps {
-  userId: string;
+  userId?: string;
   unreadCount?: number;
 }
 
-export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDropdownProps) {
+export function NotificationDropdown({
+  userId: userIdProp,
+  unreadCount: unreadCountProp,
+}: NotificationDropdownProps = {}) {
+  const notificationContext = useOptionalNotificationContext();
+  const userId = userIdProp ?? notificationContext?.userId;
+  const unreadCount = unreadCountProp ?? notificationContext?.unreadCount ?? 0;
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+
+  if (!userId) {
+    return null;
+  }
 
   // Load recent notifications when dropdown opens
   useEffect(() => {
@@ -68,14 +82,16 @@ export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDr
   };
 
   const handleNotificationClick = async (notification: Notification) => {
+    const safeLink = sanitizeAppPath(notification.link);
+
     // Mark as read if unread
     if (!notification.readAt) {
       await markAsRead({ notificationId: notification.id, userId });
     }
 
     // Navigate to link if available
-    if (notification.link) {
-      window.location.href = notification.link;
+    if (safeLink) {
+      router.push(safeLink);
     }
 
     setIsOpen(false);
@@ -102,7 +118,7 @@ export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDr
           {/* Notification badge - positioned top-right with proper offset */}
           {unreadCount > 0 && (
             <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center">
-              <NotificationBadge userId={userId} initialCount={unreadCount} />
+              <NotificationBadge initialCount={unreadCount} />
               {/* Pulse ring effect */}
               <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
             </span>
@@ -162,7 +178,7 @@ export function NotificationDropdown({ userId, unreadCount = 0 }: NotificationDr
                         })}
                       </p>
                     </div>
-                    {notification.link && (
+                    {sanitizeAppPath(notification.link) && (
                       <ExternalLink className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0 mt-1" />
                     )}
                   </div>

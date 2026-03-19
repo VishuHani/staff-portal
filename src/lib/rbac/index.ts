@@ -12,6 +12,7 @@
 
 // Core permissions
 export * from "./permissions";
+export type { Permission, PermissionAction, PermissionResource } from "./types";
 
 // Access helpers (canAccess, requireAuth, etc.)
 // Note: access.ts already re-exports from advanced-permissions.ts

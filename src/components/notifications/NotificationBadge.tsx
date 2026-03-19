@@ -2,28 +2,50 @@
 
 import { useEffect, useState, useRef } from "react";
 import { getUnreadCount } from "@/lib/actions/notifications";
+import { useOptionalNotificationContext } from "./notification-context";
+
+const POLL_INTERVAL_MS = 60000;
 
 interface NotificationBadgeProps {
-  userId: string;
+  userId?: string;
   initialCount?: number;
   className?: string;
   animate?: boolean;
 }
 
 export function NotificationBadge({
-  userId,
-  initialCount = 0,
+  userId: userIdProp,
+  initialCount,
   className = "",
   animate = true,
 }: NotificationBadgeProps) {
-  const [count, setCount] = useState(initialCount);
+  const notificationContext = useOptionalNotificationContext();
+  const userId = userIdProp ?? notificationContext?.userId;
+  const resolvedInitialCount = initialCount ?? notificationContext?.unreadCount ?? 0;
+
+  const [count, setCount] = useState(resolvedInitialCount);
   const [isNew, setIsNew] = useState(false);
-  const prevCount = useRef(initialCount);
+  const prevCount = useRef(resolvedInitialCount);
 
   useEffect(() => {
-    // Fetch unread count on mount
+    setCount(resolvedInitialCount);
+    prevCount.current = resolvedInitialCount;
+  }, [resolvedInitialCount]);
+
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
+    let isMounted = true;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
     const fetchCount = async () => {
       const result = await getUnreadCount({ userId });
+      if (!isMounted) {
+        return;
+      }
+
       if (!result.error && result.count !== undefined) {
         // Check if count increased (new notification)
         if (result.count > prevCount.current) {
@@ -36,13 +58,48 @@ export function NotificationBadge({
       }
     };
 
-    fetchCount();
+    const startPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
 
-    // Poll for updates every 30 seconds (will be replaced with real-time later)
-    const interval = setInterval(fetchCount, 30000);
+      if (document.visibilityState !== "visible") {
+        return;
+      }
 
-    return () => clearInterval(interval);
+      interval = setInterval(() => {
+        void fetchCount();
+      }, POLL_INTERVAL_MS);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void fetchCount();
+      }
+
+      startPolling();
+    };
+
+    void fetchCount();
+    startPolling();
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      if (interval) {
+        clearInterval(interval);
+      }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleVisibilityChange);
+    };
   }, [userId]);
+
+  if (!userId) {
+    return null;
+  }
 
   if (count === 0) {
     return null;
