@@ -3,15 +3,18 @@
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/auth/supabase-server";
 import { prisma } from "@/lib/prisma";
 import {
   loginSchema,
   signupSchema,
   resetPasswordSchema,
+  updatePasswordSchema,
   type LoginInput,
   type SignupInput,
   type ResetPasswordInput,
+  type UpdatePasswordInput,
 } from "@/lib/auth/schemas";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import { rateLimit, getClientIp } from "@/lib/utils/rate-limit";
@@ -302,6 +305,47 @@ export async function resetPassword(formData: ResetPasswordInput) {
   return {
     success: true,
     message: "Password reset email sent. Please check your inbox.",
+  };
+}
+
+export async function completePasswordReset(formData: UpdatePasswordInput) {
+  const validatedFields = updatePasswordSchema.safeParse(formData);
+
+  if (!validatedFields.success) {
+    return {
+      error: "Invalid fields",
+      errors: validatedFields.error.flatten().fieldErrors,
+    };
+  }
+
+  const { newPassword } = validatedFields.data;
+  const supabase = await createClient();
+  const {
+    data: { user: supabaseUser },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !supabaseUser) {
+    return { error: "Reset session is invalid or expired. Please request a new reset link." };
+  }
+
+  const { error: supabaseError } = await supabase.auth.updateUser({
+    password: newPassword,
+  });
+
+  if (supabaseError) {
+    return { error: supabaseError.message };
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { id: supabaseUser.id },
+    data: { password: hashedPassword },
+  });
+
+  return {
+    success: true,
+    message: "Password updated successfully. You can now sign in.",
   };
 }
 
