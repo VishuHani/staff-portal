@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess, canAccessAdmin } from "@/lib/rbac/access";
+import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { hasAnyPermission } from "@/lib/rbac/permissions";
 import { getAccessibleChannelIds, getUserVenueIds } from "@/lib/utils/venue";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import { getAuditContext } from "@/lib/utils/audit-helpers";
@@ -20,22 +21,18 @@ import {
 } from "@/lib/schemas/channels";
 
 /**
- * Get venue IDs for a manager user
- * Returns null if user is not a manager
+ * Determine whether the user can manage channels across all venues.
  */
-async function getManagerVenueIds(userId: string): Promise<string[] | null> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      role: true,
-      venues: { include: { venue: true } },
-    },
-  });
-
-  if (user?.role.name === "MANAGER" && user.venues.length > 0) {
-    return user.venues.map((uv) => uv.venue.id);
-  }
-  return null;
+async function hasGlobalChannelScope(userId: string): Promise<boolean> {
+  return hasAnyPermission(userId, [
+    { resource: "stores", action: "view_all" },
+    { resource: "stores", action: "manage" },
+    { resource: "venues", action: "view_all" },
+    { resource: "venues", action: "manage" },
+    { resource: "admin", action: "manage_stores" },
+    { resource: "posts", action: "edit_all" },
+    { resource: "posts", action: "delete_all" },
+  ]);
 }
 
 async function getOwnedVenueIds(userId: string): Promise<string[]> {
@@ -131,8 +128,8 @@ export async function getChannelById(id: string) {
   const user = await requireAuth();
 
   try {
-    const isAdmin = await canAccessAdmin();
-    const userVenueIds = isAdmin ? [] : await getOwnedVenueIds(user.id);
+    const hasGlobalScope = await hasGlobalChannelScope(user.id);
+    const userVenueIds = hasGlobalScope ? [] : await getOwnedVenueIds(user.id);
 
     const channel = await prisma.channel.findUnique({
       where: { id },
@@ -154,7 +151,7 @@ export async function getChannelById(id: string) {
       return { error: "Channel not found" };
     }
 
-    if (!isAdmin && !channel.isPublic) {
+    if (!hasGlobalScope && !channel.isPublic) {
       const hasVenueAccess = channel.venues.some((venue) =>
         userVenueIds.includes(venue.venueId)
       );
@@ -195,30 +192,9 @@ export async function createChannel(data: CreateChannelInput) {
 
   try {
     const userVenueIds = await getOwnedVenueIds(user.id);
-    const userIsAdmin = await canAccessAdmin();
+    const hasGlobalScope = await hasGlobalChannelScope(user.id);
 
-    // If user is a manager, validate and restrict venue assignments
-    const managerVenueIds = await getManagerVenueIds(user.id);
-    if (managerVenueIds && managerVenueIds.length > 0) {
-      // Manager must assign channel to their venue(s)
-      if (!venueIds || venueIds.length === 0) {
-        // Auto-assign to all manager's venues
-        venueIds = managerVenueIds;
-      } else {
-        // Validate that all provided venueIds are within manager's venues
-        const invalidVenueIds = venueIds.filter(
-          (id) => !managerVenueIds.includes(id)
-        );
-        if (invalidVenueIds.length > 0) {
-          return {
-            error:
-              "As a manager, you can only create channels for your assigned venue(s)",
-          };
-        }
-      }
-    }
-
-    if (!userIsAdmin) {
+    if (!hasGlobalScope) {
       if (userVenueIds.length === 0) {
         return { error: "You don't have permission to create channels" };
       }
@@ -336,10 +312,10 @@ export async function updateChannel(data: UpdateChannelInput) {
       return { error: "Channel not found" };
     }
 
-    const userIsAdmin = await canAccessAdmin();
-    const userVenueIds = userIsAdmin ? [] : await getOwnedVenueIds(user.id);
+    const hasGlobalScope = await hasGlobalChannelScope(user.id);
+    const userVenueIds = hasGlobalScope ? [] : await getOwnedVenueIds(user.id);
 
-    if (!userIsAdmin) {
+    if (!hasGlobalScope) {
       if (userVenueIds.length === 0) {
         return { error: "Channel not found" };
       }
@@ -353,22 +329,7 @@ export async function updateChannel(data: UpdateChannelInput) {
       }
     }
 
-    // If user is a manager, validate venue assignments
-    const managerVenueIds = await getManagerVenueIds(user.id);
-    if (!userIsAdmin && managerVenueIds && managerVenueIds.length > 0 && venueIds) {
-      // Validate that all provided venueIds are within manager's venues
-      const invalidVenueIds = venueIds.filter(
-        (venueId) => !managerVenueIds.includes(venueId)
-      );
-      if (invalidVenueIds.length > 0) {
-        return {
-          error:
-            "As a manager, you can only assign channels to your assigned venue(s)",
-        };
-      }
-    }
-
-    if (!userIsAdmin && venueIds) {
+    if (!hasGlobalScope && venueIds) {
       const invalidVenueIds = venueIds.filter((venueId) => !userVenueIds.includes(venueId));
       if (invalidVenueIds.length > 0) {
         return {
@@ -479,8 +440,8 @@ export async function archiveChannel(data: ArchiveChannelInput) {
       return { error: "Channel not found" };
     }
 
-    const userIsAdmin = await canAccessAdmin();
-    if (!userIsAdmin) {
+    const hasGlobalScope = await hasGlobalChannelScope(user.id);
+    if (!hasGlobalScope) {
       const userVenueIds = await getOwnedVenueIds(user.id);
       const hasVenueAccess =
         existingChannel.isPublic ||
@@ -570,8 +531,8 @@ export async function deleteChannel(data: DeleteChannelInput) {
       return { error: "Channel not found" };
     }
 
-    const userIsAdmin = await canAccessAdmin();
-    if (!userIsAdmin) {
+    const hasGlobalScope = await hasGlobalChannelScope(user.id);
+    if (!hasGlobalScope) {
       const userVenueIds = await getOwnedVenueIds(user.id);
       const hasVenueAccess =
         channel.isPublic ||

@@ -2,9 +2,10 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin, requireAnyPermission } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { getUserVenueIds } from "@/lib/utils/venue";
-import { isAdmin } from "@/lib/rbac/permissions";
+import { hasAnyPermission } from "@/lib/rbac/permissions";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
 import {
   actionFailure,
@@ -25,6 +26,14 @@ import {
   type ToggleVenueActiveInput,
 } from "@/lib/schemas/admin/venues";
 
+async function requireVenueReadAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.venuesRead);
+}
+
+async function requireVenueManageAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.venuesManage);
+}
+
 /**
  * Get all venues
  * Admin only
@@ -32,7 +41,7 @@ import {
 export async function getAllVenues(): Promise<
   ActionResult<{ venues: Awaited<ReturnType<typeof prisma.venue.findMany>> }>
 > {
-  await requireAdmin();
+  await requireVenueReadAccess();
 
   try {
     const venues = await prisma.venue.findMany({
@@ -66,7 +75,7 @@ export async function getVenueById(
     venue: NonNullable<Awaited<ReturnType<typeof prisma.venue.findUnique>>>;
   }>
 > {
-  await requireAdmin();
+  await requireVenueReadAccess();
 
   try {
     const venue = await prisma.venue.findUnique({
@@ -123,7 +132,7 @@ export async function getVenueStats(): Promise<
     };
   }>
 > {
-  await requireAdmin();
+  await requireVenueReadAccess();
 
   try {
     const [total, active, inactive] = await Promise.all([
@@ -154,7 +163,7 @@ export async function createVenue(
 ): Promise<
   ActionResult<{ venue: Awaited<ReturnType<typeof prisma.venue.create>> }>
 > {
-  const admin = await requireAdmin();
+  const actor = await requireVenueManageAccess();
 
   const validatedFields = createVenueSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -190,7 +199,7 @@ export async function createVenue(
     // Audit log
     try {
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "VENUE_CREATED",
         resourceType: "Venue",
         resourceId: venue.id,
@@ -231,7 +240,7 @@ export async function updateVenue(
 ): Promise<
   ActionResult<{ venue: Awaited<ReturnType<typeof prisma.venue.update>> }>
 > {
-  const admin = await requireAdmin();
+  const actor = await requireVenueManageAccess();
 
   const validatedFields = updateVenueSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -285,7 +294,7 @@ export async function updateVenue(
     // Audit log
     try {
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "VENUE_UPDATED",
         resourceType: "Venue",
         resourceId: venueId,
@@ -332,7 +341,7 @@ export async function updateVenue(
 export async function deleteVenue(
   data: DeleteVenueInput
 ): Promise<ActionResult<{}>> {
-  const admin = await requireAdmin();
+  const actor = await requireVenueManageAccess();
 
   const validatedFields = deleteVenueSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -382,7 +391,7 @@ export async function deleteVenue(
     // Audit log
     try {
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "VENUE_DELETED",
         resourceType: "Venue",
         resourceId: venueId,
@@ -414,7 +423,7 @@ export async function toggleVenueActive(
 ): Promise<
   ActionResult<{ venue: Awaited<ReturnType<typeof prisma.venue.update>> }>
 > {
-  await requireAdmin();
+  await requireVenueManageAccess();
 
   const validatedFields = toggleVenueActiveSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -476,22 +485,23 @@ export async function getActiveVenues(): Promise<
     }[];
   }>
 > {
-  // Allow managers and admins with appropriate permissions
-  const currentUser = await requireAnyPermission([
-    { resource: "users", action: "view_team" },
-    { resource: "users", action: "view_all" },
-  ]);
+  const currentUser = await requireVenueReadAccess();
 
   try {
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(currentUser.id);
+    const hasGlobalVenueScope = await hasAnyPermission(currentUser.id, [
+      { resource: "stores", action: "view_all" },
+      { resource: "stores", action: "manage" },
+      { resource: "venues", action: "view_all" },
+      { resource: "venues", action: "manage" },
+      { resource: "admin", action: "manage_stores" },
+    ]);
 
     // Build query based on user's permissions
     let whereClause: any = {
       active: true,
     };
 
-    if (!userIsAdmin) {
+    if (!hasGlobalVenueScope) {
       // Manager: Filter venues by their assigned venues
       const venueIds = await getUserVenueIds(currentUser.id);
       if (venueIds.length === 0) {

@@ -1,7 +1,8 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { requireAuth } from "@/lib/rbac/access";
+import { hasAnyPermission, hasPermission } from "@/lib/rbac/permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -44,6 +45,30 @@ export interface Position {
   active: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+async function canManagePositionsAtVenue(
+  userId: string,
+  venueId: string
+): Promise<boolean> {
+  const [canUpdateStore, canManageStore, canManageVenue, hasSystemManagePermission] =
+    await Promise.all([
+      hasPermission(userId, "stores", "update", venueId),
+      hasPermission(userId, "stores", "manage", venueId),
+      hasPermission(userId, "venues", "manage", venueId),
+      hasAnyPermission(userId, [
+        { resource: "stores", action: "manage_positions" },
+        { resource: "venues", action: "manage_positions" },
+        { resource: "admin", action: "manage_stores" },
+      ]),
+    ]);
+
+  return (
+    canUpdateStore ||
+    canManageStore ||
+    canManageVenue ||
+    hasSystemManagePermission
+  );
 }
 
 // Get all positions for a venue
@@ -95,19 +120,9 @@ export async function createPosition(data: PositionInput) {
       return { success: false, error: validated.error.issues[0].message };
     }
 
-    // Check permission (admin or manager of venue)
-    const hasPermission = await canAccess("stores", "update");
-    if (!hasPermission) {
-      // Check if user is manager of this venue
-      const isVenueManager = await prisma.userVenue.findFirst({
-        where: {
-          userId: user.id,
-          venueId: data.venueId,
-        },
-      });
-      if (!isVenueManager && user.role.name !== "ADMIN") {
-        return { success: false, error: "You don't have permission to manage positions" };
-      }
+    const hasAccess = await canManagePositionsAtVenue(user.id, data.venueId);
+    if (!hasAccess) {
+      return { success: false, error: "You don't have permission to manage positions" };
     }
 
     // Get max display order
@@ -169,18 +184,9 @@ export async function updatePosition(data: {
       return { success: false, error: "Position not found" };
     }
 
-    // Check permission
-    const hasPermission = await canAccess("stores", "update");
-    if (!hasPermission) {
-      const isVenueManager = await prisma.userVenue.findFirst({
-        where: {
-          userId: user.id,
-          venueId: current.venueId,
-        },
-      });
-      if (!isVenueManager && user.role.name !== "ADMIN") {
-        return { success: false, error: "You don't have permission to manage positions" };
-      }
+    const hasAccess = await canManagePositionsAtVenue(user.id, current.venueId);
+    if (!hasAccess) {
+      return { success: false, error: "You don't have permission to manage positions" };
     }
 
     // Check for duplicate name if updating name
@@ -229,18 +235,9 @@ export async function reorderPositions(data: {
       return { success: false, error: validated.error.issues[0].message };
     }
 
-    // Check permission
-    const hasPermission = await canAccess("stores", "update");
-    if (!hasPermission) {
-      const isVenueManager = await prisma.userVenue.findFirst({
-        where: {
-          userId: user.id,
-          venueId: data.venueId,
-        },
-      });
-      if (!isVenueManager && user.role.name !== "ADMIN") {
-        return { success: false, error: "You don't have permission to manage positions" };
-      }
+    const hasAccess = await canManagePositionsAtVenue(user.id, data.venueId);
+    if (!hasAccess) {
+      return { success: false, error: "You don't have permission to manage positions" };
     }
 
     // Update all positions in a transaction
@@ -274,18 +271,9 @@ export async function deletePosition(positionId: string) {
       return { success: false, error: "Position not found" };
     }
 
-    // Check permission
-    const hasPermission = await canAccess("stores", "update");
-    if (!hasPermission) {
-      const isVenueManager = await prisma.userVenue.findFirst({
-        where: {
-          userId: user.id,
-          venueId: position.venueId,
-        },
-      });
-      if (!isVenueManager && user.role.name !== "ADMIN") {
-        return { success: false, error: "You don't have permission to manage positions" };
-      }
+    const hasAccess = await canManagePositionsAtVenue(user.id, position.venueId);
+    if (!hasAccess) {
+      return { success: false, error: "You don't have permission to manage positions" };
     }
 
     // Check if position is used in any shifts

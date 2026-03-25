@@ -192,7 +192,9 @@ export function Sidebar({
     },
     {
       title: "Reports & Analytics",
-      href: userRole === "ADMIN" ? "/system/reports" : "/manage/reports",
+      href: hasAnyPermission([{ resource: "reports", action: "view_all" }])
+        ? "/system/reports"
+        : "/manage/reports",
       icon: BarChart3,
       roles: ["ADMIN", "MANAGER"],
       permissions: [

@@ -3,6 +3,10 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
+import {
+  getScopedEmailCreateVenueIds,
+  hasGlobalEmailCreateScope,
+} from "@/lib/rbac/email-create-scope";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { NewEmailClient } from "./new-email-client";
 
@@ -26,11 +30,16 @@ export default async function NewEmailPage() {
     redirect("/dashboard?error=access_denied");
   }
 
+  const [canAccessAllVenues, scopedVenueIds] = await Promise.all([
+    hasGlobalEmailCreateScope(user.id),
+    getScopedEmailCreateVenueIds(user.id, user.venueId),
+  ]);
+
   // Get templates for starting point
   const whereClause: Prisma.EmailWhereInput = { isTemplate: true };
-  if (user.role.name !== "ADMIN") {
+  if (!canAccessAllVenues) {
     whereClause.OR = [
-      { venueId: user.venueId },
+      { venueId: { in: scopedVenueIds } },
       { venueId: null, isSystem: true },
     ];
   }
@@ -48,9 +57,9 @@ export default async function NewEmailPage() {
     orderBy: { name: "asc" },
   });
 
-  // Get venues (admin only)
+  // Get venues (global scope only)
   let venues: Array<{ id: string; name: string; code: string }> = [];
-  if (user.role.name === "ADMIN") {
+  if (canAccessAllVenues) {
     venues = await prisma.venue.findMany({
       select: { id: true, name: true, code: true },
       orderBy: { name: "asc" },
@@ -62,7 +71,7 @@ export default async function NewEmailPage() {
       <NewEmailClient
         templates={templates}
         venues={venues}
-        isAdmin={user.role.name === "ADMIN"}
+        isAdmin={canAccessAllVenues}
         userVenueId={user.venueId}
       />
     </DashboardLayout>

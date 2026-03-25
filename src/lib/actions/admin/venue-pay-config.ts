@@ -4,7 +4,7 @@
  * Venue Pay Configuration Actions
  * 
  * CONFIDENTIAL: These actions handle pay rate configuration
- * Only accessible to ADMIN and MANAGER roles
+ * Access is permission-based and venue-scoped.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -12,7 +12,7 @@ import { auth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Decimal } from "@prisma/client/runtime/library";
-import { getUserVenueIds } from "@/lib/utils/venue";
+import { hasPermission } from "@/lib/rbac/permissions";
 
 // ============================================================================
 // SCHEMAS
@@ -112,35 +112,36 @@ async function checkPayConfigAccess(venueId: string) {
     return { authorized: false, error: "Not authenticated" };
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    include: {
-      role: { include: { rolePermissions: { include: { permission: true } } } },
-      venuePermissions: { where: { venueId }, include: { permission: true } },
-    },
-  });
+  const userId = session.user.id;
+  const [canManageStores, canManageVenues, venuePayPermission] = await Promise.all([
+    Promise.all([
+      hasPermission(userId, "stores", "update", venueId),
+      hasPermission(userId, "stores", "manage", venueId),
+      hasPermission(userId, "admin", "manage_stores"),
+    ]).then((results) => results.some(Boolean)),
+    hasPermission(userId, "venues", "manage", venueId),
+    prisma.userVenuePermission.findFirst({
+      where: {
+        userId,
+        venueId,
+        permission: {
+          resource: "venue_pay_config",
+          action: "manage",
+        },
+      },
+      select: { id: true },
+    }),
+  ]);
 
-  if (!user) {
-    return { authorized: false, error: "User not found" };
-  }
-
-  const isAdmin = user.role.name === "ADMIN";
-  const isVenueManager = user.venuePermissions.some(
-    (p) => p.permission.action === "manage" && p.permission.resource === "venue_pay_config"
+  const canManagePayConfig = Boolean(
+    canManageStores || canManageVenues || venuePayPermission
   );
 
-  if (!isAdmin && !isVenueManager) {
+  if (!canManagePayConfig) {
     return { authorized: false, error: "Not authorized to manage pay configuration" };
   }
 
-  if (!isAdmin) {
-    const userVenueIds = await getUserVenueIds(session.user.id);
-    if (!userVenueIds.includes(venueId)) {
-      return { authorized: false, error: "Not authorized to manage pay configuration" };
-    }
-  }
-
-  return { authorized: true, userId: session.user.id };
+  return { authorized: true, userId };
 }
 
 function toDecimal(value: number | null | undefined): Decimal | null {

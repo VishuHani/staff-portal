@@ -1,24 +1,26 @@
-import { requireAuth } from "@/lib/rbac/access";
+import { canAccess, requireAuth } from "@/lib/rbac/access";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ChannelsPageClient } from "./channels-page-client";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { getUnreadCount } from "@/lib/actions/notifications";
 import { getUnreadMessageCount } from "@/lib/actions/messages";
-import { getUserVenueIds } from "@/lib/utils/venue";
+import { hasAnyPermission } from "@/lib/rbac/permissions";
 
 export const metadata = {
   title: "Channel Management | Admin",
   description: "Manage channels and members",
 };
 
-async function getChannelsData(isAdmin: boolean, userVenueIds: string[] | null) {
-  // Build channel filter based on user role
-  const noVenueAccess = !isAdmin && (!userVenueIds || userVenueIds.length === 0);
+async function getChannelsData(
+  hasGlobalVenueScope: boolean,
+  userVenueIds: string[] | null
+) {
+  const noVenueAccess =
+    !hasGlobalVenueScope && (!userVenueIds || userVenueIds.length === 0);
   let channelWhere: any = {};
 
-  // Non-admin users only see channels assigned to their venues or public channels
-  if (!isAdmin) {
+  if (!hasGlobalVenueScope) {
     if (noVenueAccess) {
       channelWhere.id = "impossible-id-no-venues";
     } else if (userVenueIds) {
@@ -75,11 +77,10 @@ async function getChannelsData(isAdmin: boolean, userVenueIds: string[] | null) 
     ],
   });
 
-  // Build user filter based on user role
+  // Build user filter based on venue scope
   let userWhere: any = { active: true };
 
-  // Non-admin users only see users from their venues
-  if (!isAdmin) {
+  if (!hasGlobalVenueScope) {
     if (noVenueAccess) {
       userWhere.id = "impossible-id-no-venues";
     } else if (userVenueIds) {
@@ -133,11 +134,10 @@ async function getChannelsData(isAdmin: boolean, userVenueIds: string[] | null) 
     orderBy: { name: "asc" },
   });
 
-  // Build venue filter based on user role
+  // Build venue filter based on venue scope
   let venueWhere: any = { active: true };
 
-  // Non-admin users only see their assigned venues
-  if (!isAdmin) {
+  if (!hasGlobalVenueScope) {
     if (noVenueAccess) {
       venueWhere.id = "impossible-id-no-venues";
     } else if (userVenueIds) {
@@ -167,19 +167,25 @@ async function getChannelsData(isAdmin: boolean, userVenueIds: string[] | null) 
 export default async function AdminChannelsPage() {
   const user = await requireAuth();
 
-  // Check if user has posts:manage permission (admin or manager)
+  const [hasManagePermission, hasGlobalVenueScope] = await Promise.all([
+    canAccess("posts", "manage"),
+    hasAnyPermission(user.id, [
+      { resource: "stores", action: "view_all" },
+      { resource: "stores", action: "manage" },
+      { resource: "venues", action: "view_all" },
+      { resource: "venues", action: "manage" },
+      { resource: "admin", action: "manage_stores" },
+    ]),
+  ]);
+
+  if (!hasManagePermission) {
+    redirect("/dashboard");
+  }
+
   const userWithRole = await prisma.user.findUnique({
     where: { id: user.id },
     include: {
-      role: {
-        include: {
-          rolePermissions: {
-            include: {
-              permission: true,
-            },
-          },
-        },
-      },
+      role: true,
       venues: {
         include: {
           venue: {
@@ -193,21 +199,12 @@ export default async function AdminChannelsPage() {
     },
   });
 
-  const hasManagePermission = userWithRole?.role.rolePermissions.some(
-    (rp) => rp.permission.resource === "posts" && rp.permission.action === "manage"
-  );
-
-  if (!hasManagePermission) {
-    redirect("/dashboard");
-  }
-
-  const isAdmin = userWithRole?.role.name === "ADMIN";
   const userVenues = userWithRole?.venues ?? [];
-  const userVenueIds = isAdmin && userVenues.length > 0
+  const userVenueIds = hasGlobalVenueScope && userVenues.length > 0
     ? null
     : userVenues.map((uv) => uv.venue.id);
 
-  const data = await getChannelsData(isAdmin, userVenueIds);
+  const data = await getChannelsData(hasGlobalVenueScope, userVenueIds);
 
   // Get unread counts for header
   const [unreadResult, messageCountResult] = await Promise.all([

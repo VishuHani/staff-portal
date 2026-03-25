@@ -1,7 +1,8 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 import {
   actionFailure,
   actionSuccess,
@@ -90,6 +91,10 @@ export type DeleteTimeBasedAccessInput = z.infer<
   typeof deleteTimeBasedAccessSchema
 >;
 
+async function requireAdvancedPermissionAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.permissionsManage);
+}
+
 // ============================================================================
 // FIELD PERMISSION ACTIONS
 // ============================================================================
@@ -98,7 +103,7 @@ export type DeleteTimeBasedAccessInput = z.infer<
  * Get all field permissions for a role
  */
 export async function getFieldPermissions(roleId: string) {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   try {
     const permissions = await prisma.fieldPermission.findMany({
@@ -125,7 +130,7 @@ export async function getFieldPermissions(roleId: string) {
  * Create a field permission
  */
 export async function createFieldPermission(data: FieldPermissionInput) {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   const validatedFields = fieldPermissionSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -186,7 +191,7 @@ export async function createFieldPermission(data: FieldPermissionInput) {
  * Delete a field permission
  */
 export async function deleteFieldPermission(data: DeleteFieldPermissionInput) {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   const validatedFields = deleteFieldPermissionSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -219,7 +224,7 @@ export async function deleteFieldPermission(data: DeleteFieldPermissionInput) {
  * Get all conditional permissions for a role
  */
 export async function getConditionalPermissions(roleId: string) {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   try {
     const permissions = await prisma.conditionalPermission.findMany({
@@ -248,7 +253,7 @@ export async function getConditionalPermissions(roleId: string) {
 export async function createConditionalPermission(
   data: ConditionalPermissionInput
 ) {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   const validatedFields = conditionalPermissionSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -296,7 +301,7 @@ export async function createConditionalPermission(
 export async function deleteConditionalPermission(
   data: DeleteConditionalPermissionInput
 ) {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   const validatedFields = deleteConditionalPermissionSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -329,7 +334,7 @@ export async function deleteConditionalPermission(
  * Get all time-based access rules for a role
  */
 export async function getTimeBasedAccess(roleId: string) {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   try {
     const rules = await prisma.timeBasedAccess.findMany({
@@ -356,7 +361,7 @@ export async function getTimeBasedAccess(roleId: string) {
  * Create a time-based access rule
  */
 export async function createTimeBasedAccess(data: TimeBasedAccessInput) {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   const validatedFields = timeBasedAccessSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -406,7 +411,7 @@ export async function createTimeBasedAccess(data: TimeBasedAccessInput) {
  * Delete a time-based access rule
  */
 export async function deleteTimeBasedAccess(data: DeleteTimeBasedAccessInput) {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   const validatedFields = deleteTimeBasedAccessSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -447,7 +452,7 @@ export async function getAllAdvancedPermissions(
     timeBasedAccess: Awaited<ReturnType<typeof prisma.timeBasedAccess.findMany>>;
   }>
 > {
-  await requireAdmin();
+  await requireAdvancedPermissionAccess();
 
   try {
     const [fieldPerms, conditionalPerms, timeBasedRules] = await Promise.all([

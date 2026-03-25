@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { requireAuth } from "@/lib/rbac/access";
 import { RosterStatus } from "@prisma/client";
 import { createNotification } from "@/lib/services/notifications";
 import { NotificationType } from "@prisma/client";
@@ -20,6 +20,7 @@ import {
   revalidatePaths,
   type ActionResult,
 } from "@/lib/utils/action-contract";
+import { hasRosterVenuePermission } from "./permission-scope";
 
 // Types
 export interface CreateRosterInput {
@@ -44,22 +45,11 @@ export async function createRoster(
   try {
     const user = await requireAuth();
 
-    // Check permission
-    const hasPermission = await canAccess("rosters", "create");
-    if (!hasPermission) {
+    const canCreateRoster = await hasRosterVenuePermission(user.id, data.venueId, [
+      "create",
+    ]);
+    if (!canCreateRoster) {
       return actionFailure("You don't have permission to create rosters");
-    }
-
-    // Validate venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(data.venueId)) {
-        return actionFailure("You don't have access to this venue");
-      }
     }
 
     // Generate chainId for this venue/week combination
@@ -143,11 +133,6 @@ export async function updateRoster(rosterId: string, data: UpdateRosterInput) {
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "edit");
-    if (!hasPermission) {
-      return actionFailure("You don't have permission to edit rosters");
-    }
-
     // Get current roster
     const existingRoster = await prisma.roster.findUnique({
       where: { id: rosterId },
@@ -158,16 +143,13 @@ export async function updateRoster(rosterId: string, data: UpdateRosterInput) {
       return actionFailure("Roster not found");
     }
 
-    // Check venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(existingRoster.venueId)) {
-        return actionFailure("You don't have access to this roster");
-      }
+    const canEditRoster = await hasRosterVenuePermission(
+      user.id,
+      existingRoster.venueId,
+      ["edit"]
+    );
+    if (!canEditRoster) {
+      return actionFailure("You don't have permission to edit rosters");
     }
 
     // Only allow editing of draft rosters
@@ -236,11 +218,6 @@ export async function deleteRoster(rosterId: string) {
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "delete");
-    if (!hasPermission) {
-      return actionFailure("You don't have permission to delete rosters");
-    }
-
     const roster = await prisma.roster.findUnique({
       where: { id: rosterId },
     });
@@ -249,16 +226,13 @@ export async function deleteRoster(rosterId: string) {
       return actionFailure("Roster not found");
     }
 
-    // Check venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(roster.venueId)) {
-        return actionFailure("You don't have access to this roster");
-      }
+    const canDeleteRoster = await hasRosterVenuePermission(
+      user.id,
+      roster.venueId,
+      ["delete"]
+    );
+    if (!canDeleteRoster) {
+      return actionFailure("You don't have permission to delete rosters");
     }
 
     // Only allow deleting drafts
@@ -302,11 +276,6 @@ export async function publishRoster(rosterId: string) {
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "publish");
-    if (!hasPermission) {
-      return actionFailure("You don't have permission to publish rosters");
-    }
-
     const roster = await prisma.roster.findUnique({
       where: { id: rosterId },
       include: {
@@ -322,16 +291,13 @@ export async function publishRoster(rosterId: string) {
       return actionFailure("Roster not found");
     }
 
-    // Check venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(roster.venueId)) {
-        return actionFailure("You don't have access to this roster");
-      }
+    const canPublishRoster = await hasRosterVenuePermission(
+      user.id,
+      roster.venueId,
+      ["publish"]
+    );
+    if (!canPublishRoster) {
+      return actionFailure("You don't have permission to publish rosters");
     }
 
     // Check if roster has any shifts
@@ -418,17 +384,21 @@ export async function archiveRoster(rosterId: string) {
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "edit");
-    if (!hasPermission) {
-      return actionFailure("You don't have permission to archive rosters");
-    }
-
     const roster = await prisma.roster.findUnique({
       where: { id: rosterId },
     });
 
     if (!roster) {
       return actionFailure("Roster not found");
+    }
+
+    const canArchiveRoster = await hasRosterVenuePermission(
+      user.id,
+      roster.venueId,
+      ["edit"]
+    );
+    if (!canArchiveRoster) {
+      return actionFailure("You don't have permission to archive rosters");
     }
 
     // Only published rosters can be archived
@@ -489,11 +459,6 @@ export async function copyRoster(
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "create");
-    if (!hasPermission) {
-      return actionFailure("You don't have permission to create rosters");
-    }
-
     // Get source roster with all shifts
     const sourceRoster = await prisma.roster.findUnique({
       where: { id: sourceRosterId },
@@ -508,16 +473,13 @@ export async function copyRoster(
       return actionFailure("Source roster not found");
     }
 
-    // Check venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(sourceRoster.venueId)) {
-        return actionFailure("You don't have access to this roster");
-      }
+    const canCreateRoster = await hasRosterVenuePermission(
+      user.id,
+      sourceRoster.venueId,
+      ["create"]
+    );
+    if (!canCreateRoster) {
+      return actionFailure("You don't have permission to create rosters");
     }
 
     // For new versions (same week), use the version chain service

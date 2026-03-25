@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/actions/auth";
+import { hasAnyPermission } from "@/lib/rbac/permissions";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 
 export async function POST(request: Request) {
   try {
@@ -12,9 +14,17 @@ export async function POST(request: Request) {
       // Allow seeding in development with secret header
       console.log("Seeding roster permissions (dev mode with secret)");
     } else {
-      // In production, require admin auth
+      // In production, require permission-management capability
       const user = await getCurrentUser();
-      if (!user || user.role.name !== "ADMIN") {
+      if (!user) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      }
+
+      const hasAccess = await hasAnyPermission(
+        user.id,
+        SYSTEM_PERMISSIONS.permissionsManage
+      );
+      if (!hasAccess) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
       }
     }

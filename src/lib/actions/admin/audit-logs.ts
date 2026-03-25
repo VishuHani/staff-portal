@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAdmin, requireAuth } from "@/lib/rbac/access";
+import { requireAnyPermission, requireAuth } from "@/lib/rbac/access";
 import { auditLogFilterSchema, type AuditLogFilterInput } from "@/lib/schemas/admin/audit-logs";
 import {
   handleAuditLogFailure,
@@ -9,13 +9,18 @@ import {
   type AuditLogData,
 } from "@/lib/utils/audit-alert";
 import { getClientIpAddress } from "@/lib/utils/audit-helpers";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
+
+async function requireAuditReadAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.auditRead);
+}
 
 /**
  * Get audit logs with filtering and pagination
  * Admin only
  */
 export async function getAuditLogs(filters: AuditLogFilterInput = {}) {
-  await requireAdmin();
+  await requireAuditReadAccess();
 
   const validated = auditLogFilterSchema.safeParse(filters);
   if (!validated.success) {
@@ -98,7 +103,7 @@ export async function getAuditLogs(filters: AuditLogFilterInput = {}) {
  * Admin only
  */
 export async function getAuditLogStats() {
-  await requireAdmin();
+  await requireAuditReadAccess();
 
   try {
     const [
@@ -209,7 +214,7 @@ export async function getAuditLogStats() {
  * Admin only
  */
 export async function getAuditLogFilterOptions() {
-  await requireAdmin();
+  await requireAuditReadAccess();
 
   try {
     const [actionTypes, resourceTypes, users] = await Promise.all([

@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { requireAuth } from "@/lib/rbac/access";
 import { revalidatePath } from "next/cache";
 import { RosterStatus } from "@prisma/client";
 import { createAuditLog } from "@/lib/actions/admin/audit-logs";
@@ -11,6 +11,7 @@ import {
   validateBulkShifts,
   type ValidationIssue,
 } from "@/lib/rosters/validation-service";
+import { hasRosterVenuePermission } from "./permission-scope";
 
 // Types
 export interface ShiftInput {
@@ -62,11 +63,6 @@ export async function addShift(
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "edit");
-    if (!hasPermission) {
-      return { success: false, error: "You don't have permission to edit rosters" };
-    }
-
     // Get roster and verify it's editable
     const roster = await prisma.roster.findUnique({
       where: { id: rosterId },
@@ -76,20 +72,15 @@ export async function addShift(
       return { success: false, error: "Roster not found" };
     }
 
-    if (roster.status !== RosterStatus.DRAFT) {
-      return { success: false, error: "Can only add shifts to draft rosters" };
+    const canEditRoster = await hasRosterVenuePermission(user.id, roster.venueId, [
+      "edit",
+    ]);
+    if (!canEditRoster) {
+      return { success: false, error: "You don't have permission to edit rosters" };
     }
 
-    // Check venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(roster.venueId)) {
-        return { success: false, error: "You don't have access to this roster" };
-      }
+    if (roster.status !== RosterStatus.DRAFT) {
+      return { success: false, error: "Can only add shifts to draft rosters" };
     }
 
     // Run validation unless skipped
@@ -176,11 +167,6 @@ export async function updateShift(
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "edit");
-    if (!hasPermission) {
-      return { success: false, error: "You don't have permission to edit shifts" };
-    }
-
     // Get shift with roster
     const existingShift = await prisma.rosterShift.findUnique({
       where: { id: shiftId },
@@ -191,20 +177,17 @@ export async function updateShift(
       return { success: false, error: "Shift not found" };
     }
 
-    if (existingShift.roster.status !== RosterStatus.DRAFT) {
-      return { success: false, error: "Can only edit shifts in draft rosters" };
+    const canEditRoster = await hasRosterVenuePermission(
+      user.id,
+      existingShift.roster.venueId,
+      ["edit"]
+    );
+    if (!canEditRoster) {
+      return { success: false, error: "You don't have permission to edit shifts" };
     }
 
-    // Check venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(existingShift.roster.venueId)) {
-        return { success: false, error: "You don't have access to this shift" };
-      }
+    if (existingShift.roster.status !== RosterStatus.DRAFT) {
+      return { success: false, error: "Can only edit shifts in draft rosters" };
     }
 
     // Build the updated shift data for validation
@@ -305,11 +288,6 @@ export async function deleteShift(shiftId: string) {
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "edit");
-    if (!hasPermission) {
-      return { success: false, error: "You don't have permission to delete shifts" };
-    }
-
     const shift = await prisma.rosterShift.findUnique({
       where: { id: shiftId },
       include: { roster: true },
@@ -319,20 +297,17 @@ export async function deleteShift(shiftId: string) {
       return { success: false, error: "Shift not found" };
     }
 
-    if (shift.roster.status !== RosterStatus.DRAFT) {
-      return { success: false, error: "Can only delete shifts from draft rosters" };
+    const canEditRoster = await hasRosterVenuePermission(
+      user.id,
+      shift.roster.venueId,
+      ["edit"]
+    );
+    if (!canEditRoster) {
+      return { success: false, error: "You don't have permission to delete shifts" };
     }
 
-    // Check venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(shift.roster.venueId)) {
-        return { success: false, error: "You don't have access to this shift" };
-      }
+    if (shift.roster.status !== RosterStatus.DRAFT) {
+      return { success: false, error: "Can only delete shifts from draft rosters" };
     }
 
     await prisma.rosterShift.delete({
@@ -389,11 +364,6 @@ export async function bulkAddShifts(
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "edit");
-    if (!hasPermission) {
-      return { success: false, error: "You don't have permission to edit rosters" };
-    }
-
     const roster = await prisma.roster.findUnique({
       where: { id: rosterId },
     });
@@ -402,20 +372,15 @@ export async function bulkAddShifts(
       return { success: false, error: "Roster not found" };
     }
 
-    if (roster.status !== RosterStatus.DRAFT) {
-      return { success: false, error: "Can only add shifts to draft rosters" };
+    const canEditRoster = await hasRosterVenuePermission(user.id, roster.venueId, [
+      "edit",
+    ]);
+    if (!canEditRoster) {
+      return { success: false, error: "You don't have permission to edit rosters" };
     }
 
-    // Check venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(roster.venueId)) {
-        return { success: false, error: "You don't have access to this roster" };
-      }
+    if (roster.status !== RosterStatus.DRAFT) {
+      return { success: false, error: "Can only add shifts to draft rosters" };
     }
 
     // Run validation unless skipped
@@ -608,11 +573,6 @@ export async function recheckRosterConflicts(rosterId: string) {
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "edit");
-    if (!hasPermission) {
-      return { success: false, error: "You don't have permission to check roster conflicts" };
-    }
-
     const roster = await prisma.roster.findUnique({
       where: { id: rosterId },
       include: {
@@ -629,6 +589,13 @@ export async function recheckRosterConflicts(rosterId: string) {
 
     if (!roster) {
       return { success: false, error: "Roster not found" };
+    }
+
+    const canEditRoster = await hasRosterVenuePermission(user.id, roster.venueId, [
+      "edit",
+    ]);
+    if (!canEditRoster) {
+      return { success: false, error: "You don't have permission to check roster conflicts" };
     }
 
     // Check conflicts for each shift

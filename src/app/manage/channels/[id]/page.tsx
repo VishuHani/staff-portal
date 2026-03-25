@@ -1,4 +1,4 @@
-import { requireAuth } from "@/lib/rbac/access";
+import { canAccess, requireAuth } from "@/lib/rbac/access";
 import { redirect, notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ChannelDetailClient } from "./channel-detail-client";
@@ -6,6 +6,17 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { getUnreadCount } from "@/lib/actions/notifications";
 import { getUnreadMessageCount } from "@/lib/actions/messages";
 import { getCurrentUser } from "@/lib/actions/auth";
+import { hasAnyPermission } from "@/lib/rbac/permissions";
+
+async function hasGlobalVenueScope(userId: string) {
+  return hasAnyPermission(userId, [
+    { resource: "stores", action: "view_all" },
+    { resource: "stores", action: "manage" },
+    { resource: "venues", action: "view_all" },
+    { resource: "venues", action: "manage" },
+    { resource: "admin", action: "manage_stores" },
+  ]);
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -43,18 +54,24 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     },
   });
 
-  const isAdmin = userWithRole?.role.name === "ADMIN";
+  const canAccessAllVenues = await hasGlobalVenueScope(user.id);
   const userVenueIds = userWithRole?.venues.map((uv) => uv.venue.id) || [];
   const canAccessChannel =
     !!channel &&
-    (isAdmin || channel.isPublic || channel.venues.some((venue) => userVenueIds.includes(venue.venueId)));
+    (canAccessAllVenues ||
+      channel.isPublic ||
+      channel.venues.some((venue) => userVenueIds.includes(venue.venueId)));
 
   return {
     title: canAccessChannel ? `${channel!.name} | Channel Management` : "Channel Not Found",
   };
 }
 
-async function getChannelData(channelId: string, isAdmin: boolean, userVenueIds: string[] | null) {
+async function getChannelData(
+  channelId: string,
+  hasGlobalVenueScope: boolean,
+  userVenueIds: string[] | null
+) {
   // Get channel with all details
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
@@ -128,11 +145,10 @@ async function getChannelData(channelId: string, isAdmin: boolean, userVenueIds:
     return null;
   }
 
-  // Build user filter based on user role
+  // Build user filter based on venue scope
   let userWhere: any = { active: true };
 
-  // Non-admin users only see users from their venues
-  if (!isAdmin) {
+  if (!hasGlobalVenueScope) {
     if (userVenueIds && userVenueIds.length > 0) {
       userWhere.venues = {
         some: {
@@ -187,19 +203,18 @@ export default async function ChannelDetailPage({ params }: { params: Promise<{ 
   const { id } = await params;
   const user = await requireAuth();
 
-  // Check if user has posts:manage permission (admin or manager)
+  const [hasManagePermission, canAccessAllVenues] = await Promise.all([
+    canAccess("posts", "manage"),
+    hasGlobalVenueScope(user.id),
+  ]);
+  if (!hasManagePermission) {
+    redirect("/dashboard");
+  }
+
   const userWithRole = await prisma.user.findUnique({
     where: { id: user.id },
     include: {
-      role: {
-        include: {
-          rolePermissions: {
-            include: {
-              permission: true,
-            },
-          },
-        },
-      },
+      role: true,
       venues: {
         include: {
           venue: {
@@ -213,27 +228,21 @@ export default async function ChannelDetailPage({ params }: { params: Promise<{ 
     },
   });
 
-  const hasManagePermission = userWithRole?.role.rolePermissions.some(
-    (rp) => rp.permission.resource === "posts" && rp.permission.action === "manage"
-  );
-
-  if (!hasManagePermission) {
-    redirect("/dashboard");
-  }
-
-  // Check if user is a manager
   const userVenues = userWithRole?.venues ?? [];
   const userVenueIds = userVenues.map((uv) => uv.venue.id);
-  const isAdmin = userWithRole?.role.name === "ADMIN";
 
-  const data = await getChannelData(id, isAdmin, isAdmin ? null : userVenueIds);
+  const data = await getChannelData(
+    id,
+    canAccessAllVenues,
+    canAccessAllVenues ? null : userVenueIds
+  );
 
   if (!data) {
     notFound();
   }
 
   const canAccessChannel =
-    userWithRole?.role.name === "ADMIN" ||
+    canAccessAllVenues ||
     data.channel.isPublic ||
     data.channel.venues.some((venue) => userVenueIds.includes(venue.venue.id));
 

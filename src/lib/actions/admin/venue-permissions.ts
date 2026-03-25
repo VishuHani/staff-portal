@@ -1,11 +1,12 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAdmin, requireAnyPermission } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import {
   type PermissionResource,
   type PermissionAction,
   type Permission,
+  hasAnyPermission,
   isAdmin,
 } from "@/lib/rbac/permissions";
 import { revalidatePath } from "next/cache";
@@ -17,6 +18,7 @@ import {
   notifyPermissionGranted,
   notifyPermissionRevoked,
 } from "@/lib/services/notifications";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 
 /**
  * VENUE-SCOPED PERMISSION MANAGEMENT ACTIONS
@@ -104,18 +106,11 @@ async function canManageUserVenuePermissions(
       return { allowed: false, error: "Cannot edit your own permissions" };
     }
 
-    // Rule 4: Check if current user has manage permission
-    const hasManagePermission = await prisma.rolePermission.findFirst({
-      where: {
-        roleId: currentUser.role.id,
-        permission: {
-          resource: "users",
-          action: {
-            in: ["edit_team", "manage"],
-          },
-        },
-      },
-    });
+    const hasManagePermission = await hasAnyPermission(currentUserId, [
+      { resource: "users", action: "edit_team" },
+      { resource: "users", action: "manage" },
+      { resource: "admin", action: "manage_permissions" },
+    ]);
 
     if (!hasManagePermission) {
       return { allowed: false, error: "You don't have permission to manage user permissions" };
@@ -1077,8 +1072,9 @@ export async function bulkGrantPermissionsByRole(
   permissionIds: string[]
 ) {
   try {
-    // Admin only
-    const currentUser = await requireAdmin();
+    const currentUser = await requireAnyPermission(
+      SYSTEM_PERMISSIONS.permissionsManage
+    );
 
     // Validate role
     const role = await prisma.role.findUnique({
@@ -1253,8 +1249,9 @@ export async function bulkGrantPermissionsToUsers(
   permissionIds: string[]
 ) {
   try {
-    // Admin only
-    const currentUser = await requireAdmin();
+    const currentUser = await requireAnyPermission(
+      SYSTEM_PERMISSIONS.permissionsManage
+    );
 
     if (userIds.length === 0) {
       return {

@@ -1,14 +1,15 @@
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { AuditLogsPageClient } from "./audit-logs-page-client";
 import {
   getAuditLogStats,
   getAuditLogFilterOptions,
 } from "@/lib/actions/admin/audit-logs";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 
 export default async function AdminAuditPage() {
-  const user = await requireAdmin();
+  const user = await requireAnyPermission(SYSTEM_PERMISSIONS.auditRead);
 
   const [statsResult, optionsResult] = await Promise.all([
     getAuditLogStats(),

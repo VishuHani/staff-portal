@@ -9,7 +9,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
-import { hasPermission } from "@/lib/rbac/permissions";
+import { hasAnyPermission, hasPermission } from "@/lib/rbac/permissions";
+import type { PermissionAction } from "@/lib/rbac/types";
 import { RosterStatus, NotificationType } from "@prisma/client";
 import { createNotification } from "@/lib/services/notifications";
 import { format } from "date-fns";
@@ -29,6 +30,10 @@ import {
   logActionError,
   revalidatePaths,
 } from "@/lib/utils/action-contract";
+import {
+  getScopedRosterVenueIds,
+  hasRosterVenuePermission,
+} from "./permission-scope";
 
 // ============================================================================
 // TYPES
@@ -134,25 +139,13 @@ async function createShiftsSnapshot(rosterId: string): Promise<ShiftSnapshot[]> 
 
 async function checkRosterAccess(
   userId: string,
-  userRole: string,
-  roster: { venueId: string; createdBy: string }
+  roster: { venueId: string; createdBy: string },
+  requiredActions: PermissionAction[]
 ): Promise<boolean> {
-  // Admins have access to all rosters
-  if (userRole === "ADMIN") return true;
-
   // Creator always has access
   if (roster.createdBy === userId) return true;
 
-  // Managers need venue access
-  if (userRole === "MANAGER") {
-    const userVenues = await prisma.userVenue.findMany({
-      where: { userId },
-      select: { venueId: true },
-    });
-    return userVenues.some((v) => v.venueId === roster.venueId);
-  }
-
-  return false;
+  return hasRosterVenuePermission(userId, roster.venueId, requiredActions);
 }
 
 // ============================================================================
@@ -177,12 +170,6 @@ export async function finalizeRoster(
   try {
     const user = await requireAuth();
 
-    // Check permission
-    const canManageRosters = await hasPermission(user.id, "rosters", "create");
-    if (!canManageRosters) {
-      return actionFailure("You don't have permission to manage rosters");
-    }
-
     // Get the roster
     const roster = await prisma.roster.findUnique({
       where: { id: rosterId },
@@ -200,7 +187,12 @@ export async function finalizeRoster(
     }
 
     // Check access
-    const hasAccess = await checkRosterAccess(user.id, user.role.name, roster);
+    const hasAccess = await checkRosterAccess(user.id, roster, [
+      "create",
+      "edit",
+      "approve",
+      "publish",
+    ]);
     if (!hasAccess) {
       return actionFailure("You don't have access to this roster");
     }
@@ -324,12 +316,6 @@ export async function publishRoster(rosterId: string): Promise<ApprovalResult> {
   try {
     const user = await requireAuth();
 
-    // Check permission
-    const canPublish = await hasPermission(user.id, "rosters", "publish");
-    if (!canPublish) {
-      return actionFailure("You don't have permission to publish rosters");
-    }
-
     // Get the roster with shifts and assigned staff
     const roster = await prisma.roster.findUnique({
       where: { id: rosterId },
@@ -353,7 +339,7 @@ export async function publishRoster(rosterId: string): Promise<ApprovalResult> {
     }
 
     // Check access
-    const hasAccess = await checkRosterAccess(user.id, user.role.name, roster);
+    const hasAccess = await checkRosterAccess(user.id, roster, ["publish"]);
     if (!hasAccess) {
       return actionFailure("You don't have access to this roster");
     }
@@ -614,12 +600,6 @@ export async function revertToDraft(
   try {
     const user = await requireAuth();
 
-    // Check permission
-    const canManageRosters = await hasPermission(user.id, "rosters", "edit");
-    if (!canManageRosters) {
-      return actionFailure("You don't have permission to manage rosters");
-    }
-
     const roster = await prisma.roster.findUnique({
       where: { id: rosterId },
       include: {
@@ -632,7 +612,7 @@ export async function revertToDraft(
     }
 
     // Check access
-    const hasAccess = await checkRosterAccess(user.id, user.role.name, roster);
+    const hasAccess = await checkRosterAccess(user.id, roster, ["edit"]);
     if (!hasAccess) {
       return actionFailure("You don't have access to this roster");
     }
@@ -765,14 +745,28 @@ export async function getFinalizedRosters(): Promise<{
   try {
     const user = await requireAuth();
 
-    // Build venue filter for managers
+    const [canReadFinalizedRosters, canViewAllRosters] = await Promise.all([
+      hasAnyPermission(user.id, [
+        { resource: "rosters", action: "view_all" },
+        { resource: "rosters", action: "view_team" },
+        { resource: "rosters", action: "publish" },
+        { resource: "rosters", action: "approve" },
+      ]),
+      hasPermission(user.id, "rosters", "view_all"),
+    ]);
+
+    if (!canReadFinalizedRosters) {
+      return actionFailure("You don't have permission to view finalized rosters");
+    }
+
     let venueFilter = {};
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      venueFilter = { venueId: { in: userVenues.map((v) => v.venueId) } };
+    if (!canViewAllRosters) {
+      const venueIds = await getScopedRosterVenueIds(user.id);
+      if (venueIds.length === 0) {
+        return actionSuccess({ rosters: [] });
+      }
+
+      venueFilter = { venueId: { in: venueIds } };
     }
 
     const rosters = await prisma.roster.findMany({
@@ -969,14 +963,28 @@ export async function getPendingApprovalsCount(): Promise<{
   try {
     const user = await requireAuth();
 
-    // Build venue filter for managers
+    const [canReadFinalizedRosters, canViewAllRosters] = await Promise.all([
+      hasAnyPermission(user.id, [
+        { resource: "rosters", action: "view_all" },
+        { resource: "rosters", action: "view_team" },
+        { resource: "rosters", action: "publish" },
+        { resource: "rosters", action: "approve" },
+      ]),
+      hasPermission(user.id, "rosters", "view_all"),
+    ]);
+
+    if (!canReadFinalizedRosters) {
+      return actionFailure("You don't have permission to view finalized rosters");
+    }
+
     let venueFilter = {};
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      venueFilter = { venueId: { in: userVenues.map((v) => v.venueId) } };
+    if (!canViewAllRosters) {
+      const venueIds = await getScopedRosterVenueIds(user.id);
+      if (venueIds.length === 0) {
+        return actionSuccess({ count: 0 });
+      }
+
+      venueFilter = { venueId: { in: venueIds } };
     }
 
     const count = await prisma.roster.count({

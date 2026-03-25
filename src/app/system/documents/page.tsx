@@ -1,13 +1,14 @@
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { DocumentsDashboardClient } from "./documents-dashboard-client";
 import { getDocumentAnalytics } from "@/lib/actions/documents/analytics";
 import { getAuditStats } from "@/lib/actions/documents/audit";
 import { prisma } from "@/lib/prisma";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 
 export default async function DocumentsDashboardPage() {
-  const user = await requireAdmin();
+  const user = await requireAnyPermission(SYSTEM_PERMISSIONS.documentsManage);
 
   // Fetch all venues for the venue selector
   const venues = await prisma.venue.findMany({
