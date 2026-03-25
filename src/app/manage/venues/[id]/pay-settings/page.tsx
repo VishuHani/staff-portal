@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/actions/auth";
+import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { hasPermission } from "@/lib/rbac/permissions";
 import { PaySettingsClient } from "./pay-settings-client";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { getUserVenueIds } from "@/lib/utils/venue";
@@ -10,44 +11,45 @@ interface PageProps {
 }
 
 export default async function VenuePaySettingsPage({ params }: PageProps) {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
-  }
+  const user = await requireAuth();
 
   const { id: venueId } = await params;
 
-  // Check access - must be admin or have venue pay config permission
-  const userWithPermissions = await prisma.user.findUnique({
-    where: { id: user.id },
-    include: {
-      role: { include: { rolePermissions: { include: { permission: true } } } },
-      venuePermissions: {
-        where: { venueId },
-        include: { permission: true },
+  const [canManageStores, canManageVenues, canViewStoresAll, canViewVenuesAll] =
+    await Promise.all([
+      hasPermission(user.id, "stores", "update", venueId),
+      hasPermission(user.id, "venues", "manage", venueId),
+      canAccess("stores", "view_all"),
+      canAccess("venues", "view_all"),
+    ]);
+
+  const venuePayPermissions = await prisma.userVenuePermission.findMany({
+    where: { userId: user.id, venueId },
+    select: {
+      permission: {
+        select: {
+          resource: true,
+          action: true,
+        },
       },
     },
   });
 
-  if (!userWithPermissions) {
-    redirect("/login");
-  }
-
-  const userIsAdmin = userWithPermissions.role?.name === "ADMIN";
-  const userIsManager = userWithPermissions.role?.name === "MANAGER";
-  const hasVenuePayPermission = userWithPermissions.venuePermissions.some(
-    (p) => p.permission.action === "manage" && p.permission.resource === "venue_pay_config"
+  const hasVenuePayPermission = venuePayPermissions.some(
+    (entry) =>
+      entry.permission.resource === "venue_pay_config" &&
+      entry.permission.action === "manage"
   );
+  const hasGlobalVenueScope = canViewStoresAll || canViewVenuesAll;
 
-  if (!userIsAdmin) {
+  if (!hasGlobalVenueScope) {
     const userVenueIds = await getUserVenueIds(user.id);
     if (!userVenueIds.includes(venueId)) {
       redirect("/unauthorized");
     }
   }
 
-  // Allow ADMIN, MANAGER, or users with explicit venue pay permission
-  if (!userIsAdmin && !userIsManager && !hasVenuePayPermission) {
+  if (!canManageStores && !canManageVenues && !hasVenuePayPermission) {
     redirect("/unauthorized");
   }
 

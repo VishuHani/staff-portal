@@ -31,6 +31,17 @@ export const userAuthContextSelect = Prisma.validator<Prisma.UserSelect>()({
       },
     },
   },
+  venuePermissions: {
+    select: {
+      venueId: true,
+      permission: {
+        select: {
+          resource: true,
+          action: true,
+        },
+      },
+    },
+  },
   venue: {
     select: {
       id: true,

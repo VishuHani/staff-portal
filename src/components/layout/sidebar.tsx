@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -33,8 +34,26 @@ import { Separator } from "@/components/ui/separator";
 
 interface SidebarProps {
   userRole: string;
+  rolePermissions?: Array<{
+    permission: {
+      resource: string;
+      action: string;
+    };
+  }>;
+  venuePermissions?: Array<{
+    venueId: string;
+    permission: {
+      resource: string;
+      action: string;
+    };
+  }>;
   className?: string;
   unreadMessageCount?: number;
+}
+
+interface NavPermission {
+  resource: string;
+  action: string;
 }
 
 interface NavItem {
@@ -43,10 +62,34 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   badge?: string | number;
   roles?: string[]; // If specified, only shown to these roles
+  permissions?: NavPermission[]; // If specified, shown when any permission matches
 }
 
-export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProps) {
+export function Sidebar({
+  userRole,
+  rolePermissions = [],
+  venuePermissions = [],
+  className,
+  unreadMessageCount,
+}: SidebarProps) {
   const pathname = usePathname();
+
+  const effectivePermissionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    rolePermissions.forEach((entry) => {
+      keys.add(`${entry.permission.resource}:${entry.permission.action}`);
+    });
+    venuePermissions.forEach((entry) => {
+      keys.add(`${entry.permission.resource}:${entry.permission.action}`);
+    });
+    return keys;
+  }, [rolePermissions, venuePermissions]);
+
+  const hasAnyPermission = (permissions?: NavPermission[]) =>
+    !!permissions &&
+    permissions.some((permission) =>
+      effectivePermissionKeys.has(`${permission.resource}:${permission.action}`)
+    );
 
   // Personal navigation items (/my/*)
   const personalItems: NavItem[] = [
@@ -100,60 +143,102 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       href: "/manage/rosters",
       icon: CalendarDays,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [
+        { resource: "rosters", action: "view_team" },
+        { resource: "rosters", action: "view_all" },
+      ],
     },
     {
       title: "Team Availability",
       href: "/manage/availability",
       icon: Calendar,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [
+        { resource: "availability", action: "view_team" },
+        { resource: "availability", action: "view_all" },
+      ],
     },
     {
       title: "Time-Off Approvals",
       href: "/manage/time-off",
       icon: Clock,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [
+        { resource: "timeoff", action: "approve" },
+        { resource: "timeoff", action: "view_team" },
+        { resource: "timeoff", action: "view_all" },
+      ],
     },
     {
       title: "Documents",
       href: "/manage/documents",
       icon: FolderOpen,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [
+        { resource: "documents", action: "read" },
+        { resource: "documents", action: "view_team" },
+        { resource: "documents", action: "view_all" },
+      ],
     },
     {
       title: "Send Documents",
       href: "/manage/documents/send",
       icon: Send,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [
+        { resource: "documents", action: "create" },
+        { resource: "documents", action: "assign" },
+      ],
     },
     {
       title: "Reports & Analytics",
       href: userRole === "ADMIN" ? "/system/reports" : "/manage/reports",
       icon: BarChart3,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [
+        { resource: "reports", action: "view_team" },
+        { resource: "reports", action: "view_all" },
+      ],
     },
     {
       title: "Channels",
       href: "/manage/channels",
       icon: Hash,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [{ resource: "posts", action: "manage" }],
     },
     {
       title: "Team Members",
       href: "/manage/users",
       icon: Users,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [
+        { resource: "users", action: "view_team" },
+        { resource: "users", action: "view_all" },
+        { resource: "users", action: "read" },
+      ],
     },
     {
       title: "Invite Users",
       href: "/manage/invites",
       icon: UserPlus,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [
+        { resource: "invites", action: "create" },
+        { resource: "invites", action: "view" },
+      ],
     },
     {
       title: "Venue Pay Settings",
       href: "/manage/venues",
       icon: DollarSign,
       roles: ["ADMIN", "MANAGER"],
+      permissions: [
+        { resource: "stores", action: "view" },
+        { resource: "stores", action: "view_all" },
+        { resource: "venues", action: "view" },
+        { resource: "venues", action: "view_all" },
+      ],
     },
   ];
 
@@ -164,42 +249,69 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
       href: "/system/roles",
       icon: Shield,
       roles: ["ADMIN"],
+      permissions: [
+        { resource: "roles", action: "manage" },
+        { resource: "admin", action: "manage_roles" },
+      ],
     },
     {
       title: "Venue Management",
       href: "/system/venues",
       icon: Store,
       roles: ["ADMIN"],
+      permissions: [
+        { resource: "stores", action: "manage" },
+        { resource: "stores", action: "view_all" },
+        { resource: "venues", action: "manage" },
+        { resource: "venues", action: "view_all" },
+      ],
     },
     {
       title: "Document Management",
       href: "/system/documents",
       icon: ClipboardList,
       roles: ["ADMIN"],
+      permissions: [{ resource: "documents", action: "manage" }],
     },
     {
       title: "User Invitations",
       href: "/system/invites",
       icon: UserPlus,
       roles: ["ADMIN"],
+      permissions: [
+        { resource: "invites", action: "view" },
+        { resource: "invites", action: "create" },
+      ],
     },
     {
       title: "Audit Logs",
       href: "/system/audit",
       icon: FileText,
       roles: ["ADMIN"],
+      permissions: [
+        { resource: "audit", action: "view_audit_logs" },
+        { resource: "audit", action: "read" },
+      ],
     },
     {
       title: "Announcements",
       href: "/system/announcements",
       icon: Megaphone,
       roles: ["ADMIN"],
+      permissions: [
+        { resource: "announcements", action: "manage" },
+        { resource: "announcements", action: "create" },
+      ],
     },
     {
       title: "Permissions",
       href: "/system/permissions",
       icon: Lock,
       roles: ["ADMIN"],
+      permissions: [
+        { resource: "roles", action: "manage" },
+        { resource: "admin", action: "manage_permissions" },
+      ],
     },
   ];
 
@@ -258,9 +370,26 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
   };
 
   const shouldShowItem = (item: NavItem) => {
-    if (!item.roles) return true;
-    return item.roles.includes(userRole);
+    const roleAllowed = item.roles ? item.roles.includes(userRole) : false;
+    const permissionAllowed = hasAnyPermission(item.permissions);
+
+    if (item.roles && item.permissions) {
+      return roleAllowed || permissionAllowed;
+    }
+
+    if (item.roles) {
+      return roleAllowed;
+    }
+
+    if (item.permissions) {
+      return permissionAllowed;
+    }
+
+    return true;
   };
+
+  const hasVisibleTeamItems = teamItems.some(shouldShowItem);
+  const hasVisibleSystemItems = systemItems.some(shouldShowItem);
 
   const renderNavItem = (item: NavItem) => {
     if (!shouldShowItem(item)) return null;
@@ -302,7 +431,7 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
         </div>
 
         {/* Team Management Section */}
-        {(userRole === "ADMIN" || userRole === "MANAGER") && (
+        {hasVisibleTeamItems && (
           <>
             <Separator />
             <div className="px-3 py-2">
@@ -315,7 +444,7 @@ export function Sidebar({ userRole, className, unreadMessageCount }: SidebarProp
         )}
 
         {/* System Administration Section - ADMIN only */}
-        {userRole === "ADMIN" && (
+        {hasVisibleSystemItems && (
           <>
             <Separator />
             <div className="px-3 py-2">

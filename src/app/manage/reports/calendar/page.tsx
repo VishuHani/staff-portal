@@ -35,14 +35,16 @@ function CalendarSkeleton() {
 export default async function ManagerCalendarViewPage() {
   const user = await requireAuth();
 
-  // Only allow managers with view_team permission
-  const hasAccess = await canAccess("reports", "view_team");
-  if (!hasAccess) {
+  const [canViewTeam, canViewAll] = await Promise.all([
+    canAccess("reports", "view_team"),
+    canAccess("reports", "view_all"),
+  ]);
+
+  if (!canViewTeam && !canViewAll) {
     redirect("/dashboard");
   }
 
-  // Redirect admins to their version
-  if (user.role.name === "ADMIN") {
+  if (!canViewTeam && canViewAll) {
     redirect("/system/reports/calendar");
   }
 

@@ -37,15 +37,16 @@ function ConflictsSkeleton() {
 export default async function ManagerConflictsReportPage() {
   const user = await requireAuth();
 
-  // Only allow managers with view_all permission
-  const hasAccess = await canAccess("reports", "view_all");
-  if (!hasAccess) {
-    redirect("/dashboard");
-  }
+  const [canViewAll, canViewTeam] = await Promise.all([
+    canAccess("reports", "view_all"),
+    canAccess("reports", "view_team"),
+  ]);
 
-  // Redirect managers to their version
-  if (user.role.name !== "ADMIN") {
-    redirect("/manage/reports/conflicts");
+  if (!canViewAll) {
+    if (canViewTeam) {
+      redirect("/manage/reports/conflicts");
+    }
+    redirect("/dashboard");
   }
 
   // Fetch venues and roles in parallel

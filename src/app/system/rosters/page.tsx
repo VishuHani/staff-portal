@@ -39,15 +39,17 @@ function RostersSkeleton() {
 export default async function AdminRostersPage() {
   const user = await requireAuth();
 
-  // Only admins can access this page
-  const hasAccess = await canAccess("rosters", "view_all");
-  if (!hasAccess) {
-    redirect("/dashboard");
-  }
+  const [canViewAll, canViewTeam, canApprove] = await Promise.all([
+    canAccess("rosters", "view_all"),
+    canAccess("rosters", "view_team"),
+    canAccess("rosters", "approve"),
+  ]);
 
-  // Redirect non-admins to manager version
-  if (user.role.name !== "ADMIN") {
-    redirect("/manage/rosters");
+  if (!canViewAll) {
+    if (canViewTeam) {
+      redirect("/manage/rosters");
+    }
+    redirect("/dashboard");
   }
 
   // Fetch all data
@@ -77,8 +79,7 @@ export default async function AdminRostersPage() {
           </p>
         </div>
 
-        {/* Pending Approvals Section (Admin Only) */}
-        {pendingCount !== undefined && pendingCount > 0 && (
+        {canApprove && pendingCount !== undefined && pendingCount > 0 && (
           <Suspense fallback={<Skeleton className="h-48 w-full" />}>
             <PendingApprovals />
           </Suspense>

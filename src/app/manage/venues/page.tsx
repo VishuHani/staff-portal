@@ -1,37 +1,35 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/actions/auth";
+import { requireAuth, canAccess } from "@/lib/rbac/access";
 import { prisma } from "@/lib/prisma";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ManageVenuesClient } from "./manage-venues-client";
 
 export default async function ManageVenuesPage() {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
-  }
+  const user = await requireAuth();
 
-  // Check access - must be admin or manager
-  const userWithRole = await prisma.user.findUnique({
-    where: { id: user.id },
-    include: {
-      role: true,
-    },
-  });
+  const [
+    canViewStores,
+    canViewStoresAll,
+    canViewVenues,
+    canViewVenuesAll,
+  ] = await Promise.all([
+    canAccess("stores", "view"),
+    canAccess("stores", "view_all"),
+    canAccess("venues", "view"),
+    canAccess("venues", "view_all"),
+  ]);
 
-  if (!userWithRole) {
-    redirect("/login");
-  }
+  const canViewAnyVenue =
+    canViewStores || canViewStoresAll || canViewVenues || canViewVenuesAll;
+  const canViewAllVenues = canViewStoresAll || canViewVenuesAll;
 
-  const userIsAdmin = userWithRole.role?.name === "ADMIN";
-  const userIsManager = userWithRole.role?.name === "MANAGER";
-
-  if (!userIsAdmin && !userIsManager) {
+  if (!canViewAnyVenue) {
     redirect("/unauthorized");
   }
 
-  // Get venues - admins see all, managers see only their assigned venues
+  // Global-scoped users see all venues; team-scoped users see assigned venues only.
   const venues = await prisma.venue.findMany({
-    where: userIsAdmin
+    where: canViewAllVenues
       ? {}
       : {
           userVenues: { some: { userId: user.id } },
