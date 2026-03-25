@@ -1,4 +1,5 @@
 import { NotificationType } from "@prisma/client";
+import { getAppBaseUrl, toAbsoluteAppUrl } from "@/lib/utils/app-url";
 
 export interface EmailTemplate {
   subject: string;
@@ -46,14 +47,17 @@ export function getEmailTemplate(
   title: string,
   message: string,
   link?: string | null,
-  appUrl: string = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+  appUrl: string = getAppBaseUrl()
 ): EmailTemplate {
   // SECURITY: Escape all user-generated content to prevent XSS
   const safeTitle = escapeHtml(title);
   const safeMessage = escapeHtml(message);
 
   // Validate and sanitize URLs - only allow relative paths or same domain
-  const actionLink = link ? `${appUrl}${link}` : `${appUrl}/notifications`;
+  const actionLink =
+    link && link.startsWith("/")
+      ? toAbsoluteAppUrl(link, appUrl)
+      : toAbsoluteAppUrl("/notifications", appUrl);
 
   // Base HTML template with professional styling
   const createTemplate = (

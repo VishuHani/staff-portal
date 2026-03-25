@@ -17,17 +17,31 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const [unreadResult, messageCountResult] = await Promise.all([
-    getUnreadCount({ userId: user.id }),
-    getUnreadMessageCount(),
-  ]);
-  const unreadCount = unreadResult.count || 0;
-  const unreadMessageCount = messageCountResult.success
-    ? (messageCountResult.count ?? 0)
-    : 0;
+  let unreadCount = 0;
+  let unreadMessageCount = 0;
+
+  try {
+    const [unreadResult, messageCountResult] = await Promise.all([
+      getUnreadCount({ userId: user.id }),
+      getUnreadMessageCount(),
+    ]);
+    unreadCount = unreadResult.count || 0;
+    unreadMessageCount = messageCountResult.success
+      ? (messageCountResult.count ?? 0)
+      : 0;
+  } catch (error) {
+    console.error("Error loading dashboard unread counters:", error);
+  }
 
   // Get role-specific dashboard data
-  const userRole = user.role.name;
+  const safeRoleName = user.role?.name ?? "STAFF";
+  const safeUser = {
+    ...user,
+    role: {
+      name: safeRoleName,
+    },
+  };
+  const userRole = safeRoleName;
 
   // Staff Dashboard
   if (userRole === "STAFF") {
@@ -35,7 +49,7 @@ export default async function DashboardPage() {
 
     return (
       <DashboardLayout
-        user={user}
+        user={safeUser}
         unreadCount={unreadCount}
         unreadMessageCount={unreadMessageCount}
       >
@@ -58,7 +72,7 @@ export default async function DashboardPage() {
 
     return (
       <DashboardLayout
-        user={user}
+        user={safeUser}
         unreadCount={unreadCount}
         unreadMessageCount={unreadMessageCount}
       >
@@ -81,7 +95,7 @@ export default async function DashboardPage() {
 
     return (
       <DashboardLayout
-        user={user}
+        user={safeUser}
         unreadCount={unreadCount}
         unreadMessageCount={unreadMessageCount}
       >
@@ -102,7 +116,7 @@ export default async function DashboardPage() {
   // Fallback (should never reach here)
   return (
     <DashboardLayout
-      user={user}
+      user={safeUser}
       unreadCount={unreadCount}
       unreadMessageCount={unreadMessageCount}
     >

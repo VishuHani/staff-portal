@@ -19,6 +19,7 @@ import { sendBrevoEmail } from "@/lib/services/email/brevo";
 import { prisma } from "@/lib/prisma";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { getAppBaseUrl } from "@/lib/utils/app-url";
 
 export interface AuditLogData {
   userId: string;
@@ -151,19 +152,22 @@ Immediate attention required.
 
 ---
 This is an automated alert from the Staff Portal Audit System.
-Server: ${process.env.NEXT_PUBLIC_APP_URL || "localhost"}
+Server: ${getAppBaseUrl()}
 Environment: ${process.env.NODE_ENV || "development"}
 `.trim();
 
     // Send email to all admins
     for (const email of adminEmails) {
       try {
-        await sendBrevoEmail({
+        const result = await sendBrevoEmail({
           to: email,
           subject,
           htmlContent: message.replace(/\n/g, "<br>"),
           textContent: message,
         });
+        if (!result.success) {
+          console.error(`Failed to deliver alert email to ${email}:`, result.error);
+        }
       } catch (emailError) {
         console.error(`Failed to send alert email to ${email}:`, emailError);
         // Continue to next admin even if one email fails

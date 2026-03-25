@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { format, parseISO } from "date-fns";
+import { format, isValid } from "date-fns";
 import Link from "next/link";
 import { 
   Plus, 
@@ -432,8 +432,17 @@ export function EnhancedInvitesPageClient({
       : <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Venue</Badge>;
   };
 
-  const formatDate = (date: Date) => {
-    return format(parseISO(date.toString()), "MMM d, yyyy HH:mm");
+  const formatDate = (value: Date | string | null | undefined) => {
+    if (!value) {
+      return "N/A";
+    }
+
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (!isValid(parsed)) {
+      return "N/A";
+    }
+
+    return format(parsed, "MMM d, yyyy HH:mm");
   };
 
   const handlePageChange = (newPage: number) => {

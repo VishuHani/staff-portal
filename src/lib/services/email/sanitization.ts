@@ -1,3 +1,5 @@
+import { getAppBaseUrl } from "@/lib/utils/app-url";
+
 const HTML_ESCAPE_MAP: Record<string, string> = {
   "&": "&amp;",
   "<": "&lt;",
@@ -70,19 +72,6 @@ const URL_ATTRIBUTES = new Set([
   "background",
   "xlink:href",
 ]);
-
-function getAppBaseUrl(): string {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (envUrl) {
-    return envUrl;
-  }
-
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return window.location.origin;
-  }
-
-  return "http://localhost:3000";
-}
 
 export function escapeHtml(input: string): string {
   return input.replace(/[&<>"'`=/]/g, (char) => HTML_ESCAPE_MAP[char] || char);

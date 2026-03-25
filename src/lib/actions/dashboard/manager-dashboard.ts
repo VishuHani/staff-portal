@@ -459,24 +459,40 @@ export async function getTeamSnapshot() {
  * Get all manager dashboard data at once
  */
 export async function getManagerDashboardData() {
-  const [heroStats, heatmap, distribution, trend, insights, snapshot] = await Promise.all([
-    getManagerHeroStats(),
-    getTeamCoverageHeatmap(),
-    getTeamAvailabilityDistribution(),
-    getCoverageTrend(),
-    getManagerAIInsights(),
-    getTeamSnapshot(),
-  ]);
+  try {
+    const [heroStats, heatmap, distribution, trend, insights, snapshot] = await Promise.all([
+      getManagerHeroStats(),
+      getTeamCoverageHeatmap(),
+      getTeamAvailabilityDistribution(),
+      getCoverageTrend(),
+      getManagerAIInsights(),
+      getTeamSnapshot(),
+    ]);
 
-  return {
-    success: true,
-    data: {
-      heroStats: heroStats.success ? heroStats.stats : null,
-      heatmap: heatmap.success ? heatmap.heatmap : null,
-      distribution: distribution.success ? distribution.distribution : [],
-      trend: trend.success ? trend.trends : [],
-      insights: insights.success ? insights.insights : [],
-      snapshot: snapshot.success ? snapshot.snapshot : [],
-    },
-  };
+    return {
+      success: true,
+      data: {
+        heroStats: heroStats.success ? heroStats.stats : null,
+        heatmap: heatmap.success ? heatmap.heatmap : null,
+        distribution: distribution.success ? distribution.distribution : [],
+        trend: trend.success ? trend.trends : [],
+        insights: insights.success ? insights.insights : [],
+        snapshot: snapshot.success ? snapshot.snapshot : [],
+      },
+    };
+  } catch (error) {
+    console.error("Error fetching manager dashboard data:", error);
+    return {
+      success: false,
+      error: "Failed to fetch manager dashboard data",
+      data: {
+        heroStats: null,
+        heatmap: null,
+        distribution: [],
+        trend: [],
+        insights: [],
+        snapshot: [],
+      },
+    };
+  }
 }

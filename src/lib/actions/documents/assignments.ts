@@ -7,6 +7,7 @@ import { AssignmentType, AssignmentStatus, DocumentType } from "@prisma/client";
 import { z } from "zod";
 import { getUserVenueIds } from "@/lib/utils/venue";
 import { revalidatePaths } from "@/lib/utils/action-contract";
+import { toAbsoluteAppUrl } from "@/lib/utils/app-url";
 
 // ============================================================================
 // Types
@@ -927,8 +928,7 @@ export async function createProspectiveUserAssignment(
           const { sendBrevoEmail } = await import("@/lib/services/email/brevo");
           const { getInvitationEmailTemplate } = await import("@/lib/services/email/templates");
           
-          const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-          const inviteLink = `${appUrl}/signup?invite=${token}`;
+          const inviteLink = toAbsoluteAppUrl(`/signup?invite=${token}`);
           
           const emailTemplate = getInvitationEmailTemplate({
             inviterName: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
@@ -938,11 +938,18 @@ export async function createProspectiveUserAssignment(
             expirationDays: 7,
           });
           
-          await sendBrevoEmail({
+          const sendResult = await sendBrevoEmail({
             to: normalizedEmail,
             subject: emailTemplate.subject,
             htmlContent: emailTemplate.htmlContent,
           });
+
+          if (!sendResult.success) {
+            console.error("Failed to deliver invitation email:", {
+              email: normalizedEmail,
+              error: sendResult.error,
+            });
+          }
         } catch (emailError) {
           console.error("Failed to send invitation email:", emailError);
           // Continue even if email fails - the invitation is still created
@@ -1307,8 +1314,7 @@ export async function resendProspectiveUserInvitation(
       const { sendBrevoEmail } = await import("@/lib/services/email/brevo");
       const { getInvitationEmailTemplate } = await import("@/lib/services/email/templates");
       
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-      const inviteLink = `${appUrl}/signup?invite=${token}`;
+      const inviteLink = toAbsoluteAppUrl(`/signup?invite=${token}`);
       
       const emailTemplate = getInvitationEmailTemplate({
         inviterName: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
@@ -1318,11 +1324,18 @@ export async function resendProspectiveUserInvitation(
         expirationDays: 7,
       });
       
-      await sendBrevoEmail({
+      const sendResult = await sendBrevoEmail({
         to: normalizedEmail,
         subject: emailTemplate.subject,
         htmlContent: emailTemplate.htmlContent,
       });
+
+      if (!sendResult.success) {
+        console.error("Failed to deliver invitation email:", {
+          email: normalizedEmail,
+          error: sendResult.error,
+        });
+      }
     } catch (emailError) {
       console.error("Failed to send invitation email:", emailError);
       // Continue even if email fails - the invitation is still created
