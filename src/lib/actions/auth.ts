@@ -23,13 +23,18 @@ import {
   userAuthContextSelect,
   type UserAuthContext,
 } from "@/lib/users/selectors";
+import { toAbsoluteAppUrl } from "@/lib/utils/app-url";
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 export async function login(formData: LoginInput) {
   // RATE LIMITING: Prevent brute force attacks
   // Use IP + email as identifier for more granular control
   const headersList = await headers();
   const ip = getClientIp(headersList);
-  const email = formData.email || "unknown";
+  const email = formData.email ? normalizeEmail(formData.email) : "unknown";
   const identifier = `${ip}:${email}`;
 
   const { success, reset, remaining } = await rateLimit.login(identifier);
@@ -50,7 +55,8 @@ export async function login(formData: LoginInput) {
     };
   }
 
-  const { email: validatedEmail, password } = validatedFields.data;
+  const { email: validatedEmailInput, password } = validatedFields.data;
+  const validatedEmail = normalizeEmail(validatedEmailInput);
   const supabase = await createClient();
 
   // Sign in with Supabase
@@ -151,7 +157,9 @@ export async function signup(formData: SignupInput) {
     };
   }
 
-  const { email, password, firstName, lastName, phone } = validatedFields.data;
+  const { email: rawEmail, password, firstName, lastName, phone } =
+    validatedFields.data;
+  const email = normalizeEmail(rawEmail);
   const supabase = await createClient();
 
   // Check if user already exists
@@ -168,7 +176,7 @@ export async function signup(formData: SignupInput) {
     email,
     password,
     options: {
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      emailRedirectTo: toAbsoluteAppUrl("/auth/callback"),
     },
   });
 
@@ -180,13 +188,25 @@ export async function signup(formData: SignupInput) {
     return { error: "Failed to create user" };
   }
 
+  const identities = data.user.identities ?? [];
+  if (identities.length === 0) {
+    return {
+      error:
+        "An account with this email already exists. Please sign in or reset your password.",
+    };
+  }
+
   // Create user in our database with default staff role
   const staffRole = await prisma.role.findUnique({
     where: { name: "STAFF" },
   });
 
   if (!staffRole) {
-    await supabase.auth.admin.deleteUser(data.user.id);
+    try {
+      await supabase.auth.admin.deleteUser(data.user.id);
+    } catch (deleteError) {
+      console.error("Error cleaning up Supabase user after failed signup:", deleteError);
+    }
     return { error: "System error: Staff role not found" };
   }
 
@@ -295,7 +315,7 @@ export async function resetPassword(formData: ResetPasswordInput) {
   const supabase = await createClient();
 
   const { error } = await supabase.auth.resetPasswordForEmail(validatedEmail, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/reset-password`,
+    redirectTo: toAbsoluteAppUrl("/auth/reset-password"),
   });
 
   if (error) {
@@ -338,8 +358,25 @@ export async function completePasswordReset(formData: UpdatePasswordInput) {
   }
 
   const hashedPassword = await bcrypt.hash(newPassword, 10);
+  const normalizedEmail = supabaseUser.email ? normalizeEmail(supabaseUser.email) : null;
+  const prismaUser =
+    (await prisma.user.findUnique({
+      where: { id: supabaseUser.id },
+      select: { id: true },
+    })) ||
+    (normalizedEmail
+      ? await prisma.user.findUnique({
+          where: { email: normalizedEmail },
+          select: { id: true },
+        })
+      : null);
+
+  if (!prismaUser) {
+    return { error: "User account not found in application database." };
+  }
+
   await prisma.user.update({
-    where: { id: supabaseUser.id },
+    where: { id: prismaUser.id },
     data: { password: hashedPassword },
   });
 
@@ -360,10 +397,31 @@ export async function getCurrentUser(): Promise<UserAuthContext | null> {
     return null;
   }
 
-  const user = await prisma.user.findUnique({
+  const userById = await prisma.user.findUnique({
     where: { id: supabaseUser.id },
     select: userAuthContextSelect,
   });
 
-  return user;
+  if (userById) {
+    return userById;
+  }
+
+  const normalizedEmail = supabaseUser.email ? normalizeEmail(supabaseUser.email) : null;
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const userByEmail = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    select: userAuthContextSelect,
+  });
+
+  if (userByEmail) {
+    console.warn(
+      "Auth identity mismatch detected; resolved user by email fallback",
+      JSON.stringify({ supabaseUserId: supabaseUser.id, prismaUserId: userByEmail.id })
+    );
+  }
+
+  return userByEmail;
 }

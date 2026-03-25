@@ -14,45 +14,56 @@ async function calculateSystemHealth() {
   const last7Days = subDays(today, 7);
 
   try {
-    // 1. Check for failed actions in audit logs (errors)
-    const failedActions = await prisma.auditLog.count({
-      where: {
-        createdAt: { gte: last24Hours },
-        actionType: { in: ["ERROR", "FAILED", "CONFLICT_RESOLUTION_FAILED"] },
-      },
-    });
+    const [
+      failedActions,
+      oldPendingRequests,
+      rosterConflicts,
+      activeUsersLast24h,
+      missedRosters,
+      totalUsers,
+    ] = await Promise.all([
+      // 1. Check for failed actions in audit logs (errors)
+      prisma.auditLog.count({
+        where: {
+          createdAt: { gte: last24Hours },
+          actionType: { in: ["ERROR", "FAILED", "CONFLICT_RESOLUTION_FAILED"] },
+        },
+      }),
 
-    // 2. Check pending time-off requests older than 7 days (backlog)
-    const oldPendingRequests = await prisma.timeOffRequest.count({
-      where: {
-        status: "PENDING",
-        createdAt: { lte: last7Days },
-      },
-    });
+      // 2. Check pending time-off requests older than 7 days (backlog)
+      prisma.timeOffRequest.count({
+        where: {
+          status: "PENDING",
+          createdAt: { lte: last7Days },
+        },
+      }),
 
-    // 3. Check for roster conflicts
-    const rosterConflicts = await prisma.rosterShift.count({
-      where: {
-        hasConflict: true,
-        date: { gte: today },
-      },
-    });
+      // 3. Check for roster conflicts
+      prisma.rosterShift.count({
+        where: {
+          hasConflict: true,
+          date: { gte: today },
+        },
+      }),
 
-    // 4. Check user activity (active engagement)
-    const activeUsersLast24h = await prisma.auditLog.groupBy({
-      by: ["userId"],
-      where: {
-        createdAt: { gte: last24Hours },
-      },
-    });
+      // 4. Check user activity (active engagement)
+      prisma.auditLog.groupBy({
+        by: ["userId"],
+        where: {
+          createdAt: { gte: last24Hours },
+        },
+      }),
 
-    // 5. Check for unpublished rosters in the past (missed schedules)
-    const missedRosters = await prisma.roster.count({
-      where: {
-        status: "DRAFT",
-        endDate: { lt: today },
-      },
-    });
+      // 5. Check for unpublished rosters in the past (missed schedules)
+      prisma.roster.count({
+        where: {
+          status: "DRAFT",
+          endDate: { lt: today },
+        },
+      }),
+
+      prisma.user.count({ where: { active: true } }),
+    ]);
 
     // Calculate health score (0-100)
     let healthScore = 100;
@@ -70,7 +81,6 @@ async function calculateSystemHealth() {
     healthScore -= Math.min(20, missedRosters * 10);
 
     // Bonus for active users (up to 10 points back if engagement is high)
-    const totalUsers = await prisma.user.count({ where: { active: true } });
     const engagementRate = totalUsers > 0 ? (activeUsersLast24h.length / totalUsers) * 100 : 0;
     if (engagementRate > 50) {
       healthScore += 10;
@@ -109,79 +119,81 @@ export async function getAdminGlobalStats() {
 
   try {
     const today = new Date();
-    const last30Days = subDays(today, 30);
-
-    // Total active staff
-    const totalActiveStaff = await prisma.user.count({
-      where: { active: true },
-    });
-
-    // Total inactive staff
-    const totalInactiveStaff = await prisma.user.count({
-      where: { active: false },
-    });
-
-    // Calculate multi-venue average coverage
-    const venues = await prisma.venue.findMany({
-      where: { active: true },
-      select: { id: true },
-    });
-
-    let totalCoverage = 0;
-    for (const venue of venues) {
-      const venueUsers = await prisma.userVenue.count({
-        where: {
-          venueId: venue.id,
-          user: { active: true },
-        },
-      });
-
-      const todayAvailable = await prisma.availability.count({
-        where: {
-          dayOfWeek: today.getDay(),
-          isAvailable: true,
-          user: {
-            venues: {
-              some: { venueId: venue.id },
-            },
-          },
-        },
-      });
-
-      if (venueUsers > 0) {
-        totalCoverage += (todayAvailable / venueUsers) * 100;
-      }
-    }
-
-    const avgCoverage = venues.length > 0 ? Math.round(totalCoverage / venues.length) : 0;
-
-    // System health - now using comprehensive calculation
-    const healthData = await calculateSystemHealth();
-    const systemHealth = healthData.status;
-
-    // Pending actions
-    const pendingTimeOff = await prisma.timeOffRequest.count({
-      where: { status: "PENDING" },
-    });
-
-    // Real conflicts count from RosterShift
-    const conflictsCount = await prisma.rosterShift.count({
-      where: {
-        hasConflict: true,
-        date: { gte: today },
-      },
-    });
-
-    const pendingActions = pendingTimeOff + conflictsCount;
-
-    // Active users today
     const todayStart = startOfDay(today);
-    const activeUsersToday = await prisma.auditLog.groupBy({
-      by: ["userId"],
-      where: {
-        createdAt: { gte: todayStart },
-      },
-    });
+
+    const [
+      totalActiveStaff,
+      totalInactiveStaff,
+      venues,
+      healthData,
+      pendingTimeOff,
+      conflictsCount,
+      activeUsersToday,
+    ] = await Promise.all([
+      prisma.user.count({ where: { active: true } }),
+      prisma.user.count({ where: { active: false } }),
+      prisma.venue.findMany({
+        where: { active: true },
+        select: { id: true },
+      }),
+      calculateSystemHealth(),
+      prisma.timeOffRequest.count({ where: { status: "PENDING" } }),
+      prisma.rosterShift.count({
+        where: {
+          hasConflict: true,
+          date: { gte: today },
+        },
+      }),
+      prisma.auditLog.groupBy({
+        by: ["userId"],
+        where: {
+          createdAt: { gte: todayStart },
+        },
+      }),
+    ]);
+
+    const venueCoverages = await Promise.all(
+      venues.map(async (venue) => {
+        const [venueUsers, todayAvailable] = await Promise.all([
+          prisma.userVenue.count({
+            where: {
+              venueId: venue.id,
+              user: { active: true },
+            },
+          }),
+          prisma.availability.count({
+            where: {
+              dayOfWeek: today.getDay(),
+              isAvailable: true,
+              user: {
+                venues: {
+                  some: { venueId: venue.id },
+                },
+              },
+            },
+          }),
+        ]);
+
+        if (venueUsers <= 0) {
+          return null;
+        }
+        return (todayAvailable / venueUsers) * 100;
+      })
+    );
+
+    const validVenueCoverage = venueCoverages.filter(
+      (coverage): coverage is number => coverage !== null
+    );
+    const avgCoverage =
+      validVenueCoverage.length > 0
+        ? Math.round(
+            validVenueCoverage.reduce((sum, value) => sum + value, 0) /
+              validVenueCoverage.length
+          )
+        : 0;
+
+    const systemHealth = healthData.status;
+    const pendingActions = pendingTimeOff + conflictsCount;
 
     return {
       success: true,
@@ -212,7 +224,6 @@ export async function getVenueCoverageComparison() {
 
   try {
     const today = new Date();
-    const weekStart = startOfWeek(today, { weekStartsOn: 0 });
 
     const venues = await prisma.venue.findMany({
       where: { active: true },
@@ -223,58 +234,68 @@ export async function getVenueCoverageComparison() {
       take: 10, // Limit to 10 venues for chart readability
     });
 
-    const comparison = [];
-
-    for (const venue of venues) {
-      const venueUsers = await prisma.user.findMany({
-        where: {
-          active: true,
-          venues: {
-            some: { venueId: venue.id },
-          },
-        },
-        select: { id: true },
-      });
-
-      const venueUserIds = venueUsers.map((u) => u.id);
-      const totalStaff = venueUserIds.length;
-
-      if (totalStaff === 0) continue;
-
-      // Today's coverage
-      const todayAvailable = await prisma.availability.count({
-        where: {
-          userId: { in: venueUserIds },
-          dayOfWeek: today.getDay(),
-          isAvailable: true,
-        },
-      });
-
-      const todayCoverage = Math.round((todayAvailable / totalStaff) * 100);
-
-      // Week average
-      let weekTotal = 0;
-      for (let i = 0; i < 7; i++) {
-        const dayAvailable = await prisma.availability.count({
+    const comparison = await Promise.all(
+      venues.map(async (venue) => {
+        const venueUsers = await prisma.user.findMany({
           where: {
-            userId: { in: venueUserIds },
-            dayOfWeek: i,
-            isAvailable: true,
+            active: true,
+            venues: {
+              some: { venueId: venue.id },
+            },
           },
+          select: { id: true },
         });
-        weekTotal += dayAvailable;
-      }
-      const weekAvg = Math.round((weekTotal / (7 * totalStaff)) * 100);
 
-      comparison.push({
-        venue: venue.name,
-        today: todayCoverage,
-        weekAvg,
-        monthAvg: weekAvg, // Simplified - using week avg
-      });
-    }
+        const venueUserIds = venueUsers.map((u) => u.id);
+        const totalStaff = venueUserIds.length;
 
-    return { success: true, comparison };
+        if (totalStaff === 0) {
+          return null;
+        }
+
+        const [todayAvailable, weeklyAvailability] = await Promise.all([
+          prisma.availability.count({
+            where: {
+              userId: { in: venueUserIds },
+              dayOfWeek: today.getDay(),
+              isAvailable: true,
+            },
+          }),
+          Promise.all(
+            Array.from({ length: 7 }, (_, dayOfWeek) =>
+              prisma.availability.count({
+                where: {
+                  userId: { in: venueUserIds },
+                  dayOfWeek,
+                  isAvailable: true,
+                },
+              })
+            )
+          ),
+        ]);
+
+        const todayCoverage = Math.round((todayAvailable / totalStaff) * 100);
+        const weekTotal = weeklyAvailability.reduce((sum, value) => sum + value, 0);
+        const weekAvg = Math.round((weekTotal / (7 * totalStaff)) * 100);
+
+        return {
+          venue: venue.name,
+          today: todayCoverage,
+          weekAvg,
+          monthAvg: weekAvg, // Simplified - using week avg
+        };
+      })
+    );
+
+    return {
+      success: true,
+      comparison: comparison.filter(
+        (
+          item
+        ): item is { venue: string; today: number; weekAvg: number; monthAvg: number } =>
+          item !== null
+      ),
+    };
   } catch (error) {
     console.error("Error fetching venue coverage comparison:", error);
     return { error: "Failed to fetch venue coverage comparison" };
@@ -303,15 +324,17 @@ export async function getUserActivityStats() {
     const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const hours = Array.from({ length: 24 }, (_, i) => i);
 
+    const countByCell = new Map<string, number>();
+    for (const log of auditLogs) {
+      const key = `${format(log.createdAt, "EEE")}:${log.createdAt.getHours()}`;
+      countByCell.set(key, (countByCell.get(key) ?? 0) + 1);
+    }
+
     const heatmapData = [];
 
     for (const day of daysOfWeek) {
       for (const hour of hours) {
-        const count = auditLogs.filter((log) => {
-          const logDay = format(log.createdAt, "EEE");
-          const logHour = log.createdAt.getHours();
-          return logDay === day && logHour === hour;
-        }).length;
+        const count = countByCell.get(`${day}:${hour}`) ?? 0;
 
         heatmapData.push({
           x: hour,
@@ -411,46 +434,50 @@ export async function getApprovalMetrics() {
 
   try {
     const today = new Date();
-    const metrics = [];
-
-    for (let i = 11; i >= 0; i--) {
+    const weekRanges = Array.from({ length: 12 }, (_, index) => {
+      const i = 11 - index;
       const weekStart = startOfWeek(subWeeks(today, i), { weekStartsOn: 0 });
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 7);
+      return { weekStart, weekEnd };
+    });
 
-      const approvedRequests = await prisma.timeOffRequest.findMany({
-        where: {
-          status: { in: ["APPROVED", "REJECTED"] },
-          reviewedAt: {
-            gte: weekStart,
-            lt: weekEnd,
+    const metrics = await Promise.all(
+      weekRanges.map(async ({ weekStart, weekEnd }) => {
+        const approvedRequests = await prisma.timeOffRequest.findMany({
+          where: {
+            status: { in: ["APPROVED", "REJECTED"] },
+            reviewedAt: {
+              gte: weekStart,
+              lt: weekEnd,
+            },
           },
-        },
-        select: {
-          createdAt: true,
-          reviewedAt: true,
-        },
-      });
+          select: {
+            createdAt: true,
+            reviewedAt: true,
+          },
+        });
 
-      let totalDays = 0;
-      approvedRequests.forEach((req) => {
-        if (req.reviewedAt) {
-          const diffMs = req.reviewedAt.getTime() - req.createdAt.getTime();
-          const diffDays = diffMs / (1000 * 60 * 60 * 24);
-          totalDays += diffDays;
-        }
-      });
+        let totalDays = 0;
+        approvedRequests.forEach((req) => {
+          if (req.reviewedAt) {
+            const diffMs = req.reviewedAt.getTime() - req.createdAt.getTime();
+            const diffDays = diffMs / (1000 * 60 * 60 * 24);
+            totalDays += diffDays;
+          }
+        });
 
-      const avgDays = approvedRequests.length > 0
-        ? totalDays / approvedRequests.length
-        : 0;
+        const avgDays = approvedRequests.length > 0
+          ? totalDays / approvedRequests.length
+          : 0;
 
-      metrics.push({
-        week: format(weekStart, "MMM d"),
-        avgDays: Math.round(avgDays * 10) / 10, // Round to 1 decimal
-        target: 2, // Target: 2 days
-      });
-    }
+        return {
+          week: format(weekStart, "MMM d"),
+          avgDays: Math.round(avgDays * 10) / 10, // Round to 1 decimal
+          target: 2, // Target: 2 days
+        };
+      })
+    );
 
     return { success: true, metrics };
   } catch (error) {
@@ -510,27 +537,44 @@ export async function getRecentAuditLogs() {
  * Get all admin dashboard data at once
  */
 export async function getAdminDashboardData() {
-  const [globalStats, venueComparison, activityHeatmap, actionDist, roleDist, approvalMetrics, auditLogs] =
-    await Promise.all([
-      getAdminGlobalStats(),
-      getVenueCoverageComparison(),
-      getUserActivityStats(),
-      getActionDistribution(),
-      getRoleDistribution(),
-      getApprovalMetrics(),
-      getRecentAuditLogs(),
-    ]);
+  try {
+    const [globalStats, venueComparison, activityHeatmap, actionDist, roleDist, approvalMetrics, auditLogs] =
+      await Promise.all([
+        getAdminGlobalStats(),
+        getVenueCoverageComparison(),
+        getUserActivityStats(),
+        getActionDistribution(),
+        getRoleDistribution(),
+        getApprovalMetrics(),
+        getRecentAuditLogs(),
+      ]);
 
-  return {
-    success: true,
-    data: {
-      globalStats: globalStats.success ? globalStats.stats : null,
-      venueComparison: venueComparison.success ? venueComparison.comparison : [],
-      activityHeatmap: activityHeatmap.success ? activityHeatmap.heatmap : null,
-      actionDistribution: actionDist.success ? actionDist.distribution : [],
-      roleDistribution: roleDist.success ? roleDist.distribution : [],
-      approvalMetrics: approvalMetrics.success ? approvalMetrics.metrics : [],
-      auditLogs: auditLogs.success ? auditLogs.logs : [],
-    },
-  };
+    return {
+      success: true,
+      data: {
+        globalStats: globalStats.success ? globalStats.stats : null,
+        venueComparison: venueComparison.success ? venueComparison.comparison : [],
+        activityHeatmap: activityHeatmap.success ? activityHeatmap.heatmap : null,
+        actionDistribution: actionDist.success ? actionDist.distribution : [],
+        roleDistribution: roleDist.success ? roleDist.distribution : [],
+        approvalMetrics: approvalMetrics.success ? approvalMetrics.metrics : [],
+        auditLogs: auditLogs.success ? auditLogs.logs : [],
+      },
+    };
+  } catch (error) {
+    console.error("Error fetching admin dashboard data:", error);
+    return {
+      success: false,
+      error: "Failed to fetch admin dashboard data",
+      data: {
+        globalStats: null,
+        venueComparison: [],
+        activityHeatmap: null,
+        actionDistribution: [],
+        roleDistribution: [],
+        approvalMetrics: [],
+        auditLogs: [],
+      },
+    };
+  }
 }

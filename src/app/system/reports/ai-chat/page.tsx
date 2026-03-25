@@ -29,15 +29,21 @@ function ChatSkeleton() {
 export default async function ManagerAIChatPage() {
   const user = await requireAuth();
 
-  // Only allow managers with view_ai permission
-  const hasAccess = await canAccess("reports", "view_ai");
-  if (!hasAccess) {
+  const [canViewAI, canViewAll, canViewTeam] = await Promise.all([
+    canAccess("reports", "view_ai"),
+    canAccess("reports", "view_all"),
+    canAccess("reports", "view_team"),
+  ]);
+
+  if (!canViewAI) {
     redirect("/dashboard");
   }
 
-  // Redirect managers to their version
-  if (user.role.name !== "ADMIN") {
-    redirect("/manage/reports/ai-chat");
+  if (!canViewAll) {
+    if (canViewTeam) {
+      redirect("/manage/reports/ai-chat");
+    }
+    redirect("/dashboard");
   }
 
   return (

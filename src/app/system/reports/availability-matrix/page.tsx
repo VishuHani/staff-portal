@@ -31,15 +31,16 @@ function MatrixSkeleton() {
 export default async function ManagerAvailabilityMatrixPage() {
   const user = await requireAuth();
 
-  // Only allow managers with view_all permission
-  const hasAccess = await canAccess("reports", "view_all");
-  if (!hasAccess) {
-    redirect("/dashboard");
-  }
+  const [canViewAll, canViewTeam] = await Promise.all([
+    canAccess("reports", "view_all"),
+    canAccess("reports", "view_team"),
+  ]);
 
-  // Redirect managers to their version
-  if (user.role.name !== "ADMIN") {
-    redirect("/manage/reports/availability-matrix");
+  if (!canViewAll) {
+    if (canViewTeam) {
+      redirect("/manage/reports/availability-matrix");
+    }
+    redirect("/dashboard");
   }
 
   // Fetch venues and roles in parallel

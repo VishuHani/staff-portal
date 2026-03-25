@@ -19,7 +19,20 @@ interface DashboardLayoutProps {
     lastName?: string | null;
     role: {
       name: string;
+      rolePermissions?: Array<{
+        permission: {
+          resource: string;
+          action: string;
+        };
+      }>;
     };
+    venuePermissions?: Array<{
+      venueId: string;
+      permission: {
+        resource: string;
+        action: string;
+      };
+    }>;
   };
   unreadCount?: number;
   unreadMessageCount?: number;
@@ -39,7 +52,12 @@ export function DashboardLayout({ user, unreadCount = 0, unreadMessageCount = 0,
           {/* Desktop Sidebar */}
           <aside className="hidden w-64 border-r bg-background lg:block">
             <div className="h-full overflow-y-auto p-4">
-              <Sidebar userRole={user.role.name} unreadMessageCount={unreadMessageCount} />
+              <Sidebar
+                userRole={user.role.name}
+                rolePermissions={user.role.rolePermissions}
+                venuePermissions={user.venuePermissions}
+                unreadMessageCount={unreadMessageCount}
+              />
             </div>
           </aside>
 
@@ -50,7 +68,12 @@ export function DashboardLayout({ user, unreadCount = 0, unreadMessageCount = 0,
                 <SheetTitle>Navigation</SheetTitle>
               </SheetHeader>
               <div className="h-full overflow-y-auto p-4">
-                <Sidebar userRole={user.role.name} unreadMessageCount={unreadMessageCount} />
+                <Sidebar
+                  userRole={user.role.name}
+                  rolePermissions={user.role.rolePermissions}
+                  venuePermissions={user.venuePermissions}
+                  unreadMessageCount={unreadMessageCount}
+                />
               </div>
             </SheetContent>
           </Sheet>

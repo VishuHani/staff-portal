@@ -19,6 +19,8 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { env, constants } from "@/lib/config";
 
+const RATE_LIMIT_TIMEOUT_MS = 1500;
+
 // In-memory store for development (resets on server restart)
 class InMemoryRateLimiter {
   private cache: Map<string, { count: number; resetAt: number }> = new Map();
@@ -121,13 +123,30 @@ async function rateLimitAction(
   remaining: number;
 }> {
   if (upstashRateLimiter) {
-    // Use Upstash (production)
-    const result = await upstashRateLimiter.limit(identifier);
-    return {
-      success: result.success,
-      reset: result.reset,
-      remaining: result.remaining,
-    };
+    // Use Upstash (production), but fail open on timeout/errors so auth doesn't hang.
+    try {
+      const result = await Promise.race([
+        upstashRateLimiter.limit(identifier),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error("Rate limit request timed out"));
+          }, RATE_LIMIT_TIMEOUT_MS);
+        }),
+      ]);
+
+      return {
+        success: result.success,
+        reset: result.reset,
+        remaining: result.remaining,
+      };
+    } catch (error) {
+      console.error("Rate limiter unavailable, failing open:", error);
+      return {
+        success: true,
+        reset: 0,
+        remaining: limit,
+      };
+    }
   } else {
     // Use in-memory (development)
     return await inMemoryLimiter.limit(identifier, limit, windowMs);

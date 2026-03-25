@@ -18,9 +18,15 @@ export default async function AdminRosterPage({ params }: AdminRosterPageProps) 
   const { id } = await params;
   const user = await requireAuth();
 
-  // Only admins can access
-  const hasAccess = await canAccess("rosters", "view_all");
-  if (!hasAccess || user.role.name !== "ADMIN") {
+  const [canViewAll, canViewTeam] = await Promise.all([
+    canAccess("rosters", "view_all"),
+    canAccess("rosters", "view_team"),
+  ]);
+
+  if (!canViewAll) {
+    if (canViewTeam) {
+      redirect(`/manage/rosters/${id}`);
+    }
     redirect("/dashboard");
   }
 
@@ -33,9 +39,10 @@ export default async function AdminRosterPage({ params }: AdminRosterPageProps) 
 
   const roster = result.roster;
 
-  // Admins have full access
-  const canEdit = true;
-  const canPublish = true;
+  const [canEdit, canPublish] = await Promise.all([
+    canAccess("rosters", "edit"),
+    canAccess("rosters", "publish"),
+  ]);
 
   // Fetch staff for the venue
   const staffResult = await getVenueStaff(roster.venueId);

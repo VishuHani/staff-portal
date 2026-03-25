@@ -12,13 +12,24 @@ export const metadata = {
 export default async function AdminCreateRosterPage() {
   const user = await requireAuth();
 
-  // Only admins can access
-  const hasAccess = await canAccess("rosters", "create");
-  if (!hasAccess || user.role.name !== "ADMIN") {
-    redirect("/system/rosters");
+  const [canCreate, canViewAll, canViewTeam] = await Promise.all([
+    canAccess("rosters", "create"),
+    canAccess("rosters", "view_all"),
+    canAccess("rosters", "view_team"),
+  ]);
+
+  if (!canCreate) {
+    redirect("/dashboard");
   }
 
-  // Get all venues for admin
+  if (!canViewAll) {
+    if (canViewTeam) {
+      redirect("/manage/rosters/new");
+    }
+    redirect("/manage/rosters");
+  }
+
+  // Get all venues for system-wide roster creators
   const venues = await prisma.venue.findMany({
     where: { active: true },
     select: { id: true, name: true, code: true },

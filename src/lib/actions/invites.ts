@@ -13,6 +13,7 @@ import {
   type InvitationFilters,
 } from "@/lib/schemas/invites";
 import { revalidatePaths } from "@/lib/utils/action-contract";
+import { toAbsoluteAppUrl } from "@/lib/utils/app-url";
 
 // ============================================================================
 // TYPES
@@ -193,8 +194,7 @@ export async function createInvitation(data: CreateInvitationInput): Promise<{
     });
     
     // Send invitation email
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const inviteLink = `${appUrl}/signup?invite=${token}`;
+    const inviteLink = toAbsoluteAppUrl(`/signup?invite=${token}`);
     
     const emailTemplate = getInvitationEmailTemplate({
       inviterName: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
@@ -204,11 +204,24 @@ export async function createInvitation(data: CreateInvitationInput): Promise<{
       expirationDays: settings.invitationExpirationDays,
     });
     
-    await sendBrevoEmail({
+    const emailResult = await sendBrevoEmail({
       to: normalizedEmail,
       subject: emailTemplate.subject,
       htmlContent: emailTemplate.htmlContent,
     });
+
+    if (!emailResult.success) {
+      console.error("Invitation created but email delivery failed:", {
+        email: normalizedEmail,
+        error: emailResult.error,
+      });
+      await prisma.userInvitation.delete({ where: { id: invitation.id } });
+      return {
+        success: false,
+        error:
+          "Failed to deliver invitation email. Please verify Brevo settings and try again.",
+      };
+    }
     
     revalidatePaths("/system/invites", "/manage/invites");
     
@@ -424,8 +437,7 @@ export async function resendInvitation(invitationId: string): Promise<{
     });
     
     // Send new invitation email
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const inviteLink = `${appUrl}/signup?invite=${newToken}`;
+    const inviteLink = toAbsoluteAppUrl(`/signup?invite=${newToken}`);
     
     const emailTemplate = getInvitationEmailTemplate({
       inviterName: `${invitation.inviter.firstName || ""} ${invitation.inviter.lastName || ""}`.trim() || invitation.inviter.email,
@@ -435,11 +447,23 @@ export async function resendInvitation(invitationId: string): Promise<{
       expirationDays: settings.invitationExpirationDays,
     });
     
-    await sendBrevoEmail({
+    const emailResult = await sendBrevoEmail({
       to: normalizeEmail(invitation.email),
       subject: emailTemplate.subject,
       htmlContent: emailTemplate.htmlContent,
     });
+
+    if (!emailResult.success) {
+      console.error("Failed to resend invitation email:", {
+        email: invitation.email,
+        invitationId,
+        error: emailResult.error,
+      });
+      return {
+        success: false,
+        error: "Failed to deliver invitation email. Please verify Brevo configuration and try again.",
+      };
+    }
     
     return { success: true };
   } catch (error) {

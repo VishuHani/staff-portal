@@ -1,24 +1,24 @@
 # Pre-Launch Master Remediation Tracker
 
 **Created:** March 19, 2026  
-**Last Updated:** March 19, 2026  
+**Last Updated:** March 20, 2026  
 **Purpose:** Single source of truth for pre-launch remediation across initial 13 findings + 28 architecture findings + newly discovered issues during fixes.
 
 ## Snapshot
 
 | Metric | Value | Notes |
 |---|---:|---|
-| Raw Findings Total | 41 | `I13 (13) + A28 (28)` |
-| Canonical Issues Total | 39 | Exact dedupe only for true duplicates |
-| Fixed (`Verified`) | 37 | Closure requires evidence + verification |
+| Raw Findings Total | 43 | `I13 (13) + A28 (28) + NEW (2)` |
+| Canonical Issues Total | 41 | Exact dedupe only for true duplicates |
+| Fixed (`Verified`) | 39 | Closure requires evidence + verification |
 | Pending (non-blocked) | 0 | `Pending + In Progress + Fixed-Pending-Verify` |
 | Blocked | 0 | Blocked tracked separately |
 | Invalid | 2 | Retained for audit traceability |
 | Pending Total (incl. blocked) | 0 | `Pending (non-blocked) + Blocked` |
-| New-Discovered (`NEW-*`) | 0 | Issues found while fixing |
+| New-Discovered (`NEW-*`) | 2 | Issues found while fixing |
 
 **Accounting rule:** `Fixed + Pending (non-blocked) + Blocked + Invalid = Canonical Total`  
-**Current check:** `37 + 0 + 0 + 2 = 39` ✅
+**Current check:** `39 + 0 + 0 + 2 = 41` ✅
 
 ## Status Definitions
 
@@ -84,6 +84,8 @@
 | A28-026 | pre-launch-architecture-audit.md | 6.5 Real-time Dashboard Updates (Polling) | Medium | Confirmed | PLR-037 | Verified | Scalability |
 | A28-027 | pre-launch-architecture-audit.md | 7.1.3 Add rate limiting to all public endpoints | High | Confirmed | PLR-038 | Verified | Public upload/webhook endpoints now enforce baseline rate limiting |
 | A28-028 | pre-launch-architecture-audit.md | 7.1.4 Review/test auth in all API routes | High | Confirmed | PLR-039 | Verified | Auth coverage added for upload, webhook, and cron routes |
+| NEW-001 | Remediation Discovery (2026-03-20) | Invite page crash from invalid date formatting (`parseISO(date.toString())`) | High | Confirmed | PLR-040 | Verified | Date formatting hardened for mixed Date/string inputs and invalid values |
+| NEW-002 | Remediation Discovery (2026-03-20) | Production email/auth links could fall back to localhost/undefined when `NEXT_PUBLIC_APP_URL` missing | High | Confirmed | PLR-041 | Verified | Centralized app URL resolver added and wired across auth/invite/reminder/notification paths |
 
 ## Canonical Issues (Actionable Deduplicated Backlog)
 
@@ -128,12 +130,15 @@
 | PLR-037 | Improve real-time dashboard strategy (reduce polling load) | A28-026 | Performance | Medium | P1 | Confirmed | Verified | Unassigned | TBD | src/components/notifications/NotificationBadge.tsx | Polling now backs off to 60s and pauses while hidden, resuming on visibility/focus | 2026-03-19 |
 | PLR-038 | Add baseline rate limiting to all public endpoints | A28-027 | Security | High | P0 | Confirmed | Verified | Unassigned | TBD | Security-controls test suite | Upload and webhook endpoints enforce baseline rate limits | 2026-03-19 |
 | PLR-039 | Complete API route authentication/authorization coverage audit | A28-028 | Security | High | P0 | Confirmed | Verified | Unassigned | TBD | Security-controls test suite | Upload, webhook, and cron route auth tests added | 2026-03-19 |
+| PLR-040 | Prevent invite-management runtime crash from invalid date parsing | NEW-001 | Reliability | High | P1 | Confirmed | Verified | Unassigned | TBD | `src/app/system/invites/invites-page-enhanced.tsx`; `npm run type-check`; `npm run build` | Invite date rendering now guards invalid/serialized values and no longer throws `Invalid time value` | 2026-03-20 |
+| PLR-041 | Centralize production-safe app URL resolution for auth and email links | NEW-002 | Reliability | High | P1 | Confirmed | Verified | Unassigned | TBD | `src/lib/utils/app-url.ts`; `src/lib/actions/auth.ts`; `src/lib/actions/invites.ts`; `src/lib/actions/documents/assignments.ts`; `src/lib/jobs/document-reminders.ts`; `src/lib/services/email/templates.ts`; `src/lib/services/email/sanitization.ts`; `src/lib/utils/audit-alert.ts`; `npm run type-check`; `npm run build` | Redirect and email links now resolve via env/`VERCEL_URL` fallback instead of localhost defaults in production paths | 2026-03-20 |
 
 ## Newly Discovered During Fixes (`NEW-*`)
 
 | NEW ID | Title | Discovered While Fixing | Severity | Domain | Triage Result | Mapped Canonical ID | Execution Status | Evidence | Last Updated |
 |---|---|---|---|---|---|---|---|---|---|
-| NEW-001 (template) | _TBD_ | PLR-XXX | TBD | TBD | TBD | PLR-XXX or New PLR | Pending | TBD | TBD |
+| NEW-001 | Invite page crash from invalid date formatting (`parseISO(date.toString())`) | PLR-011 | High | Reliability | Confirmed and fixed in same cycle | PLR-040 | Verified | `src/app/system/invites/invites-page-enhanced.tsx`; `npm run type-check`; `npm run build` | 2026-03-20 |
+| NEW-002 | Production auth/email links could resolve to localhost/undefined when app URL env missing | PLR-011 | High | Reliability | Confirmed and fixed in same cycle | PLR-041 | Verified | `src/lib/utils/app-url.ts` + auth/invite/email callsite updates; `npm run type-check`; `npm run build` | 2026-03-20 |
 
 ## Launch Gate
 
@@ -147,7 +152,7 @@
 
 ## Validation Checklist (Tracker Integrity)
 
-1. Completeness: 41 raw findings exist with unique IDs (`I13-*`, `A28-*`).
+1. Completeness: 43 raw findings exist with unique IDs (`I13-*`, `A28-*`, `NEW-*`).
 2. Coverage: every raw row maps to a canonical `PLR-*`.
 3. Accounting: `Fixed + Pending (non-blocked) + Blocked + Invalid = Canonical`.
 4. Workflow: status transitions logged with evidence.

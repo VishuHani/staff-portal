@@ -7,6 +7,7 @@ import {
   markReminderSent,
   markReminderFailed,
 } from "@/lib/documents/reminder-service";
+import { toAbsoluteAppUrl } from "@/lib/utils/app-url";
 
 // ============================================================================
 // Types
@@ -197,6 +198,7 @@ async function sendReminderEmail(data: ReminderEmailData): Promise<{ success: bo
           day: "numeric",
         })
       : "No due date";
+    const documentUrl = toAbsoluteAppUrl(`/my/documents/${assignmentId}`);
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -241,7 +243,7 @@ async function sendReminderEmail(data: ReminderEmailData): Promise<{ success: bo
           </div>
           
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${process.env.NEXT_PUBLIC_APP_URL || "https://staff-portal.example.com"}/my/documents/${assignmentId}"
+            <a href="${documentUrl}"
                style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">
               View Document
             </a>
@@ -278,7 +280,7 @@ Document: ${documentName}
 Due Date: ${dueDateStr}
 Venue: ${venueName}
 
-View your document at: ${process.env.NEXT_PUBLIC_APP_URL || "https://staff-portal.example.com"}/my/documents/${assignmentId}
+View your document at: ${documentUrl}
 
 If you have already completed this document, please disregard this reminder.
 

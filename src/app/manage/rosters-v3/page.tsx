@@ -39,15 +39,13 @@ function RostersSkeleton() {
 export default async function RostersV3Page() {
   const user = await requireAuth();
 
-  // Check permission
-  const hasAccess = await canAccess("rosters", "view_team");
-  if (!hasAccess) {
-    redirect("/dashboard");
-  }
+  const [canViewTeam, canViewAll] = await Promise.all([
+    canAccess("rosters", "view_team"),
+    canAccess("rosters", "view_all"),
+  ]);
 
-  // Redirect admins to their version
-  if (user.role.name === "ADMIN") {
-    // Admins can use this page too, no redirect
+  if (!canViewTeam && !canViewAll) {
+    redirect("/dashboard");
   }
 
   // Fetch initial data

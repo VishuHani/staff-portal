@@ -165,7 +165,7 @@ export function invalidatePermissionCache(userId?: string) {
  *
  * ENHANCED: Now supports venue-scoped permissions
  * - If venueId is provided, checks both role permissions AND user-venue permissions
- * - If venueId is not provided, only checks role permissions (global)
+ * - If venueId is not provided, checks role permissions AND venue grants from any venue
  * - Admin users bypass all permission checks (see isAdmin() function)
  *
  * @param userId - The user's ID
@@ -195,21 +195,15 @@ export async function hasPermission(
         permission.resource === resource && permission.action === action
     );
 
-    // If venueId is provided, also check venue-specific permissions
-    if (venueId) {
-      const hasVenuePermission = snapshot.venuePermissions.some(
-        (entry) =>
-          entry.venueId === venueId &&
-          entry.permission.resource === resource &&
-          entry.permission.action === action
-      );
+    const hasVenuePermission = snapshot.venuePermissions.some(
+      (entry) =>
+        (!venueId || entry.venueId === venueId) &&
+        entry.permission.resource === resource &&
+        entry.permission.action === action
+    );
 
-      // User has permission if they have it via role OR via venue-specific grant
-      return hasRolePermission || hasVenuePermission;
-    }
-
-    // No venue specified, just check role permissions
-    return hasRolePermission;
+    // User has permission if they have it via role OR via venue-specific grant
+    return hasRolePermission || hasVenuePermission;
   } catch (error) {
     console.error("Error checking permission:", error);
     return false;
@@ -235,13 +229,20 @@ export async function hasAllPermissions(
     return true;
   }
 
-  return permissions.every((permission) =>
-    snapshot.rolePermissions.some(
+  return permissions.every((permission) => {
+    const hasRolePermission = snapshot.rolePermissions.some(
       (candidate) =>
         candidate.resource === permission.resource &&
         candidate.action === permission.action
-    )
-  );
+    );
+    const hasVenuePermission = snapshot.venuePermissions.some(
+      (entry) =>
+        entry.permission.resource === permission.resource &&
+        entry.permission.action === permission.action
+    );
+
+    return hasRolePermission || hasVenuePermission;
+  });
 }
 
 /**
@@ -263,13 +264,20 @@ export async function hasAnyPermission(
     return true;
   }
 
-  return permissions.some((permission) =>
-    snapshot.rolePermissions.some(
+  return permissions.some((permission) => {
+    const hasRolePermission = snapshot.rolePermissions.some(
       (candidate) =>
         candidate.resource === permission.resource &&
         candidate.action === permission.action
-    )
-  );
+    );
+    const hasVenuePermission = snapshot.venuePermissions.some(
+      (entry) =>
+        entry.permission.resource === permission.resource &&
+        entry.permission.action === permission.action
+    );
+
+    return hasRolePermission || hasVenuePermission;
+  });
 }
 
 /**

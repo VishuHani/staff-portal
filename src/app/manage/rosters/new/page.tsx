@@ -12,22 +12,25 @@ export const metadata = {
 export default async function CreateRosterPage() {
   const user = await requireAuth();
 
-  // Check permission
-  const hasAccess = await canAccess("rosters", "create");
-  if (!hasAccess) {
+  const [canCreate, canViewAll] = await Promise.all([
+    canAccess("rosters", "create"),
+    canAccess("rosters", "view_all"),
+  ]);
+
+  if (!canCreate) {
     redirect("/manage/rosters");
   }
 
   // Get venues the user has access to
   let venues;
-  if (user.role.name === "ADMIN") {
+  if (canViewAll) {
     venues = await prisma.venue.findMany({
       where: { active: true },
       select: { id: true, name: true, code: true },
       orderBy: { name: "asc" },
     });
   } else {
-    // Manager - only their venues
+    // Team-scoped users - only assigned venues
     const userVenues = await prisma.userVenue.findMany({
       where: { userId: user.id },
       include: {

@@ -330,22 +330,37 @@ export async function getUpcomingShifts() {
  * Get all staff dashboard data at once
  */
 export async function getStaffDashboardData() {
-  const [weeklySummary, kpis, activity, trends, upcomingShifts] = await Promise.all([
-    getWeeklyAvailabilitySummary(),
-    getStaffKPIs(),
-    getRecentActivity(),
-    getScheduledHoursTrends(),
-    getUpcomingShifts(),
-  ]);
+  try {
+    const [weeklySummary, kpis, activity, trends, upcomingShifts] = await Promise.all([
+      getWeeklyAvailabilitySummary(),
+      getStaffKPIs(),
+      getRecentActivity(),
+      getScheduledHoursTrends(),
+      getUpcomingShifts(),
+    ]);
 
-  return {
-    success: true,
-    data: {
-      weeklySummary: weeklySummary.success ? weeklySummary.summary : [],
-      kpis: kpis.success ? kpis.kpis : null,
-      recentActivity: activity.success ? activity.notifications : [],
-      trends: trends.success ? trends.trends : [],
-      upcomingShifts: upcomingShifts.success ? upcomingShifts.shifts : [],
-    },
-  };
+    return {
+      success: true,
+      data: {
+        weeklySummary: weeklySummary.success ? weeklySummary.summary : [],
+        kpis: kpis.success ? kpis.kpis : null,
+        recentActivity: activity.success ? activity.notifications : [],
+        trends: trends.success ? trends.trends : [],
+        upcomingShifts: upcomingShifts.success ? upcomingShifts.shifts : [],
+      },
+    };
+  } catch (error) {
+    console.error("Error fetching staff dashboard data:", error);
+    return {
+      success: false,
+      error: "Failed to fetch staff dashboard data",
+      data: {
+        weeklySummary: [],
+        kpis: null,
+        recentActivity: [],
+        trends: [],
+        upcomingShifts: [],
+      },
+    };
+  }
 }
