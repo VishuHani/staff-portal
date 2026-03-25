@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, canAccess } from "@/lib/rbac/access";
+import { canAccess, requireAuth } from "@/lib/rbac/access";
+import { hasAnyPermission, hasPermission } from "@/lib/rbac/permissions";
 import { createAuditLog } from "@/lib/actions/audit";
 import {
   addChannelMembersSchema,
@@ -24,6 +25,18 @@ import {
 } from "@/lib/schemas/channel-members";
 import { getFullName } from "@/lib/utils/profile";
 
+async function hasGlobalChannelScope(userId: string): Promise<boolean> {
+  return hasAnyPermission(userId, [
+    { resource: "stores", action: "view_all" },
+    { resource: "stores", action: "manage" },
+    { resource: "venues", action: "view_all" },
+    { resource: "venues", action: "manage" },
+    { resource: "admin", action: "manage_stores" },
+    { resource: "posts", action: "edit_all" },
+    { resource: "posts", action: "delete_all" },
+  ]);
+}
+
 /**
  * Permission Check: Can user manage channel members?
  * - Admins can manage all channels
@@ -35,9 +48,12 @@ async function canManageChannel(
   userId: string,
   channelId: string
 ): Promise<{ allowed: boolean; reason?: string; isManager?: boolean }> {
-  // Check if user has admin posts:manage permission
-  const hasManagePermission = await canAccess("posts", "manage");
-  if (hasManagePermission) {
+  const [hasManagePermission, hasGlobalScope] = await Promise.all([
+    hasPermission(userId, "posts", "manage"),
+    hasGlobalChannelScope(userId),
+  ]);
+
+  if (hasManagePermission && hasGlobalScope) {
     return { allowed: true, isManager: false };
   }
 
@@ -55,19 +71,10 @@ async function canManageChannel(
     return { allowed: true, isManager: false };
   }
 
-  // Check if user is a manager with venue-scoped access
+  // Check if user has venue-scoped channel management access.
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
-      role: {
-        include: {
-          rolePermissions: {
-            include: {
-              permission: true,
-            },
-          },
-        },
-      },
       venues: {
         include: {
           venue: true,
@@ -76,15 +83,7 @@ async function canManageChannel(
     },
   });
 
-  // Check if manager role with posts:manage permission
-  const isManager =
-    user?.role.name === "MANAGER" &&
-    user.role.rolePermissions.some(
-      (rp) =>
-        rp.permission.resource === "posts" && rp.permission.action === "manage"
-    );
-
-  if (isManager && user.venues.length > 0) {
+  if (hasManagePermission && user && user.venues.length > 0) {
     // Get manager's venue IDs
     const managerVenueIds = user.venues.map((uv) => uv.venue.id);
 
@@ -130,7 +129,6 @@ async function getManagerVenueIds(userId: string): Promise<string[] | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
-      role: true,
       venues: {
         include: {
           venue: true,
@@ -139,7 +137,7 @@ async function getManagerVenueIds(userId: string): Promise<string[] | null> {
     },
   });
 
-  if (user?.role.name === "MANAGER" && user.venues.length > 0) {
+  if (user && user.venues.length > 0) {
     return user.venues.map((uv) => uv.venue.id);
   }
 
@@ -1028,23 +1026,51 @@ export async function getManageableChannels(data: GetManageableChannelsInput) {
   const { includeArchived, venueId } = validatedFields.data;
 
   try {
-    // Check if user is admin
-    const hasManagePermission = await canAccess("posts", "manage");
+    const [hasManagePermission, hasGlobalScope, scopedVenueIds] =
+      await Promise.all([
+        canAccess("posts", "manage"),
+        hasGlobalChannelScope(user.id),
+        getManagerVenueIds(user.id),
+      ]);
 
     let where: any = {
       ...(includeArchived === false && { archived: false }),
     };
 
     if (hasManagePermission) {
-      // Admins can manage all channels
-      if (venueId) {
-        // Filter by venue if specified
-        where.venues = {
-          some: { venueId },
-        };
+      if (hasGlobalScope) {
+        if (venueId) {
+          where.venues = {
+            some: { venueId },
+          };
+        }
+      } else {
+        const allowedVenueIds = scopedVenueIds ?? [];
+        if (allowedVenueIds.length === 0) {
+          where.id = "impossible-id-no-venues";
+        } else if (venueId) {
+          if (!allowedVenueIds.includes(venueId)) {
+            where.id = "impossible-id-no-venues";
+          } else {
+            where.venues = {
+              some: { venueId },
+            };
+          }
+        } else {
+          where.OR = [
+            { isPublic: true },
+            {
+              venues: {
+                some: {
+                  venueId: { in: allowedVenueIds },
+                },
+              },
+            },
+          ];
+        }
       }
     } else {
-      // Non-admins can only manage channels where they are CREATOR or MODERATOR
+      // Users without manage permission can only manage channels where they are CREATOR or MODERATOR.
       where.members = {
         some: {
           userId: user.id,

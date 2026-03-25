@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { VenuePermissionsPageClient } from "./venue-permissions-page-client";
 import { getAllVenues } from "@/lib/actions/admin/venues";
@@ -7,9 +7,10 @@ import {
   getAvailablePermissions,
   getTotalVenuePermissionAssignments
 } from "@/lib/actions/admin/venue-permissions";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 
 export default async function AdminVenuePermissionsPage() {
-  const user = await requireAdmin();
+  const user = await requireAnyPermission(SYSTEM_PERMISSIONS.permissionsManage);
 
   const [venuesResult, permissionsResult, assignmentsResult] = await Promise.all([
     getAllVenues(),

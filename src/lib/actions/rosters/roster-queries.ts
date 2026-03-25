@@ -3,6 +3,10 @@
 import { prisma } from "@/lib/prisma";
 import { requireAuth, canAccess } from "@/lib/rbac/access";
 import { RosterStatus, Prisma } from "@prisma/client";
+import {
+  getScopedRosterVenueIds,
+  hasRosterVenuePermission,
+} from "./permission-scope";
 
 // Types
 export interface RosterFilters {
@@ -41,12 +45,12 @@ export async function getRosters(filters: RosterFilters = {}) {
     if (filters.venueId) {
       where.venueId = filters.venueId;
     } else if (!canViewAll) {
-      // Managers can only see rosters for their venues
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      where.venueId = { in: userVenues.map((v) => v.venueId) };
+      const venueIds = await getScopedRosterVenueIds(user.id);
+      if (venueIds.length === 0) {
+        return { success: true, rosters: [] };
+      }
+
+      where.venueId = { in: venueIds };
     }
 
     // Status filter
@@ -218,11 +222,7 @@ export async function getRosterById(rosterId: string) {
 
     if (!canViewAll) {
       if (canViewTeam) {
-        const userVenues = await prisma.userVenue.findMany({
-          where: { userId: user.id },
-          select: { venueId: true },
-        });
-        const venueIds = userVenues.map((v) => v.venueId);
+        const venueIds = await getScopedRosterVenueIds(user.id);
         if (!venueIds.includes(roster.venueId)) {
           return { success: false, error: "You don't have access to this roster" };
         }
@@ -568,21 +568,14 @@ export async function getVenueStaff(venueId: string, options?: {
   try {
     const user = await requireAuth();
 
-    const hasPermission = await canAccess("rosters", "edit");
-    if (!hasPermission) {
+    const canManageVenueRoster = await hasRosterVenuePermission(user.id, venueId, [
+      "edit",
+      "create",
+      "publish",
+      "approve",
+    ]);
+    if (!canManageVenueRoster) {
       return { success: false, error: "You don't have permission", staff: [] };
-    }
-
-    // Check venue access for managers
-    if (user.role.name === "MANAGER") {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const venueIds = userVenues.map((v) => v.venueId);
-      if (!venueIds.includes(venueId)) {
-        return { success: false, error: "You don't have access to this venue", staff: [] };
-      }
     }
 
     const staff = await prisma.user.findMany({
@@ -683,13 +676,36 @@ export async function getRosterStats(venueId?: string) {
     let venueFilter: { venueId: string } | { venueId: { in: string[] } } | undefined;
 
     if (venueId) {
+      const canAccessVenueStats = await hasRosterVenuePermission(user.id, venueId, [
+        "view_all",
+        "view_team",
+        "edit",
+        "publish",
+        "approve",
+      ]);
+      if (!canAccessVenueStats) {
+        return { success: false, error: "You don't have access to this venue" };
+      }
+
       venueFilter = { venueId };
     } else if (!canViewAll) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      venueFilter = { venueId: { in: userVenues.map((v) => v.venueId) } };
+      const venueIds = await getScopedRosterVenueIds(user.id);
+      if (venueIds.length === 0) {
+        return {
+          success: true,
+          stats: {
+            totalRosters: 0,
+            draftRosters: 0,
+            publishedRosters: 0,
+            upcomingRosters: 0,
+            totalShifts: 0,
+            unassignedShifts: 0,
+            conflictShifts: 0,
+          },
+        };
+      }
+
+      venueFilter = { venueId: { in: venueIds } };
     }
 
     const now = new Date();

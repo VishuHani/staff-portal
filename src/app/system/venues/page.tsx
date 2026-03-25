@@ -1,11 +1,12 @@
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { getAllVenues, getVenueStats } from "@/lib/actions/admin/venues";
 import { StoresPageClient } from "./stores-page-client";
 import { redirect } from "next/navigation";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 
 export default async function AdminStoresPage() {
-  const user = await requireAdmin();
+  const user = await requireAnyPermission(SYSTEM_PERMISSIONS.venuesRead);
 
   // Fetch venues and stats
   const [venuesResult, statsResult] = await Promise.all([

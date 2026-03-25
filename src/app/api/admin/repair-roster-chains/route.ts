@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@/lib/actions/auth";
 import { repairChainActiveFlags, diagnoseChainIntegrity } from "@/lib/actions/rosters";
 import { apiError, apiSuccess } from "@/lib/utils/api-response";
+import { hasAnyPermission } from "@/lib/rbac/permissions";
 
 /**
  * GET /api/admin/repair-roster-chains
@@ -9,7 +10,15 @@ import { apiError, apiSuccess } from "@/lib/utils/api-response";
 export async function GET() {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role.name !== "ADMIN") {
+    if (!user) {
+      return apiError("Unauthorized", 403);
+    }
+
+    const hasAccess = await hasAnyPermission(user.id, [
+      { resource: "rosters", action: "edit_all" },
+      { resource: "rosters", action: "view_all" },
+    ]);
+    if (!hasAccess) {
       return apiError("Unauthorized", 403);
     }
 
@@ -36,7 +45,15 @@ export async function GET() {
 export async function POST() {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role.name !== "ADMIN") {
+    if (!user) {
+      return apiError("Unauthorized", 403);
+    }
+
+    const hasAccess = await hasAnyPermission(user.id, [
+      { resource: "rosters", action: "edit_all" },
+      { resource: "rosters", action: "view_all" },
+    ]);
+    if (!hasAccess) {
       return apiError("Unauthorized", 403);
     }
 

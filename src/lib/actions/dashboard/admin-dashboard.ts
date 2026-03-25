@@ -1,8 +1,17 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { startOfDay, subDays, format, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval } from "date-fns";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
+
+async function requireAdminDashboardAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.dashboardAdmin);
+}
+
+async function requireAdminAuditAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.auditRead);
+}
 
 /**
  * Calculate system health based on multiple metrics
@@ -115,7 +124,7 @@ async function calculateSystemHealth() {
  * Get admin global stats
  */
 export async function getAdminGlobalStats() {
-  await requireAdmin();
+  await requireAdminDashboardAccess();
 
   try {
     const today = new Date();
@@ -220,7 +229,7 @@ export async function getAdminGlobalStats() {
  * Get cross-venue comparison
  */
 export async function getVenueCoverageComparison() {
-  await requireAdmin();
+  await requireAdminDashboardAccess();
 
   try {
     const today = new Date();
@@ -306,7 +315,7 @@ export async function getVenueCoverageComparison() {
  * Get user activity heatmap (last 7 days, by hour)
  */
 export async function getUserActivityStats() {
-  await requireAdmin();
+  await requireAdminDashboardAccess();
 
   try {
     const today = new Date();
@@ -363,7 +372,7 @@ export async function getUserActivityStats() {
  * Get action distribution (last 30 days)
  */
 export async function getActionDistribution() {
-  await requireAdmin();
+  await requireAdminDashboardAccess();
 
   try {
     const last30Days = subDays(new Date(), 30);
@@ -392,7 +401,7 @@ export async function getActionDistribution() {
  * Get role distribution with active and inactive counts
  */
 export async function getRoleDistribution() {
-  await requireAdmin();
+  await requireAdminDashboardAccess();
 
   try {
     // Get all roles with their users
@@ -430,7 +439,7 @@ export async function getRoleDistribution() {
  * Get approval turnaround time metrics (last 12 weeks)
  */
 export async function getApprovalMetrics() {
-  await requireAdmin();
+  await requireAdminDashboardAccess();
 
   try {
     const today = new Date();
@@ -490,7 +499,7 @@ export async function getApprovalMetrics() {
  * Get recent audit logs (last 20)
  */
 export async function getRecentAuditLogs() {
-  await requireAdmin();
+  await requireAdminAuditAccess();
 
   try {
     const logs = await prisma.auditLog.findMany({

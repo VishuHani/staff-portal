@@ -1,10 +1,11 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAdmin, requireAnyPermission } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { createClient } from "@/lib/auth/supabase-server";
 import { getUserVenueIds } from "@/lib/utils/venue";
-import { isAdmin } from "@/lib/rbac/permissions";
+import { hasAnyPermission } from "@/lib/rbac/permissions";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 import {
   actionFailure,
   actionSuccess,
@@ -45,6 +46,14 @@ type UserStatsPayload = {
   byRole: Array<{ role: string; count: number }>;
 };
 
+async function requireUsersReadAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.usersRead);
+}
+
+async function requireUsersManageAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.usersManage);
+}
+
 /**
  * Get all users with their roles and stores
  * Admin/Manager with permissions
@@ -52,20 +61,19 @@ type UserStatsPayload = {
 export async function getAllUsers(): Promise<
   ActionResult<{ users: TeamUsersPayload }>
 > {
-  // Allow managers and admins with appropriate permissions
-  const currentUser = await requireAnyPermission([
-    { resource: "users", action: "view_team" },
-    { resource: "users", action: "view_all" },
-  ]);
+  const currentUser = await requireUsersReadAccess();
 
   try {
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(currentUser.id);
+    const hasGlobalUserScope = await hasAnyPermission(currentUser.id, [
+      { resource: "users", action: "view_all" },
+      { resource: "users", action: "manage_users" },
+      { resource: "users", action: "edit_all" },
+    ]);
 
     // Build query based on user's permissions
     let whereClause: any = {};
 
-    if (!userIsAdmin) {
+    if (!hasGlobalUserScope) {
       // Manager: Filter users by shared venues
       const venueIds = await getUserVenueIds(currentUser.id);
       if (venueIds.length === 0) {
@@ -126,7 +134,7 @@ export async function getAllUsers(): Promise<
  * Admin only
  */
 export async function getUserById(userId: string) {
-  await requireAdmin();
+  await requireUsersReadAccess();
 
   try {
     const user = await prisma.user.findUnique({
@@ -175,20 +183,19 @@ export async function getUserById(userId: string) {
 export async function getUserStats(): Promise<
   ActionResult<{ stats: UserStatsPayload }>
 > {
-  // Allow managers and admins with appropriate permissions
-  const currentUser = await requireAnyPermission([
-    { resource: "users", action: "view_team" },
-    { resource: "users", action: "view_all" },
-  ]);
+  const currentUser = await requireUsersReadAccess();
 
   try {
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(currentUser.id);
+    const hasGlobalUserScope = await hasAnyPermission(currentUser.id, [
+      { resource: "users", action: "view_all" },
+      { resource: "users", action: "manage_users" },
+      { resource: "users", action: "edit_all" },
+    ]);
 
     // Build query based on user's permissions
     let whereClause: any = {};
 
-    if (!userIsAdmin) {
+    if (!hasGlobalUserScope) {
       // Manager: Filter users by shared venues
       const venueIds = await getUserVenueIds(currentUser.id);
       if (venueIds.length === 0) {
@@ -251,7 +258,7 @@ export async function getUserStats(): Promise<
  * This ensures the user can log in (requires existence in both systems)
  */
 export async function createUser(data: CreateUserInput) {
-  const admin = await requireAdmin();
+  const actor = await requireUsersManageAccess();
 
   const validatedFields = createUserSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -346,7 +353,7 @@ export async function createUser(data: CreateUserInput) {
     // Create audit log
     try {
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "USER_CREATED",
         resourceType: "User",
         resourceId: result.userId!,
@@ -381,7 +388,7 @@ export async function createUser(data: CreateUserInput) {
  * Admin only
  */
 export async function updateUser(data: UpdateUserInput) {
-  const admin = await requireAdmin();
+  const actor = await requireUsersManageAccess();
 
   const validatedFields = updateUserSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -468,27 +475,27 @@ export async function updateUser(data: UpdateUserInput) {
 
     // Send notifications for relevant changes
     try {
-      const adminName = admin.firstName && admin.lastName
-        ? `${admin.firstName} ${admin.lastName}`
-        : admin.email;
+      const adminName = actor.firstName && actor.lastName
+        ? `${actor.firstName} ${actor.lastName}`
+        : actor.email;
 
       // Notify if role changed
       if (roleId && roleId !== currentUser.roleId) {
-        await notifyRoleChanged(
-          userId,
-          admin.id,
-          adminName,
-          currentUser.role.name,
-          user.role.name
+          await notifyRoleChanged(
+            userId,
+            actor.id,
+            adminName,
+            currentUser.role.name,
+            user.role.name
         );
       }
 
       // Notify if active status changed
       if (active !== undefined && active !== currentUser.active) {
         if (active) {
-          await notifyUserActivated(userId, admin.id, adminName);
+          await notifyUserActivated(userId, actor.id, adminName);
         } else {
-          await notifyUserDeactivated(userId, admin.id, adminName);
+          await notifyUserDeactivated(userId, actor.id, adminName);
         }
       }
     } catch (error) {
@@ -499,7 +506,7 @@ export async function updateUser(data: UpdateUserInput) {
     // Create audit log
     try {
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "USER_UPDATED",
         resourceType: "User",
         resourceId: userId,
@@ -539,7 +546,7 @@ export async function updateUser(data: UpdateUserInput) {
  * Admin only
  */
 export async function deleteUser(data: DeleteUserInput) {
-  const admin = await requireAdmin();
+  const actor = await requireUsersManageAccess();
 
   const validatedFields = deleteUserSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -567,7 +574,7 @@ export async function deleteUser(data: DeleteUserInput) {
     // Create audit log
     try {
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "USER_DELETED",
         resourceType: "User",
         resourceId: userId,
@@ -599,7 +606,7 @@ export async function deleteUser(data: DeleteUserInput) {
  * Admin only
  */
 export async function toggleUserActive(data: ToggleUserActiveInput) {
-  const admin = await requireAdmin();
+  const actor = await requireUsersManageAccess();
 
   const validatedFields = toggleUserActiveSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -631,14 +638,14 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
 
     // Send notification about status change
     try {
-      const adminName = admin.firstName && admin.lastName
-        ? `${admin.firstName} ${admin.lastName}`
-        : admin.email;
+      const adminName = actor.firstName && actor.lastName
+        ? `${actor.firstName} ${actor.lastName}`
+        : actor.email;
 
       if (newActiveStatus) {
-        await notifyUserActivated(userId, admin.id, adminName);
+        await notifyUserActivated(userId, actor.id, adminName);
       } else {
-        await notifyUserDeactivated(userId, admin.id, adminName);
+        await notifyUserDeactivated(userId, actor.id, adminName);
       }
     } catch (error) {
       logActionError("admin.users.toggleUserActive.notifications", error, { userId });
@@ -648,7 +655,7 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
     // Create audit log
     try {
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: newActiveStatus ? "USER_ACTIVATED" : "USER_DEACTIVATED",
         resourceType: "User",
         resourceId: userId,
@@ -676,11 +683,7 @@ export async function toggleUserActive(data: ToggleUserActiveInput) {
 export async function getAllRoles(): Promise<
   ActionResult<{ roles: RolesPayload }>
 > {
-  // Allow managers and admins with appropriate permissions
-  await requireAnyPermission([
-    { resource: "users", action: "view_team" },
-    { resource: "users", action: "view_all" },
-  ]);
+  await requireUsersReadAccess();
 
   try {
     const roles = await prisma.role.findMany({
@@ -703,22 +706,20 @@ export async function getAllRoles(): Promise<
 export async function getAllStores(): Promise<
   ActionResult<{ stores: StoresPayload }>
 > {
-  // Allow managers and admins with appropriate permissions
-  const currentUser = await requireAnyPermission([
-    { resource: "users", action: "view_team" },
-    { resource: "users", action: "view_all" },
-  ]);
+  const currentUser = await requireUsersReadAccess();
 
   try {
-    // Check if user is admin
-    const userIsAdmin = await isAdmin(currentUser.id);
+    const hasGlobalVenueScope = await hasAnyPermission(
+      currentUser.id,
+      SYSTEM_PERMISSIONS.venuesRead
+    );
 
     // Build query based on user's permissions
     let whereClause: any = {
       active: true,
     };
 
-    if (!userIsAdmin) {
+    if (!hasGlobalVenueScope) {
       // Manager: Filter venues by their assigned venues
       const venueIds = await getUserVenueIds(currentUser.id);
       if (venueIds.length === 0) {

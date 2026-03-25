@@ -1,7 +1,8 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 import {
   actionFailure,
   actionSuccess,
@@ -29,6 +30,14 @@ type PermissionListPayload = Awaited<
   ReturnType<typeof prisma.permission.findMany>
 >;
 
+async function requireRolesReadAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.rolesRead);
+}
+
+async function requireRolesManageAccess() {
+  return requireAnyPermission(SYSTEM_PERMISSIONS.rolesManage);
+}
+
 /**
  * Get all roles with their permissions
  * Admin only
@@ -36,7 +45,7 @@ type PermissionListPayload = Awaited<
 export async function getAllRoles(): Promise<
   ActionResult<{ roles: RoleListPayload }>
 > {
-  await requireAdmin();
+  await requireRolesReadAccess();
 
   try {
     const roles = await prisma.role.findMany({
@@ -71,7 +80,7 @@ export async function getAllRoles(): Promise<
 export async function getAllPermissions(): Promise<
   ActionResult<{ permissions: PermissionListPayload }>
 > {
-  await requireAdmin();
+  await requireRolesReadAccess();
 
   try {
     const permissions = await prisma.permission.findMany({
@@ -90,7 +99,7 @@ export async function getAllPermissions(): Promise<
  * Admin only
  */
 export async function createRole(data: CreateRoleInput & { permissionIds?: string[] }) {
-  const admin = await requireAdmin();
+  const actor = await requireRolesManageAccess();
 
   const validatedFields = createRoleSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -135,7 +144,7 @@ export async function createRole(data: CreateRoleInput & { permissionIds?: strin
     try {
       const auditContext = await getAuditContext();
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "ROLE_CREATED",
         resourceType: "Role",
         resourceId: role.id,
@@ -166,7 +175,7 @@ export async function createRole(data: CreateRoleInput & { permissionIds?: strin
  * Admin only
  */
 export async function updateRole(data: UpdateRoleInput & { permissionIds?: string[] }) {
-  const admin = await requireAdmin();
+  const actor = await requireRolesManageAccess();
 
   const validatedFields = updateRoleSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -251,7 +260,7 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
     try {
       const auditContext = await getAuditContext();
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "ROLE_UPDATED",
         resourceType: "Role",
         resourceId: roleId,
@@ -286,7 +295,7 @@ export async function updateRole(data: UpdateRoleInput & { permissionIds?: strin
  * Admin only - Cannot delete if users are assigned
  */
 export async function deleteRole(data: DeleteRoleInput) {
-  const admin = await requireAdmin();
+  const actor = await requireRolesManageAccess();
 
   const validatedFields = deleteRoleSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -336,7 +345,7 @@ export async function deleteRole(data: DeleteRoleInput) {
     try {
       const auditContext = await getAuditContext();
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "ROLE_DELETED",
         resourceType: "Role",
         resourceId: roleId,
@@ -366,7 +375,7 @@ export async function deleteRole(data: DeleteRoleInput) {
  * Admin only
  */
 export async function assignPermissionsToRole(data: AssignPermissionsInput) {
-  const admin = await requireAdmin();
+  const actor = await requireRolesManageAccess();
 
   const validatedFields = assignPermissionsSchema.safeParse(data);
   if (!validatedFields.success) {
@@ -411,7 +420,7 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
     try {
       const auditContext = await getAuditContext();
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "ROLE_PERMISSIONS_UPDATED",
         resourceType: "Role",
         resourceId: roleId,
@@ -446,7 +455,7 @@ export async function assignPermissionsToRole(data: AssignPermissionsInput) {
  * Admin only
  */
 export async function cloneRole(sourceRoleId: string, newName: string) {
-  const admin = await requireAdmin();
+  const actor = await requireRolesManageAccess();
 
   if (!newName || newName.trim().length < 2) {
     return actionFailure("Role name must be at least 2 characters");
@@ -507,7 +516,7 @@ export async function cloneRole(sourceRoleId: string, newName: string) {
     try {
       const auditContext = await getAuditContext();
       await createAuditLog({
-        userId: admin.id,
+        userId: actor.id,
         actionType: "ROLE_CREATED",
         resourceType: "Role",
         resourceId: newRole.id,

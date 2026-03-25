@@ -9,6 +9,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/actions/auth";
+import { hasPermission } from "@/lib/rbac/permissions";
 import { exportRosterToExcel, exportRosterToPdf } from "@/lib/services/roster-export-service";
 import {
   calculateShiftPayBreakdownWithSuper,
@@ -19,6 +20,7 @@ import {
   type ShiftPayBreakdownWithSuper,
 } from "@/lib/utils/pay-calculator";
 import type { RosterExportData, ExportOptions } from "@/lib/services/roster-export-service";
+import { hasRosterVenuePermission } from "./permission-scope";
 
 /**
  * Check if user can view pay rates (admin or manager)
@@ -26,29 +28,7 @@ import type { RosterExportData, ExportOptions } from "@/lib/services/roster-expo
 async function canViewPayRates(venueId: string): Promise<boolean> {
   const user = await getCurrentUser();
   if (!user) return false;
-
-  const userWithData = await prisma.user.findUnique({
-    where: { id: user.id },
-    include: {
-      role: true,
-      venuePermissions: {
-        where: { venueId },
-        include: { permission: true },
-      },
-    },
-  });
-
-  if (!userWithData) return false;
-
-  // Admin can always view pay rates
-  if (userWithData.role.name === "ADMIN") return true;
-
-  // Check for view_sensitive permission on users resource
-  const hasSensitivePermission = userWithData.venuePermissions.some(
-    (p) => p.permission.resource === "users" && p.permission.action === "view_sensitive"
-  );
-
-  return hasSensitivePermission;
+  return hasPermission(user.id, "users", "view_sensitive", venueId);
 }
 
 /**
@@ -241,6 +221,17 @@ export async function exportRosterExcel(
       return { success: false, error: "Roster not found" };
     }
 
+    const canAccessRoster = await hasRosterVenuePermission(user.id, roster.venueId, [
+      "view_all",
+      "view_team",
+      "view_own",
+      "edit",
+      "publish",
+    ]);
+    if (!canAccessRoster) {
+      return { success: false, error: "You don't have permission to export this roster" };
+    }
+
     const includePayRates = await canViewPayRates(roster.venueId);
     const exportData = await getRosterExportData(rosterId, includePayRates);
 
@@ -287,6 +278,17 @@ export async function exportRosterPdf(
 
     if (!roster) {
       return { success: false, error: "Roster not found" };
+    }
+
+    const canAccessRoster = await hasRosterVenuePermission(user.id, roster.venueId, [
+      "view_all",
+      "view_team",
+      "view_own",
+      "edit",
+      "publish",
+    ]);
+    if (!canAccessRoster) {
+      return { success: false, error: "You don't have permission to export this roster" };
     }
 
     const includePayRates = await canViewPayRates(roster.venueId);

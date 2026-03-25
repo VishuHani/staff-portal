@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { getInviteSettingsAction } from "@/lib/actions/invites";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { InviteSettingsClient } from "./settings-client";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 
 export default async function InviteSettingsPage() {
-  const user = await requireAdmin();
+  const user = await requireAnyPermission(SYSTEM_PERMISSIONS.invitesManage);
 
   const result = await getInviteSettingsAction();
 

@@ -3,7 +3,13 @@
 import { prisma } from "@/lib/prisma";
 import { RosterStatus } from "@prisma/client";
 import { requireAuth } from "@/lib/rbac/access";
-import { isAdmin } from "@/lib/rbac/permissions";
+import { hasAnyPermission } from "@/lib/rbac/permissions";
+import type { Permission } from "@/lib/rbac/types";
+
+const CHAIN_REPAIR_PERMISSIONS: Permission[] = [
+  { resource: "rosters", action: "edit_all" },
+  { resource: "rosters", action: "view_all" },
+];
 
 interface RepairResult {
   success: boolean;
@@ -27,10 +33,13 @@ interface RepairResult {
  */
 export async function repairChainActiveFlags(): Promise<RepairResult> {
   try {
-    // Only admins can run this repair
     const user = await requireAuth();
-    if (!(await isAdmin(user.id))) {
-      return { success: false, error: "Only admins can run this repair" };
+    const canRepairChains = await hasAnyPermission(user.id, CHAIN_REPAIR_PERMISSIONS);
+    if (!canRepairChains) {
+      return {
+        success: false,
+        error: "You don't have permission to run this repair",
+      };
     }
 
     // Get all unique chainIds
@@ -138,8 +147,15 @@ export async function diagnoseChainIntegrity(): Promise<{
 }> {
   try {
     const user = await requireAuth();
-    if (!(await isAdmin(user.id))) {
-      return { success: false, error: "Only admins can diagnose chain integrity" };
+    const canDiagnoseChains = await hasAnyPermission(
+      user.id,
+      CHAIN_REPAIR_PERMISSIONS
+    );
+    if (!canDiagnoseChains) {
+      return {
+        success: false,
+        error: "You don't have permission to diagnose chain integrity",
+      };
     }
 
     // Find chains with issues

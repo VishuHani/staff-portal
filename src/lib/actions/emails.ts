@@ -3,6 +3,12 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
+import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
+import {
+  getScopedEmailCreateVenueIds,
+  hasEmailCreatePermissionAtVenue,
+  hasGlobalEmailCreateScope,
+} from "@/lib/rbac/email-create-scope";
 import {
   isFolderSchemaMissingError,
   validateFolderAssignment,
@@ -20,6 +26,15 @@ type EmailWhereInput = NonNullable<EmailFindManyArgs["where"]>;
 type EmailCreateData = Parameters<typeof prisma.email.create>[0]["data"];
 type EmailUpdateData = Parameters<typeof prisma.email.update>[0]["data"];
 
+async function getEmailBuilderScope(userId: string, primaryVenueId: string | null) {
+  const [canAccessAllVenues, scopedVenueIds] = await Promise.all([
+    hasGlobalEmailCreateScope(userId),
+    getScopedEmailCreateVenueIds(userId, primaryVenueId),
+  ]);
+
+  return { canAccessAllVenues, scopedVenueIds };
+}
+
 // ============================================================================
 // GET EMAILS (List)
 // ============================================================================
@@ -32,12 +47,21 @@ export async function getEmails(filters?: EmailFilters): Promise<EmailWithRelati
 
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
-    include: { role: true },
+    select: { id: true, venueId: true },
   });
 
   if (!user) {
     throw new Error("User not found");
   }
+
+  if (!(await canAccessEmailModule(user.id, "create"))) {
+    throw new Error("Access denied");
+  }
+
+  const { canAccessAllVenues, scopedVenueIds } = await getEmailBuilderScope(
+    user.id,
+    user.venueId
+  );
 
   const where: EmailWhereInput = {};
   const andConditions: EmailWhereInput[] = [];
@@ -54,15 +78,14 @@ export async function getEmails(filters?: EmailFilters): Promise<EmailWithRelati
 
   // Filter by venue
   if (filters?.venueId) {
-    if (user.role.name !== "ADMIN" && filters.venueId !== user.venueId) {
+    if (!canAccessAllVenues && !scopedVenueIds.includes(filters.venueId)) {
       return [];
     }
     where.venueId = filters.venueId;
-  } else if (user.role.name !== "ADMIN") {
-    // Non-admins can only see emails for their venue or system emails
+  } else if (!canAccessAllVenues) {
     andConditions.push({
       OR: [
-        { venueId: user.venueId },
+        { venueId: { in: scopedVenueIds } },
         { venueId: null, isSystem: true },
       ],
     });
@@ -146,15 +169,23 @@ export async function getEmail(id: string): Promise<EmailWithRelations | null> {
   // Check access permissions
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
-    include: { role: true },
+    select: { id: true, venueId: true },
   });
 
   if (!user) {
     throw new Error("User not found");
   }
 
-  // Non-admins can only access emails for their venue or system emails
-  if (user.role.name !== "ADMIN" && email.venueId && email.venueId !== user.venueId) {
+  if (!(await canAccessEmailModule(user.id, "create"))) {
+    throw new Error("Access denied");
+  }
+
+  const { canAccessAllVenues, scopedVenueIds } = await getEmailBuilderScope(
+    user.id,
+    user.venueId
+  );
+
+  if (!canAccessAllVenues && email.venueId && !scopedVenueIds.includes(email.venueId)) {
     throw new Error("Access denied");
   }
 
@@ -174,18 +205,33 @@ export async function createEmail(input: CreateEmailInput): Promise<{ success: b
 
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
-      include: { role: true },
+      select: { id: true, venueId: true },
     });
 
     if (!user) {
       return { success: false, error: "User not found" };
     }
 
-    const isUserAdmin = user.role.name === "ADMIN";
-
-    // Non-admins can only create emails for their venue
-    if (!isUserAdmin && input.venueId && input.venueId !== user.venueId) {
+    if (!(await canAccessEmailModule(user.id, "create"))) {
       return { success: false, error: "Access denied" };
+    }
+
+    const { canAccessAllVenues } = await getEmailBuilderScope(user.id, user.venueId);
+
+    if (input.venueId) {
+      const canCreateAtVenue = await hasEmailCreatePermissionAtVenue(
+        user.id,
+        input.venueId,
+        ["create", "manage"]
+      );
+      if (!canCreateAtVenue) {
+        return { success: false, error: "Access denied" };
+      }
+    } else if (!canAccessAllVenues) {
+      return {
+        success: false,
+        error: "Only users with global email permissions can create system emails",
+      };
     }
 
     let folderIdForCreate: string | null | undefined = undefined;
@@ -194,7 +240,7 @@ export async function createEmail(input: CreateEmailInput): Promise<{ success: b
       try {
         const folderValidation = await validateFolderAssignment({
           userId: session.userId,
-          isAdminUser: isUserAdmin,
+          isAdminUser: canAccessAllVenues,
           module: "create",
           folderId: input.folderId,
         });
@@ -282,23 +328,51 @@ export async function updateEmail(id: string, input: UpdateEmailInput): Promise<
 
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
-      include: { role: true },
+      select: { id: true, venueId: true },
     });
 
     if (!user) {
       return { success: false, error: "User not found" };
     }
 
-    const isUserAdmin = user.role.name === "ADMIN";
-
-    // Non-admins can only update emails for their venue
-    if (!isUserAdmin && existingEmail.venueId && existingEmail.venueId !== user.venueId) {
+    if (!(await canAccessEmailModule(user.id, "create"))) {
       return { success: false, error: "Access denied" };
     }
 
-    // System emails can only be updated by admins
-    if (existingEmail.isSystem && user.role.name !== "ADMIN") {
-      return { success: false, error: "System emails can only be modified by admins" };
+    const { canAccessAllVenues } = await getEmailBuilderScope(user.id, user.venueId);
+
+    if (existingEmail.venueId) {
+      const canUpdateAtVenue = await hasEmailCreatePermissionAtVenue(
+        user.id,
+        existingEmail.venueId,
+        ["update", "manage"]
+      );
+      if (!canUpdateAtVenue) {
+        return { success: false, error: "Access denied" };
+      }
+    } else if (existingEmail.isSystem && !canAccessAllVenues) {
+      return {
+        success: false,
+        error: "System emails can only be modified by users with global email permissions",
+      };
+    }
+
+    if (input.venueId !== undefined) {
+      if (input.venueId) {
+        const canAssignToVenue = await hasEmailCreatePermissionAtVenue(
+          user.id,
+          input.venueId,
+          ["create", "update", "manage"]
+        );
+        if (!canAssignToVenue) {
+          return { success: false, error: "Access denied" };
+        }
+      } else if (!canAccessAllVenues) {
+        return {
+          success: false,
+          error: "Only users with global email permissions can assign system emails",
+        };
+      }
     }
 
     const updateData: Record<string, unknown> = {
@@ -323,7 +397,7 @@ export async function updateEmail(id: string, input: UpdateEmailInput): Promise<
         try {
           const folderValidation = await validateFolderAssignment({
             userId: session.userId,
-            isAdminUser: isUserAdmin,
+            isAdminUser: canAccessAllVenues,
             module: "create",
             folderId: input.folderId,
           });
@@ -396,15 +470,29 @@ export async function deleteEmail(id: string): Promise<{ success: boolean; error
 
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
-      include: { role: true },
+      select: { id: true, venueId: true },
     });
 
     if (!user) {
       return { success: false, error: "User not found" };
     }
 
-    // Non-admins can only delete emails for their venue
-    if (user.role.name !== "ADMIN" && existingEmail.venueId && existingEmail.venueId !== user.venueId) {
+    if (!(await canAccessEmailModule(user.id, "create"))) {
+      return { success: false, error: "Access denied" };
+    }
+
+    const { canAccessAllVenues } = await getEmailBuilderScope(user.id, user.venueId);
+
+    if (existingEmail.venueId) {
+      const canDeleteAtVenue = await hasEmailCreatePermissionAtVenue(
+        user.id,
+        existingEmail.venueId,
+        ["delete", "manage"]
+      );
+      if (!canDeleteAtVenue) {
+        return { success: false, error: "Access denied" };
+      }
+    } else if (existingEmail.isSystem && !canAccessAllVenues) {
       return { success: false, error: "Access denied" };
     }
 
@@ -452,6 +540,34 @@ export async function duplicateEmail(id: string): Promise<{ success: boolean; em
       return { success: false, error: "Email not found" };
     }
 
+    const user = await prisma.user.findUnique({
+      where: { id: session.userId },
+      select: { id: true, venueId: true },
+    });
+
+    if (!user) {
+      return { success: false, error: "User not found" };
+    }
+
+    if (!(await canAccessEmailModule(user.id, "create"))) {
+      return { success: false, error: "Access denied" };
+    }
+
+    const { canAccessAllVenues } = await getEmailBuilderScope(user.id, user.venueId);
+
+    if (existingEmail.venueId) {
+      const canDuplicateAtVenue = await hasEmailCreatePermissionAtVenue(
+        user.id,
+        existingEmail.venueId,
+        ["view", "create", "update", "manage"]
+      );
+      if (!canDuplicateAtVenue) {
+        return { success: false, error: "Access denied" };
+      }
+    } else if (existingEmail.isSystem && !canAccessAllVenues) {
+      return { success: false, error: "Access denied" };
+    }
+
     const newEmail = await prisma.email.create({
       data: {
         name: `${existingEmail.name} (Copy)`,
@@ -497,6 +613,34 @@ export async function saveEmailAsTemplate(id: string, templateName?: string): Pr
 
     if (!existingEmail) {
       return { success: false, error: "Email not found" };
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: session.userId },
+      select: { id: true, venueId: true },
+    });
+
+    if (!user) {
+      return { success: false, error: "User not found" };
+    }
+
+    if (!(await canAccessEmailModule(user.id, "create"))) {
+      return { success: false, error: "Access denied" };
+    }
+
+    const { canAccessAllVenues } = await getEmailBuilderScope(user.id, user.venueId);
+
+    if (existingEmail.venueId) {
+      const canTemplateAtVenue = await hasEmailCreatePermissionAtVenue(
+        user.id,
+        existingEmail.venueId,
+        ["view", "create", "update", "manage"]
+      );
+      if (!canTemplateAtVenue) {
+        return { success: false, error: "Access denied" };
+      }
+    } else if (existingEmail.isSystem && !canAccessAllVenues) {
+      return { success: false, error: "Access denied" };
     }
 
     // Create a new email as a template
@@ -595,12 +739,18 @@ export async function sendEmailBuilderTest(
 
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
-      include: { role: true },
+      select: { id: true, venueId: true },
     });
 
     if (!user) {
       return { success: false, error: "User not found." };
     }
+
+    if (!(await canAccessEmailModule(user.id, "create"))) {
+      return { success: false, error: "Access denied." };
+    }
+
+    const { canAccessAllVenues } = await getEmailBuilderScope(user.id, user.venueId);
 
     let subject = input.subject?.trim() || "";
     let htmlContent = input.htmlContent?.trim() || "";
@@ -615,7 +765,16 @@ export async function sendEmailBuilderTest(
         return { success: false, error: "Email not found." };
       }
 
-      if (user.role.name !== "ADMIN" && email.venueId && email.venueId !== user.venueId) {
+      if (email.venueId) {
+        const canUseEmail = await hasEmailCreatePermissionAtVenue(
+          user.id,
+          email.venueId,
+          ["view", "create", "update", "manage"]
+        );
+        if (!canUseEmail) {
+          return { success: false, error: "Access denied." };
+        }
+      } else if (email.isSystem && !canAccessAllVenues) {
         return { success: false, error: "Access denied." };
       }
 

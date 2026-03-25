@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/rbac/access";
+import { requireAnyPermission } from "@/lib/rbac/access";
 import { getInvitations, getInvitationStats, getInvitableVenues, getInviteRoles } from "@/lib/actions/invites";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { EnhancedInvitesPageClient } from "./invites-page-enhanced";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 
 export default async function AdminInvitesPage() {
-  const user = await requireAdmin();
+  const user = await requireAnyPermission(SYSTEM_PERMISSIONS.invitesManage);
 
   const [invitationsResult, statsResult, venuesResult, rolesResult] = await Promise.all([
     getInvitations(),
