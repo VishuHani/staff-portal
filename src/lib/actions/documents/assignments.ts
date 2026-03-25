@@ -2,10 +2,11 @@
 
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/actions/auth";
-import { hasPermission, isAdmin } from "@/lib/rbac/permissions";
+import { hasAnyPermission, hasPermission } from "@/lib/rbac/permissions";
 import { AssignmentType, AssignmentStatus, DocumentType } from "@prisma/client";
 import { z } from "zod";
 import { getUserVenueIds } from "@/lib/utils/venue";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 import { revalidatePaths } from "@/lib/utils/action-contract";
 import { toAbsoluteAppUrl } from "@/lib/utils/app-url";
 
@@ -144,6 +145,35 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+async function hasGlobalDocumentVenueScope(userId: string): Promise<boolean> {
+  return hasAnyPermission(userId, [
+    ...SYSTEM_PERMISSIONS.documentsManage,
+    ...SYSTEM_PERMISSIONS.venuesRead,
+  ]);
+}
+
+async function getDocumentScopedVenueIds(userId: string): Promise<string[]> {
+  const [membershipVenues, permissionVenues] = await Promise.all([
+    getUserVenueIds(userId),
+    prisma.userVenuePermission.findMany({
+      where: {
+        userId,
+        permission: {
+          resource: "documents",
+          action: {
+            in: ["view", "read", "create", "update", "delete", "manage"],
+          },
+        },
+      },
+      select: { venueId: true },
+    }),
+  ]);
+
+  return Array.from(
+    new Set([...membershipVenues, ...permissionVenues.map((row) => row.venueId)])
+  );
+}
+
 // ============================================================================
 // Permission Check Helper
 // ============================================================================
@@ -162,10 +192,10 @@ async function checkDocumentPermission(
 
   const permissionAction = permissionMap[action] || "read";
   if (venueId) {
-    const userIsAdmin = await isAdmin(userId);
-    if (!userIsAdmin) {
-      const userVenueIds = await getUserVenueIds(userId);
-      if (!userVenueIds.includes(venueId)) {
+    const hasGlobalScope = await hasGlobalDocumentVenueScope(userId);
+    if (!hasGlobalScope) {
+      const scopedVenueIds = await getDocumentScopedVenueIds(userId);
+      if (!scopedVenueIds.includes(venueId)) {
         return false;
       }
     }
@@ -408,20 +438,22 @@ export async function listDocumentAssignments(
       return { success: false, error: "Unauthorized" };
     }
 
-    const userIsAdmin = await isAdmin(user.id);
-    const userVenueIds = userIsAdmin ? [] : await getUserVenueIds(user.id);
+    const [hasGlobalScope, scopedVenueIds] = await Promise.all([
+      hasGlobalDocumentVenueScope(user.id),
+      getDocumentScopedVenueIds(user.id),
+    ]);
     const where: any = {};
 
     if (filters.venueId) {
-      if (!userIsAdmin && !userVenueIds.includes(filters.venueId)) {
+      if (!hasGlobalScope && !scopedVenueIds.includes(filters.venueId)) {
         return { success: false, error: "You don't have permission to view assignments for this venue" };
       }
       where.venueId = filters.venueId;
-    } else if (!userIsAdmin) {
-      if (userVenueIds.length === 0) {
+    } else if (!hasGlobalScope) {
+      if (scopedVenueIds.length === 0) {
         return { success: true, data: [] };
       }
-      where.venueId = { in: userVenueIds };
+      where.venueId = { in: scopedVenueIds };
     }
 
     if (filters.userId) {
@@ -491,8 +523,10 @@ export async function listMyDocumentAssignments(
       return { success: false, error: "Unauthorized" };
     }
 
-    const userIsAdmin = await isAdmin(user.id);
-    const userVenueIds = userIsAdmin ? [] : await getUserVenueIds(user.id);
+    const [hasGlobalScope, scopedVenueIds] = await Promise.all([
+      hasGlobalDocumentVenueScope(user.id),
+      getDocumentScopedVenueIds(user.id),
+    ]);
 
     const where: any = {
       userId: user.id,
@@ -502,11 +536,11 @@ export async function listMyDocumentAssignments(
       where.status = filters.status;
     }
 
-    if (!userIsAdmin) {
-      if (userVenueIds.length === 0) {
+    if (!hasGlobalScope) {
+      if (scopedVenueIds.length === 0) {
         return { success: true, data: [] };
       }
-      where.venueId = { in: userVenueIds };
+      where.venueId = { in: scopedVenueIds };
     }
 
     const assignments = await prisma.documentAssignment.findMany({
@@ -1118,8 +1152,10 @@ export async function getProspectiveUsers(
       return { success: false, error: "Unauthorized" };
     }
 
-    const userIsAdmin = await isAdmin(user.id);
-    const userVenueIds = userIsAdmin ? [] : await getUserVenueIds(user.id);
+    const [hasGlobalScope, scopedVenueIds] = await Promise.all([
+      hasGlobalDocumentVenueScope(user.id),
+      getDocumentScopedVenueIds(user.id),
+    ]);
 
     // Build where clause for assignments
     const whereClause: any = {
@@ -1129,16 +1165,16 @@ export async function getProspectiveUsers(
     };
 
     if (venueId) {
-      if (!userIsAdmin && !userVenueIds.includes(venueId)) {
+      if (!hasGlobalScope && !scopedVenueIds.includes(venueId)) {
         return { success: false, error: "You don't have permission to view prospective users" };
       }
       whereClause.venueId = venueId;
     } else {
-      if (!userIsAdmin) {
-        if (userVenueIds.length === 0) {
+      if (!hasGlobalScope) {
+        if (scopedVenueIds.length === 0) {
           return { success: true, data: [] };
         }
-        whereClause.venueId = { in: userVenueIds };
+        whereClause.venueId = { in: scopedVenueIds };
       }
     }
 

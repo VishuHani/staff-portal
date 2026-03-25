@@ -1,8 +1,8 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAuth, isAdmin } from "@/lib/rbac/access";
-import { hasPermission } from "@/lib/rbac/permissions";
+import { requireAuth } from "@/lib/rbac/access";
+import { hasAnyPermission, hasPermission } from "@/lib/rbac/permissions";
 import { randomBytes } from "crypto";
 import { addDays } from "date-fns";
 import { sendBrevoEmail } from "@/lib/services/email/brevo";
@@ -12,6 +12,7 @@ import {
   type CreateInvitationInput,
   type InvitationFilters,
 } from "@/lib/schemas/invites";
+import { SYSTEM_PERMISSIONS } from "@/lib/rbac/system-permissions";
 import { revalidatePaths } from "@/lib/utils/action-contract";
 import { toAbsoluteAppUrl } from "@/lib/utils/app-url";
 
@@ -74,20 +75,22 @@ async function getInviteSettings() {
 
 /**
  * Get venues that a user can invite to
- * - Admins can invite to all venues
- * - Non-admins can only invite to venues they are assigned to
+ * - Users with global venue scope can invite to all venues
+ * - Others can only invite to venues they are assigned to
  */
+async function hasGlobalInviteVenueScope(userId: string): Promise<boolean> {
+  return hasAnyPermission(userId, SYSTEM_PERMISSIONS.venuesRead);
+}
+
 async function getUserInvitableVenues(userId: string): Promise<string[]> {
-  if (await isAdmin(userId)) {
-    // Admin can invite to all venues
+  if (await hasGlobalInviteVenueScope(userId)) {
     const venues = await prisma.venue.findMany({
       where: { active: true },
       select: { id: true },
     });
     return venues.map((v) => v.id);
   }
-  
-  // Non-admin can only invite to their assigned venues
+
   const userVenues = await prisma.userVenue.findMany({
     where: { userId },
     select: { venueId: true },
@@ -126,22 +129,25 @@ export async function createInvitation(data: CreateInvitationInput): Promise<{
       return { success: false, error: "You don't have permission to send invitations" };
     }
     
-    // Validate venue access for non-admins
-    const invitableVenues = await getUserInvitableVenues(user.id);
-    const isUserAdmin = await isAdmin(user.id);
+    const [invitableVenues, hasGlobalVenueScope] = await Promise.all([
+      getUserInvitableVenues(user.id),
+      hasGlobalInviteVenueScope(user.id),
+    ]);
     
     if (scope === "VENUE") {
       if (!venueId) {
         return { success: false, error: "Venue is required for venue-scoped invitations" };
       }
       
-      if (!isUserAdmin && !invitableVenues.includes(venueId)) {
+      if (!hasGlobalVenueScope && !invitableVenues.includes(venueId)) {
         return { success: false, error: "You can only send invitations for venues you are assigned to" };
       }
     } else if (scope === "SYSTEM") {
-      // Only admins can send system-level invitations
-      if (!isUserAdmin) {
-        return { success: false, error: "Only administrators can send system-level invitations" };
+      if (!hasGlobalVenueScope) {
+        return {
+          success: false,
+          error: "Only users with global invite scope can send system-level invitations",
+        };
       }
     }
     
@@ -259,8 +265,10 @@ export async function getInvitations(filters?: InvitationFilters & {
       return { success: false, error: "You don't have permission to view invitations" };
     }
     
-    const isUserAdmin = await isAdmin(user.id);
-    const invitableVenues = await getUserInvitableVenues(user.id);
+    const [hasGlobalVenueScope, invitableVenues] = await Promise.all([
+      hasGlobalInviteVenueScope(user.id),
+      getUserInvitableVenues(user.id),
+    ]);
     
     // Build where clause
     const where: any = {};
@@ -273,8 +281,7 @@ export async function getInvitations(filters?: InvitationFilters & {
       where.scope = filters.scope;
     }
     
-    // Non-admins can only see invitations for their venues
-    if (!isUserAdmin) {
+    if (!hasGlobalVenueScope) {
       where.venueId = { in: invitableVenues };
     } else if (filters?.venueId) {
       where.venueId = filters.venueId;
@@ -357,8 +364,8 @@ export async function cancelInvitation(invitationId: string): Promise<{
     }
     
     // Check permission - user must be the inviter or an admin
-    const isUserAdmin = await isAdmin(user.id);
-    if (invitation.inviterId !== user.id && !isUserAdmin) {
+    const hasGlobalVenueScope = await hasGlobalInviteVenueScope(user.id);
+    if (invitation.inviterId !== user.id && !hasGlobalVenueScope) {
       // Check if user has venue permission
       if (invitation.venueId) {
         const canCancel = await hasPermission(user.id, "invites", "cancel", invitation.venueId);
@@ -413,8 +420,8 @@ export async function resendInvitation(invitationId: string): Promise<{
     }
     
     // Check permission
-    const isUserAdmin = await isAdmin(user.id);
-    if (invitation.inviterId !== user.id && !isUserAdmin) {
+    const hasGlobalVenueScope = await hasGlobalInviteVenueScope(user.id);
+    if (invitation.inviterId !== user.id && !hasGlobalVenueScope) {
       const canResend = await hasPermission(user.id, "invites", "resend");
       if (!canResend) {
         return { success: false, error: "You don't have permission to resend this invitation" };
@@ -665,10 +672,10 @@ export async function getInvitableVenues(): Promise<{
   try {
     const user = await requireAuth();
     
-    const isUserAdmin = await isAdmin(user.id);
+    const hasGlobalVenueScope = await hasGlobalInviteVenueScope(user.id);
     
     let venues;
-    if (isUserAdmin) {
+    if (hasGlobalVenueScope) {
       venues = await prisma.venue.findMany({
         where: { active: true },
         select: { id: true, name: true, code: true },
@@ -737,10 +744,12 @@ export async function getInvitationStats(): Promise<{
       return { success: false, error: "You don't have permission to view invitation stats" };
     }
     
-    const isUserAdmin = await isAdmin(user.id);
-    const invitableVenues = await getUserInvitableVenues(user.id);
+    const [hasGlobalVenueScope, invitableVenues] = await Promise.all([
+      hasGlobalInviteVenueScope(user.id),
+      getUserInvitableVenues(user.id),
+    ]);
     
-    const where = isUserAdmin ? {} : { venueId: { in: invitableVenues } };
+    const where = hasGlobalVenueScope ? {} : { venueId: { in: invitableVenues } };
     
     const [total, pending, accepted, expired, cancelled] = await Promise.all([
       prisma.userInvitation.count({ where }),
@@ -783,10 +792,12 @@ export async function getInvitationAnalytics(): Promise<{
       return { success: false, error: "You don't have permission to view invitation analytics" };
     }
     
-    const isUserAdmin = await isAdmin(user.id);
-    const invitableVenues = await getUserInvitableVenues(user.id);
+    const [hasGlobalVenueScope, invitableVenues] = await Promise.all([
+      hasGlobalInviteVenueScope(user.id),
+      getUserInvitableVenues(user.id),
+    ]);
     
-    const baseWhere = isUserAdmin ? {} : { venueId: { in: invitableVenues } };
+    const baseWhere = hasGlobalVenueScope ? {} : { venueId: { in: invitableVenues } };
     
     // Get invitations from the last 12 months
     const twelveMonthsAgo = new Date();
@@ -930,10 +941,12 @@ export async function getInviters(): Promise<{
       return { success: false, error: "You don't have permission to view inviters" };
     }
     
-    const isUserAdmin = await isAdmin(user.id);
-    const invitableVenues = await getUserInvitableVenues(user.id);
+    const [hasGlobalVenueScope, invitableVenues] = await Promise.all([
+      hasGlobalInviteVenueScope(user.id),
+      getUserInvitableVenues(user.id),
+    ]);
     
-    const where = isUserAdmin ? {} : { venueId: { in: invitableVenues } };
+    const where = hasGlobalVenueScope ? {} : { venueId: { in: invitableVenues } };
     
     // Get unique inviter IDs
     const invitations = await prisma.userInvitation.findMany({
@@ -984,10 +997,12 @@ export async function getInviteSettingsAction(): Promise<{
   try {
     const user = await requireAuth();
     
-    // Only admins can manage settings
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin) {
-      return { success: false, error: "Only administrators can view invite settings" };
+    const canManageSettings = await hasAnyPermission(
+      user.id,
+      SYSTEM_PERMISSIONS.invitesManage
+    );
+    if (!canManageSettings) {
+      return { success: false, error: "You don't have permission to view invite settings" };
     }
     
     const settings = await getInviteSettings();
@@ -1023,10 +1038,15 @@ export async function updateInviteSettingsAction(data: {
   try {
     const user = await requireAuth();
     
-    // Only admins can manage settings
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin) {
-      return { success: false, error: "Only administrators can update invite settings" };
+    const canManageSettings = await hasAnyPermission(
+      user.id,
+      SYSTEM_PERMISSIONS.invitesManage
+    );
+    if (!canManageSettings) {
+      return {
+        success: false,
+        error: "You don't have permission to update invite settings",
+      };
     }
     
     // Get existing settings

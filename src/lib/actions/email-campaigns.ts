@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAuth, isAdmin } from "@/lib/rbac/access";
+import { requireAuth } from "@/lib/rbac/access";
 import { normalizePagination } from "@/lib/utils/pagination";
 import { revalidatePaths } from "@/lib/utils/action-contract";
 import {
@@ -37,6 +37,10 @@ import {
   reviewCampaignApproval as reviewCampaignApprovalImpl,
   upsertEmailApprovalPolicy as upsertEmailApprovalPolicyImpl,
 } from "@/lib/actions/email-campaigns/approvals";
+import {
+  getScopedEmailCampaignVenueIds,
+  hasGlobalEmailCampaignScope,
+} from "@/lib/rbac/email-campaign-scope";
 import type {
   EmailCampaign,
   EmailRecipient,
@@ -49,6 +53,18 @@ import type {
 
 type EmailCampaignCreateData = Parameters<typeof prisma.emailCampaign.create>[0]["data"];
 type EmailCampaignUpdateData = Parameters<typeof prisma.emailCampaign.update>[0]["data"];
+
+async function getEmailCampaignScope(userId: string): Promise<{
+  canAccessAllVenues: boolean;
+  scopedVenueIds: string[];
+}> {
+  const [canAccessAllVenues, scopedVenueIds] = await Promise.all([
+    hasGlobalEmailCampaignScope(userId),
+    getScopedEmailCampaignVenueIds(userId),
+  ]);
+
+  return { canAccessAllVenues, scopedVenueIds };
+}
 
 // ============================================================================
 // TYPES
@@ -142,22 +158,24 @@ export async function createEmailCampaign(
   try {
     const user = await requireAuth();
 
-    // Check permissions
-    const isUserAdmin = await isAdmin(user.id);
-    
-    if (!isUserAdmin) {
-      // Non-admin can only create campaigns for their own venues
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
+
+    if (!canAccessAllVenues) {
       if (data.venueId) {
-        const userVenues = await prisma.userVenue.findMany({
-          where: { userId: user.id },
-          select: { venueId: true },
-        });
-        
-        if (!userVenues.some(uv => uv.venueId === data.venueId)) {
-          return { success: false, error: "You don't have permission to create campaigns for this venue" };
+        if (!scopedVenueIds.includes(data.venueId)) {
+          return {
+            success: false,
+            error: "You don't have permission to create campaigns for this venue",
+          };
         }
       } else {
-        return { success: false, error: "Venue managers can only create campaigns for their own venues" };
+        return {
+          success: false,
+          error:
+            "Only users with global campaign permissions can create system campaigns",
+        };
       }
     }
 
@@ -175,14 +193,8 @@ export async function createEmailCampaign(
       return { success: false, error: "Selected email not found" };
     }
 
-    // Check email access permissions
-    if (!isUserAdmin && email.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      
-      if (!userVenues.some(uv => uv.venueId === email.venueId)) {
+    if (!canAccessAllVenues && email.venueId) {
+      if (!scopedVenueIds.includes(email.venueId)) {
         return { success: false, error: "You don't have permission to use this email" };
       }
     }
@@ -193,7 +205,7 @@ export async function createEmailCampaign(
       try {
         const folderValidation = await validateFolderAssignment({
           userId: user.id,
-          isAdminUser: isUserAdmin,
+          isAdminUser: canAccessAllVenues,
           module: "campaigns",
           folderId: data.folderId,
         });
@@ -215,7 +227,7 @@ export async function createEmailCampaign(
 
     const approvalRequirement = await resolveCampaignApprovalRequirement({
       venueId: data.venueId || null,
-      isUserAdmin,
+      isUserAdmin: canAccessAllVenues,
     });
 
     const campaignCreateData: Record<string, unknown> = {
@@ -224,7 +236,9 @@ export async function createEmailCampaign(
       customSubject: data.customSubject,
       customHtml: data.customHtml,
       targetRoles: data.targetRoles || [],
-      targetVenueIds: data.targetVenueIds || (isUserAdmin ? [] : [data.venueId!]).filter(Boolean),
+      targetVenueIds:
+        data.targetVenueIds ||
+        (canAccessAllVenues ? [] : [data.venueId!]).filter(Boolean),
       targetStatus: data.targetStatus || ["ACTIVE"],
       targetUserIds: data.targetUserIds || [],
       segmentId: data.segmentId,
@@ -316,17 +330,15 @@ export async function updateEmailCampaign(
       return { success: false, error: "Only draft campaigns can be edited" };
     }
 
-    // Check permissions
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin && existingCampaign.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      
-      if (!userVenues?.some(uv => uv.venueId === existingCampaign.venueId)) {
-        return { success: false, error: "You don't have permission to edit this campaign" };
-      }
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
+    if (
+      !canAccessAllVenues &&
+      existingCampaign.venueId &&
+      !scopedVenueIds.includes(existingCampaign.venueId)
+    ) {
+      return { success: false, error: "You don't have permission to edit this campaign" };
     }
 
     // Build update data
@@ -348,12 +360,12 @@ export async function updateEmailCampaign(
     if (data.folderId !== undefined) {
       if (data.folderId) {
         try {
-          const folderValidation = await validateFolderAssignment({
-            userId: user.id,
-            isAdminUser: isUserAdmin,
-            module: "campaigns",
-            folderId: data.folderId,
-          });
+        const folderValidation = await validateFolderAssignment({
+          userId: user.id,
+          isAdminUser: canAccessAllVenues,
+          module: "campaigns",
+          folderId: data.folderId,
+        });
 
           if (!folderValidation.valid) {
             return {
@@ -427,17 +439,15 @@ export async function deleteEmailCampaign(id: string): Promise<{
       return { success: false, error: "Only draft campaigns can be deleted" };
     }
 
-    // Check permissions
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin && campaign.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      
-      if (!userVenues?.some(uv => uv.venueId === campaign.venueId)) {
-        return { success: false, error: "You don't have permission to delete this campaign" };
-      }
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
+    if (
+      !canAccessAllVenues &&
+      campaign.venueId &&
+      !scopedVenueIds.includes(campaign.venueId)
+    ) {
+      return { success: false, error: "You don't have permission to delete this campaign" };
     }
 
     await prisma.emailCampaign.delete({
@@ -499,17 +509,15 @@ export async function getEmailCampaign(id: string): Promise<{
       return { success: false, error: "Campaign not found" };
     }
 
-    // Check permissions
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin && campaign.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      
-      if (!userVenues?.some(uv => uv.venueId === campaign.venueId)) {
-        return { success: false, error: "You don't have permission to view this campaign" };
-      }
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
+    if (
+      !canAccessAllVenues &&
+      campaign.venueId &&
+      !scopedVenueIds.includes(campaign.venueId)
+    ) {
+      return { success: false, error: "You don't have permission to view this campaign" };
     }
 
     return { success: true, campaign: campaign as any };
@@ -533,7 +541,9 @@ export async function getEmailCampaigns(filters?: EmailCampaignFilters): Promise
 }> {
   try {
     const user = await requireAuth();
-    const isUserAdmin = await isAdmin(user.id);
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
 
     const pagination = normalizePagination(
       {
@@ -577,13 +587,8 @@ export async function getEmailCampaigns(filters?: EmailCampaignFilters): Promise
       };
     }
 
-    // Non-admin can only see campaigns for their venues
-    if (!isUserAdmin) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      const allowedVenueIds = userVenues.map((uv) => uv.venueId);
+    if (!canAccessAllVenues) {
+      const allowedVenueIds = scopedVenueIds;
 
       if (filters?.venueId) {
         if (!allowedVenueIds.includes(filters.venueId)) {
@@ -609,6 +614,27 @@ export async function getEmailCampaigns(filters?: EmailCampaignFilters): Promise
 
         where.venueId = filters.venueId;
       } else {
+        if (allowedVenueIds.length === 0) {
+          return {
+            success: true,
+            campaigns: [],
+            total: 0,
+            summary: {
+              drafts: 0,
+              scheduled: 0,
+              sent: 0,
+              totalRecipients: 0,
+            },
+            pagination: {
+              page: pagination.page,
+              limit: pagination.limit,
+              total: 0,
+              totalPages: 0,
+              hasMore: false,
+            },
+          };
+        }
+
         where.venueId = { in: allowedVenueIds };
       }
     }
@@ -686,7 +712,9 @@ export async function previewCampaignRecipients(
 ): Promise<RecipientPreviewResult> {
   try {
     const user = await requireAuth();
-    const isUserAdmin = await isAdmin(user.id);
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
 
     // Build user query
     const userWhere: any = {
@@ -700,17 +728,12 @@ export async function previewCampaignRecipients(
 
     // Apply venue filter
     let venueFilter: string[] = [];
-    if (isUserAdmin) {
+    if (canAccessAllVenues) {
       if (targeting.venueIds && targeting.venueIds.length > 0) {
         venueFilter = targeting.venueIds;
       }
     } else {
-      // Non-admin can only target their own venues
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      venueFilter = userVenues.map(uv => uv.venueId);
+      venueFilter = [...scopedVenueIds];
       
       if (targeting.venueIds && targeting.venueIds.length > 0) {
         venueFilter = venueFilter.filter(v => targeting.venueIds!.includes(v));
@@ -824,17 +847,15 @@ export async function sendTestEmail(
       return { success: false, error: "Campaign has no linked email" };
     }
 
-    // Check permissions
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin && campaign.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      
-      if (!userVenues?.some(uv => uv.venueId === campaign.venueId)) {
-        return { success: false, error: "You don't have permission to send this campaign" };
-      }
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
+    if (
+      !canAccessAllVenues &&
+      campaign.venueId &&
+      !scopedVenueIds.includes(campaign.venueId)
+    ) {
+      return { success: false, error: "You don't have permission to send this campaign" };
     }
 
     // Get content from email or custom overrides
@@ -906,17 +927,15 @@ export async function sendEmailCampaign(id: string): Promise<{
       return { success: false, error: "Campaign cannot be sent" };
     }
 
-    // Check permissions
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin && campaign.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      
-      if (!userVenues?.some(uv => uv.venueId === campaign.venueId)) {
-        return { success: false, error: "You don't have permission to send this campaign" };
-      }
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
+    if (
+      !canAccessAllVenues &&
+      campaign.venueId &&
+      !scopedVenueIds.includes(campaign.venueId)
+    ) {
+      return { success: false, error: "You don't have permission to send this campaign" };
     }
 
     // Get recipients
@@ -1146,17 +1165,15 @@ export async function scheduleEmailCampaign(
       return { success: false, error: "Only draft campaigns can be scheduled" };
     }
 
-    // Check permissions
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin && campaign.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      
-      if (!userVenues?.some(uv => uv.venueId === campaign.venueId)) {
-        return { success: false, error: "You don't have permission to schedule this campaign" };
-      }
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
+    if (
+      !canAccessAllVenues &&
+      campaign.venueId &&
+      !scopedVenueIds.includes(campaign.venueId)
+    ) {
+      return { success: false, error: "You don't have permission to schedule this campaign" };
     }
 
     await prisma.emailCampaign.update({
@@ -1199,17 +1216,15 @@ export async function cancelEmailCampaign(id: string): Promise<{
       return { success: false, error: "Only scheduled or draft campaigns can be cancelled" };
     }
 
-    // Check permissions
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin && campaign.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      
-      if (!userVenues?.some(uv => uv.venueId === campaign.venueId)) {
-        return { success: false, error: "You don't have permission to cancel this campaign" };
-      }
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
+    if (
+      !canAccessAllVenues &&
+      campaign.venueId &&
+      !scopedVenueIds.includes(campaign.venueId)
+    ) {
+      return { success: false, error: "You don't have permission to cancel this campaign" };
     }
 
     await prisma.emailCampaign.update({
@@ -1272,17 +1287,15 @@ export async function getCampaignAnalytics(id: string): Promise<{
       return { success: false, error: "Campaign not found" };
     }
 
-    // Check permissions
-    const isUserAdmin = await isAdmin(user.id);
-    if (!isUserAdmin && campaign.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      
-      if (!userVenues?.some(uv => uv.venueId === campaign.venueId)) {
-        return { success: false, error: "You don't have permission to view this campaign" };
-      }
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
+    if (
+      !canAccessAllVenues &&
+      campaign.venueId &&
+      !scopedVenueIds.includes(campaign.venueId)
+    ) {
+      return { success: false, error: "You don't have permission to view this campaign" };
     }
 
     const analytics = await prisma.emailCampaignAnalytics.findUnique({
@@ -1312,7 +1325,9 @@ export async function getEmailTemplates(filters?: {
 }> {
   try {
     const user = await requireAuth();
-    const isUserAdmin = await isAdmin(user.id);
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
 
     const where: any = {};
 
@@ -1326,14 +1341,9 @@ export async function getEmailTemplates(filters?: {
       ];
     }
 
-    // Non-admin can only see templates for their venues or system templates
-    if (!isUserAdmin) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
+    if (!canAccessAllVenues) {
       where.OR = [
-        { venueId: { in: userVenues.map(uv => uv.venueId) } },
+        { venueId: { in: scopedVenueIds } },
         { isSystem: true },
       ];
     }
@@ -1461,7 +1471,9 @@ export async function getAvailableEmails(filters?: {
 }> {
   try {
     const user = await requireAuth();
-    const isUserAdmin = await isAdmin(user.id);
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
 
     const where: any = {};
 
@@ -1475,14 +1487,9 @@ export async function getAvailableEmails(filters?: {
       ];
     }
 
-    // Non-admin can only see emails for their venues or system emails
-    if (!isUserAdmin) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
+    if (!canAccessAllVenues) {
       where.OR = [
-        { venueId: { in: userVenues.map(uv => uv.venueId) } },
+        { venueId: { in: scopedVenueIds } },
         { venueId: null }, // Global emails available to all
       ];
     }
@@ -1533,7 +1540,9 @@ export async function getEmailSegments(filters?: {
 }> {
   try {
     const user = await requireAuth();
-    const isUserAdmin = await isAdmin(user.id);
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
 
     const where: any = {};
 
@@ -1544,14 +1553,9 @@ export async function getEmailSegments(filters?: {
       ];
     }
 
-    // Non-admin can only see segments for their venues or system segments
-    if (!isUserAdmin) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
+    if (!canAccessAllVenues) {
       where.OR = [
-        { venueId: { in: userVenues.map(uv => uv.venueId) } },
+        { venueId: { in: scopedVenueIds } },
         { venueId: null }, // Global segments available to all
       ];
     }
@@ -1592,19 +1596,20 @@ export async function createEmailSegment(data: {
 }> {
   try {
     const user = await requireAuth();
-    const isUserAdmin = await isAdmin(user.id);
+    const { canAccessAllVenues, scopedVenueIds } = await getEmailCampaignScope(
+      user.id
+    );
 
-    if (!isUserAdmin && !data.venueId) {
-      return { success: false, error: "Venue managers can only create segments for their venues" };
+    if (!canAccessAllVenues && !data.venueId) {
+      return {
+        success: false,
+        error: "Only users with global campaign permissions can create system segments",
+      };
     }
 
     // Check venue permission
-    if (!isUserAdmin && data.venueId) {
-      const userVenues = await prisma.userVenue.findMany({
-        where: { userId: user.id },
-        select: { venueId: true },
-      });
-      if (!userVenues.some(uv => uv.venueId === data.venueId)) {
+    if (!canAccessAllVenues && data.venueId) {
+      if (!scopedVenueIds.includes(data.venueId)) {
         return { success: false, error: "You don't have permission to create segments for this venue" };
       }
     }

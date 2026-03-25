@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { EmailWorkspaceModule } from "@/lib/rbac/email-workspace";
+import { getScopedEmailModuleVenueIds } from "@/lib/rbac/email-module-scope";
 
 type DatabaseEmailWorkspaceModule =
   | "CREATE_EMAIL"
@@ -24,15 +25,6 @@ const MODULE_TO_DB: Record<EmailWorkspaceModule, DatabaseEmailWorkspaceModule> =
   campaigns: "CAMPAIGNS",
   reports: "REPORTS",
 };
-
-async function getUserVenueIds(userId: string): Promise<string[]> {
-  const venues = await prisma.userVenue.findMany({
-    where: { userId },
-    select: { venueId: true },
-  });
-
-  return venues.map((venue) => venue.venueId);
-}
 
 export interface ValidateFolderAssignmentInput {
   userId: string;
@@ -85,8 +77,11 @@ export async function validateFolderAssignment(
   }
 
   if (folder.scope === "TEAM" && folder.venue_id) {
-    const userVenueIds = await getUserVenueIds(input.userId);
-    if (userVenueIds.includes(folder.venue_id)) {
+    const scopedVenueIds = await getScopedEmailModuleVenueIds(
+      input.userId,
+      input.module
+    );
+    if (scopedVenueIds.includes(folder.venue_id)) {
       return { valid: true };
     }
   }

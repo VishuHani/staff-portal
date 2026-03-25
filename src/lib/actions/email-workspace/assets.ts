@@ -12,8 +12,11 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
 import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
 import {
+  getScopedEmailModuleVenueIds,
+  hasGlobalEmailModuleScope,
+} from "@/lib/rbac/email-module-scope";
+import {
   hasPermission,
-  isAdmin,
   type PermissionAction,
 } from "@/lib/rbac/permissions";
 import {
@@ -270,22 +273,10 @@ function revalidateAssetPaths() {
   }
 }
 
-async function getUserVenueIds(userId: string): Promise<string[]> {
-  const rows = await prisma.userVenue.findMany({
-    where: { userId },
-    select: { venueId: true },
-  });
-  return rows.map((row) => row.venueId);
-}
-
 async function canMutateAssets(
   userId: string,
   action: Extract<PermissionAction, "create" | "update" | "delete">
 ): Promise<boolean> {
-  if (await isAdmin(userId)) {
-    return true;
-  }
-
   if (await hasPermission(userId, "email_workspace", "manage")) {
     return true;
   }
@@ -304,10 +295,10 @@ function canReadAsset(
     venueId: string | null;
   },
   userId: string,
-  isAdminUser: boolean,
-  userVenueIds: string[]
+  canAccessAllVenues: boolean,
+  scopedVenueIds: string[]
 ): boolean {
-  if (isAdminUser) {
+  if (canAccessAllVenues) {
     return true;
   }
 
@@ -322,7 +313,7 @@ function canReadAsset(
   if (
     asset.scope === "TEAM" &&
     asset.venueId &&
-    userVenueIds.includes(asset.venueId)
+    scopedVenueIds.includes(asset.venueId)
   ) {
     return true;
   }
@@ -332,10 +323,10 @@ function canReadAsset(
 
 function buildVisibilityWhere(
   userId: string,
-  isAdminUser: boolean,
-  userVenueIds: string[]
+  canAccessAllVenues: boolean,
+  scopedVenueIds: string[]
 ): EmailAssetWhereInput {
-  if (isAdminUser) {
+  if (canAccessAllVenues) {
     return {};
   }
 
@@ -343,18 +334,18 @@ function buildVisibilityWhere(
     OR: [
       { scope: "SYSTEM" },
       { ownerId: userId },
-      { scope: "TEAM", venueId: { in: userVenueIds } },
+      { scope: "TEAM", venueId: { in: scopedVenueIds } },
     ],
   };
 }
 
 function getResolvedScopeAndVenue(input: {
-  isAdminUser: boolean;
-  userVenueIds: string[];
+  canAccessAllVenues: boolean;
+  scopedVenueIds: string[];
   requestedScope: EmailContentScope;
   requestedVenueId: string | null;
 }): { scope: EmailContentScope; venueId: string | null; error?: string } {
-  if (input.isAdminUser) {
+  if (input.canAccessAllVenues) {
     return {
       scope: input.requestedScope,
       venueId: input.requestedVenueId,
@@ -365,12 +356,13 @@ function getResolvedScopeAndVenue(input: {
     return {
       scope: "PRIVATE",
       venueId: null,
-      error: "Only admins can create system-scoped assets.",
+      error:
+        "Only users with global email asset permissions can create system-scoped assets.",
     };
   }
 
   if (input.requestedScope === "TEAM") {
-    const venueId = input.requestedVenueId || input.userVenueIds[0] || null;
+    const venueId = input.requestedVenueId || input.scopedVenueIds[0] || null;
     if (!venueId) {
       return {
         scope: "TEAM",
@@ -379,7 +371,7 @@ function getResolvedScopeAndVenue(input: {
       };
     }
 
-    if (!input.userVenueIds.includes(venueId)) {
+    if (!input.scopedVenueIds.includes(venueId)) {
       return {
         scope: "TEAM",
         venueId,
@@ -395,7 +387,7 @@ function getResolvedScopeAndVenue(input: {
 
   if (
     input.requestedVenueId &&
-    !input.userVenueIds.includes(input.requestedVenueId)
+    !input.scopedVenueIds.includes(input.requestedVenueId)
   ) {
     return {
       scope: "PRIVATE",
@@ -617,11 +609,16 @@ export async function listEmailAssets(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "assets"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "assets");
 
     const whereClauses: EmailAssetWhereInput[] = [
-      buildVisibilityWhere(user.id, isAdminUser, userVenueIds),
+      buildVisibilityWhere(user.id, canAccessAllVenues, scopedVenueIds),
     ];
 
     if (input.search?.trim()) {
@@ -767,11 +764,16 @@ export async function createEmailAsset(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "assets"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "assets");
     const scopeResolution = getResolvedScopeAndVenue({
-      isAdminUser,
-      userVenueIds,
+      canAccessAllVenues,
+      scopedVenueIds,
       requestedScope: input.scope || "PRIVATE",
       requestedVenueId: input.venueId || null,
     });
@@ -788,7 +790,7 @@ export async function createEmailAsset(
       try {
         const folderValidation = await validateFolderAssignment({
           userId: user.id,
-          isAdminUser,
+          isAdminUser: canAccessAllVenues,
           module: "assets",
           folderId: input.folderId,
         });
@@ -1162,9 +1164,16 @@ export async function updateEmailAsset(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
-    if (!canReadAsset(existing, user.id, isAdminUser, userVenueIds)) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "assets"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "assets");
+    if (
+      !canReadAsset(existing, user.id, canAccessAllVenues, scopedVenueIds)
+    ) {
       return {
         success: false,
         error: "You don't have permission to update this asset.",
@@ -1199,7 +1208,7 @@ export async function updateEmailAsset(
         try {
           const folderValidation = await validateFolderAssignment({
             userId: user.id,
-            isAdminUser,
+            isAdminUser: canAccessAllVenues,
             module: "assets",
             folderId: input.folderId,
           });
@@ -1304,15 +1313,19 @@ export async function deleteEmailAsset(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "assets"
+    );
     if (
-      !isAdminUser &&
+      !canAccessAllVenues &&
       existing.ownerId !== user.id &&
       existing.scope === "SYSTEM"
     ) {
       return {
         success: false,
-        error: "Only admins can delete system-scoped assets.",
+        error:
+          "Only users with global email asset permissions can delete system-scoped assets.",
       };
     }
 

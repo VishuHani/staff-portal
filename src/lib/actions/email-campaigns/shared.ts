@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { isAdmin } from "@/lib/rbac/access";
-import { hasPermission } from "@/lib/rbac/permissions";
+import { hasAnyPermission } from "@/lib/rbac/permissions";
 import type {
   CampaignApprovalStatus,
   EmailCampaign,
@@ -98,17 +97,9 @@ export async function resolveCampaignApprovalRequirement(input: {
 }
 
 export async function canApproveCampaign(userId: string): Promise<boolean> {
-  if (await isAdmin(userId)) {
-    return true;
-  }
-
-  if (await hasPermission(userId, "email_workspace", "approve")) {
-    return true;
-  }
-
-  if (await hasPermission(userId, "email_campaigns", "approve")) {
-    return true;
-  }
-
-  return hasPermission(userId, "email_campaigns", "manage");
+  return hasAnyPermission(userId, [
+    { resource: "email_workspace", action: "approve" },
+    { resource: "email_campaigns", action: "approve" },
+    { resource: "email_campaigns", action: "manage" },
+  ]);
 }

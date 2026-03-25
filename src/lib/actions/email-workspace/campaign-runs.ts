@@ -2,9 +2,10 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isAdmin, requireAuth } from "@/lib/rbac/access";
+import { requireAuth } from "@/lib/rbac/access";
 import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
 import { isCampaignRunSchemaMissingError } from "@/lib/email-workspace/campaign-runs";
+import { canAccessEmailCampaignVenue } from "@/lib/rbac/email-campaign-scope";
 
 export interface EmailCampaignRunSummary {
   id: string;
@@ -35,14 +36,6 @@ export interface CampaignRunsOutput {
   error?: string;
 }
 
-async function getUserVenueIds(userId: string): Promise<string[]> {
-  const rows = await prisma.userVenue.findMany({
-    where: { userId },
-    select: { venueId: true },
-  });
-  return rows.map((row) => row.venueId);
-}
-
 export async function listCampaignRuns(
   input: ListCampaignRunsInput
 ): Promise<CampaignRunsOutput> {
@@ -71,19 +64,14 @@ export async function listCampaignRuns(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    if (!isAdminUser) {
-      const userVenueIds = await getUserVenueIds(user.id);
-      const canRead =
-        campaign.createdBy === user.id ||
-        !campaign.venueId ||
-        userVenueIds.includes(campaign.venueId);
-      if (!canRead) {
-        return {
-          success: false,
-          error: "You don't have permission to view this campaign run history.",
-        };
-      }
+    const canRead =
+      campaign.createdBy === user.id ||
+      (await canAccessEmailCampaignVenue(user.id, campaign.venueId));
+    if (!canRead) {
+      return {
+        success: false,
+        error: "You don't have permission to view this campaign run history.",
+      };
     }
 
     const take = Math.max(1, Math.min(input.take ?? 25, 100));

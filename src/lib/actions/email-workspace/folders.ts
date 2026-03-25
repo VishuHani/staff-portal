@@ -11,9 +11,11 @@ import {
   type EmailWorkspaceModule,
 } from "@/lib/rbac/email-workspace";
 import {
+  getScopedEmailModuleVenueIds,
+  hasGlobalEmailModuleScope,
+} from "@/lib/rbac/email-module-scope";
+import {
   hasPermission,
-  isAdmin,
-  isManager,
   type PermissionResource,
 } from "@/lib/rbac/permissions";
 
@@ -174,24 +176,11 @@ function buildFolderTree(rows: EmailFolderRow[]): EmailFolderNode[] {
   return roots;
 }
 
-async function getUserVenueIds(userId: string): Promise<string[]> {
-  const venues = await prisma.userVenue.findMany({
-    where: { userId },
-    select: { venueId: true },
-  });
-
-  return venues.map((venue) => venue.venueId);
-}
-
 async function hasFolderMutationAccess(
   userId: string,
   module: EmailWorkspaceModule,
   action: "create" | "update" | "delete"
 ): Promise<boolean> {
-  if (await isAdmin(userId)) {
-    return true;
-  }
-
   const moduleResource = MODULE_RESOURCE_MAP[module];
 
   if (await hasPermission(userId, "email_workspace", "manage")) {
@@ -206,16 +195,16 @@ async function hasFolderMutationAccess(
     return true;
   }
 
-  return isManager(userId);
+  return false;
 }
 
 function canReadFolderRow(
   folder: EmailFolderRow,
   userId: string,
-  isUserAdmin: boolean,
-  userVenueIds: string[]
+  canAccessAllVenues: boolean,
+  scopedVenueIds: string[]
 ): boolean {
-  if (isUserAdmin) {
+  if (canAccessAllVenues) {
     return true;
   }
 
@@ -230,7 +219,7 @@ function canReadFolderRow(
   if (
     folder.scope === "TEAM" &&
     folder.venue_id &&
-    userVenueIds.includes(folder.venue_id)
+    scopedVenueIds.includes(folder.venue_id)
   ) {
     return true;
   }
@@ -381,12 +370,17 @@ export async function listFolderTree(
     }
 
     const moduleKey = MODULE_TO_DB[input.module];
-    const userIsAdmin = await isAdmin(user.id);
-    const userVenueIds = userIsAdmin ? [] : await getUserVenueIds(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      input.module
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, input.module);
 
     const teamVenueAccessSql =
-      userVenueIds.length > 0
-        ? Prisma.sql` OR (scope::text = 'TEAM' AND "venueId" IN (${Prisma.join(userVenueIds)}))`
+      scopedVenueIds.length > 0
+        ? Prisma.sql` OR (scope::text = 'TEAM' AND "venueId" IN (${Prisma.join(scopedVenueIds)}))`
         : Prisma.empty;
 
     const rows = await prisma.$queryRaw<EmailFolderRow[]>(Prisma.sql`
@@ -404,7 +398,7 @@ export async function listFolderTree(
       FROM "email_folders"
       WHERE module::text = ${moduleKey}
       AND (
-        ${userIsAdmin}
+        ${canAccessAllVenues}
         OR scope::text = 'SYSTEM'
         OR "ownerId" = ${user.id}
         ${teamVenueAccessSql}
@@ -468,8 +462,13 @@ export async function createFolder(
       };
     }
 
-    const userIsAdmin = await isAdmin(user.id);
-    const userVenueIds = userIsAdmin ? [] : await getUserVenueIds(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      input.module
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, input.module);
     const moduleKey = MODULE_TO_DB[input.module];
 
     let parent: EmailFolderRow | null = null;
@@ -490,7 +489,9 @@ export async function createFolder(
         };
       }
 
-      if (!canReadFolderRow(parent, user.id, userIsAdmin, userVenueIds)) {
+      if (
+        !canReadFolderRow(parent, user.id, canAccessAllVenues, scopedVenueIds)
+      ) {
         return {
           success: false,
           error: "You don't have permission to use this parent folder.",
@@ -507,10 +508,11 @@ export async function createFolder(
       venueId = parent.venue_id;
       path = `${parent.path}${parent.id}/`;
     } else {
-      if (scope === "SYSTEM" && !userIsAdmin) {
+      if (scope === "SYSTEM" && !canAccessAllVenues) {
         return {
           success: false,
-          error: "Only admins can create SYSTEM-scoped folders.",
+          error:
+            "Only users with global email module permissions can create SYSTEM-scoped folders.",
         };
       }
 
@@ -525,7 +527,11 @@ export async function createFolder(
         venueId = null;
       }
 
-      if (!userIsAdmin && venueId && !userVenueIds.includes(venueId)) {
+      if (
+        !canAccessAllVenues &&
+        venueId &&
+        !scopedVenueIds.includes(venueId)
+      ) {
         return {
           success: false,
           error: "You can only create TEAM folders for your assigned venues.",
@@ -663,11 +669,15 @@ export async function renameFolder(
       };
     }
 
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin && folder.owner_id !== user.id) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      folderModule
+    );
+    if (!canAccessAllVenues && folder.owner_id !== user.id) {
       return {
         success: false,
-        error: "Only folder owners (or admins) can rename folders.",
+        error:
+          "Only folder owners (or users with global email module permissions) can rename folders.",
       };
     }
 
@@ -764,11 +774,15 @@ export async function moveFolder(
       };
     }
 
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin && folder.owner_id !== user.id) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      folderModule
+    );
+    if (!canAccessAllVenues && folder.owner_id !== user.id) {
       return {
         success: false,
-        error: "Only folder owners (or admins) can move folders.",
+        error:
+          "Only folder owners (or users with global email module permissions) can move folders.",
       };
     }
 
@@ -933,11 +947,15 @@ export async function deleteFolder(
       };
     }
 
-    const userIsAdmin = await isAdmin(user.id);
-    if (!userIsAdmin && folder.owner_id !== user.id) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      folderModule
+    );
+    if (!canAccessAllVenues && folder.owner_id !== user.id) {
       return {
         success: false,
-        error: "Only folder owners (or admins) can delete folders.",
+        error:
+          "Only folder owners (or users with global email module permissions) can delete folders.",
       };
     }
 
