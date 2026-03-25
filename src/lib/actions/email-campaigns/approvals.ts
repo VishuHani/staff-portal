@@ -1,8 +1,8 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireAuth, isAdmin } from "@/lib/rbac/access";
-import { hasPermission } from "@/lib/rbac/permissions";
+import { requireAuth } from "@/lib/rbac/access";
+import { hasAnyPermission, hasPermission } from "@/lib/rbac/permissions";
 import {
   actionFailure,
   actionSuccess,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/utils/action-contract";
 import { canApproveCampaign } from "./shared";
 import type { CampaignApprovalStatus } from "@/types/email-campaign";
+import { canAccessEmailCampaignVenue } from "@/lib/rbac/email-campaign-scope";
 
 type ApprovalPolicyPayload = {
   policy: {
@@ -27,9 +28,16 @@ export async function getEmailApprovalPolicy(
 ): Promise<ActionResult<ApprovalPolicyPayload>> {
   try {
     const user = await requireAuth();
-    const isUserAdmin = await isAdmin(user.id);
+    const [canManagePolicy, canAccessVenue] = await Promise.all([
+      hasAnyPermission(user.id, [
+        { resource: "email_campaigns", action: "manage" },
+        { resource: "email_workspace", action: "manage" },
+        { resource: "admin", action: "manage_settings" },
+      ]),
+      canAccessEmailCampaignVenue(user.id, venueId),
+    ]);
 
-    if (!isUserAdmin && !(await hasPermission(user.id, "email_campaigns", "manage"))) {
+    if (!canManagePolicy || !canAccessVenue) {
       return actionFailure("You don't have permission to view approval policy.");
     }
 
@@ -64,8 +72,20 @@ export async function upsertEmailApprovalPolicy(input: {
 }): Promise<ActionResult> {
   try {
     const user = await requireAuth();
-    if (!(await isAdmin(user.id))) {
-      return actionFailure("Only admins can update approval policy.");
+    const [canManagePolicy, canAccessVenue] = await Promise.all([
+      hasAnyPermission(user.id, [
+        { resource: "email_campaigns", action: "manage" },
+        { resource: "email_workspace", action: "manage" },
+        { resource: "admin", action: "manage_settings" },
+        { resource: "admin", action: "manage_stores" },
+      ]),
+      canAccessEmailCampaignVenue(user.id, input.venueId),
+    ]);
+
+    if (!canManagePolicy || !canAccessVenue) {
+      return actionFailure(
+        "You don't have permission to update approval policy."
+      );
     }
 
     await prisma.emailApprovalPolicy.upsert({
@@ -113,11 +133,27 @@ export async function requestCampaignApproval(
       return actionFailure("Campaign not found.");
     }
 
-    const isUserAdmin = await isAdmin(user.id);
-    const canManageCampaigns =
-      isUserAdmin || (await hasPermission(user.id, "email_campaigns", "manage"));
+    const [canManageCampaigns, canAccessVenue] = await Promise.all([
+      Promise.all([
+        hasPermission(
+          user.id,
+          "email_campaigns",
+          "manage",
+          campaign.venueId ?? undefined
+        ),
+        hasPermission(
+          user.id,
+          "email_workspace",
+          "manage",
+          campaign.venueId ?? undefined
+        ),
+      ]).then(([campaignManage, workspaceManage]) =>
+        campaignManage || workspaceManage
+      ),
+      canAccessEmailCampaignVenue(user.id, campaign.venueId),
+    ]);
 
-    if (!canManageCampaigns && campaign.createdBy !== user.id) {
+    if ((!canAccessVenue || !canManageCampaigns) && campaign.createdBy !== user.id) {
       return actionFailure(
         "You don't have permission to request approval for this campaign."
       );

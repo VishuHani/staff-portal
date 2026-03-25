@@ -281,6 +281,32 @@ export async function hasAnyPermission(
 }
 
 /**
+ * Check if a user has any of the specified permissions via role-level grants only.
+ * Venue-scoped grants are intentionally excluded.
+ */
+export async function hasAnyRolePermission(
+  userId: string,
+  permissions: Permission[]
+): Promise<boolean> {
+  const snapshot = await getPermissionSnapshot(userId);
+  if (!snapshot) {
+    return false;
+  }
+
+  if (snapshot.roleName === "ADMIN") {
+    return true;
+  }
+
+  return permissions.some((permission) =>
+    snapshot.rolePermissions.some(
+      (candidate) =>
+        candidate.resource === permission.resource &&
+        candidate.action === permission.action
+    )
+  );
+}
+
+/**
  * Get all permissions for a user (role-based only, no venue-specific)
  * @param userId - The user's ID
  * @returns Array of permissions

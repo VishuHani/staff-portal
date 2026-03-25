@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma";
-import { hasAnyPermission, hasPermission } from "@/lib/rbac/permissions";
+import {
+  hasAnyRolePermission,
+  hasPermission,
+} from "@/lib/rbac/permissions";
 import type { PermissionAction } from "@/lib/rbac/types";
 import { getUserVenueIds } from "@/lib/utils/venue";
 
@@ -27,7 +30,7 @@ const STORE_SCOPED_ACTIONS: PermissionAction[] = ["view_all", "manage", "update"
 const VENUE_SCOPED_ACTIONS: PermissionAction[] = ["view_all", "manage"];
 
 export async function hasGlobalEmailCreateScope(userId: string): Promise<boolean> {
-  return hasAnyPermission(userId, [...EMAIL_CREATE_GLOBAL_SCOPE_PERMISSIONS]);
+  return hasAnyRolePermission(userId, [...EMAIL_CREATE_GLOBAL_SCOPE_PERMISSIONS]);
 }
 
 export async function getScopedEmailCreateVenueIds(

@@ -10,8 +10,11 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
 import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
 import {
+  getScopedEmailModuleVenueIds,
+  hasGlobalEmailModuleScope,
+} from "@/lib/rbac/email-module-scope";
+import {
   hasPermission,
-  isAdmin,
   type PermissionAction,
 } from "@/lib/rbac/permissions";
 import {
@@ -199,22 +202,10 @@ function revalidateAudiencePaths() {
 const MAX_AUDIENCE_SQL_ROWS = 2000;
 const SQL_STATEMENT_TIMEOUT_MS = 5000;
 
-async function getUserVenueIds(userId: string): Promise<string[]> {
-  const rows = await prisma.userVenue.findMany({
-    where: { userId },
-    select: { venueId: true },
-  });
-  return rows.map((row) => row.venueId);
-}
-
 async function canMutateAudienceLists(
   userId: string,
   action: Extract<PermissionAction, "create" | "update" | "delete">
 ): Promise<boolean> {
-  if (await isAdmin(userId)) {
-    return true;
-  }
-
   if (await hasPermission(userId, "email_workspace", "manage")) {
     return true;
   }
@@ -233,10 +224,10 @@ function canReadAudienceList(
     venueId: string | null;
   },
   userId: string,
-  isAdminUser: boolean,
-  userVenueIds: string[]
+  canAccessAllVenues: boolean,
+  scopedVenueIds: string[]
 ): boolean {
-  if (isAdminUser) {
+  if (canAccessAllVenues) {
     return true;
   }
 
@@ -251,7 +242,7 @@ function canReadAudienceList(
   if (
     list.scope === "TEAM" &&
     list.venueId &&
-    userVenueIds.includes(list.venueId)
+    scopedVenueIds.includes(list.venueId)
   ) {
     return true;
   }
@@ -315,10 +306,10 @@ function toAudienceRunSummary(run: {
 
 function buildVisibilityWhere(
   userId: string,
-  isAdminUser: boolean,
-  userVenueIds: string[]
+  canAccessAllVenues: boolean,
+  scopedVenueIds: string[]
 ): AudienceListWhereInput {
-  if (isAdminUser) {
+  if (canAccessAllVenues) {
     return {};
   }
 
@@ -326,7 +317,7 @@ function buildVisibilityWhere(
     OR: [
       { scope: "SYSTEM" },
       { ownerId: userId },
-      { scope: "TEAM", venueId: { in: userVenueIds } },
+      { scope: "TEAM", venueId: { in: scopedVenueIds } },
     ],
   };
 }
@@ -617,13 +608,13 @@ function mergeFilterPayload(
 
 async function executeAudienceFilter({
   userId,
-  isAdminUser,
-  userVenueIds,
+  canAccessAllVenues,
+  scopedVenueIds,
   filter,
 }: {
   userId: string;
-  isAdminUser: boolean;
-  userVenueIds: string[];
+  canAccessAllVenues: boolean;
+  scopedVenueIds: string[];
   filter: AudienceFilterPayload;
 }): Promise<{
   rowCount: number;
@@ -664,7 +655,7 @@ async function executeAudienceFilter({
 
   const requestedVenueIds = filter.venueIds;
   if (requestedVenueIds.length > 0) {
-    if (isAdminUser) {
+    if (canAccessAllVenues) {
       andWhere.push({
         OR: [
           { venueId: { in: requestedVenueIds } },
@@ -673,7 +664,7 @@ async function executeAudienceFilter({
       });
     } else {
       const allowedVenueIds = requestedVenueIds.filter((venueId) =>
-        userVenueIds.includes(venueId)
+        scopedVenueIds.includes(venueId)
       );
       if (allowedVenueIds.length > 0) {
         andWhere.push({
@@ -688,12 +679,12 @@ async function executeAudienceFilter({
         });
       }
     }
-  } else if (!isAdminUser) {
-    if (userVenueIds.length > 0) {
+  } else if (!canAccessAllVenues) {
+    if (scopedVenueIds.length > 0) {
       andWhere.push({
         OR: [
-          { venueId: { in: userVenueIds } },
-          { venues: { some: { venueId: { in: userVenueIds } } } },
+          { venueId: { in: scopedVenueIds } },
+          { venues: { some: { venueId: { in: scopedVenueIds } } } },
         ],
       });
     } else {
@@ -750,12 +741,12 @@ async function executeAudienceFilter({
 }
 
 function getResolvedScopeAndVenue(input: {
-  isAdminUser: boolean;
-  userVenueIds: string[];
+  canAccessAllVenues: boolean;
+  scopedVenueIds: string[];
   requestedScope: EmailContentScope;
   requestedVenueId: string | null;
 }): { scope: EmailContentScope; venueId: string | null; error?: string } {
-  if (input.isAdminUser) {
+  if (input.canAccessAllVenues) {
     return {
       scope: input.requestedScope,
       venueId: input.requestedVenueId,
@@ -766,12 +757,13 @@ function getResolvedScopeAndVenue(input: {
     return {
       scope: "PRIVATE",
       venueId: null,
-      error: "Only admins can create system-scoped audience lists.",
+      error:
+        "Only users with global email audience permissions can create system-scoped audience lists.",
     };
   }
 
   if (input.requestedScope === "TEAM") {
-    const venueId = input.requestedVenueId || input.userVenueIds[0] || null;
+    const venueId = input.requestedVenueId || input.scopedVenueIds[0] || null;
     if (!venueId) {
       return {
         scope: "TEAM",
@@ -780,7 +772,7 @@ function getResolvedScopeAndVenue(input: {
       };
     }
 
-    if (!input.userVenueIds.includes(venueId)) {
+    if (!input.scopedVenueIds.includes(venueId)) {
       return {
         scope: "TEAM",
         venueId,
@@ -796,7 +788,7 @@ function getResolvedScopeAndVenue(input: {
 
   if (
     input.requestedVenueId &&
-    !input.userVenueIds.includes(input.requestedVenueId)
+    !input.scopedVenueIds.includes(input.requestedVenueId)
   ) {
     return {
       scope: "PRIVATE",
@@ -824,11 +816,16 @@ export async function listAudienceLists(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "audience"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "audience");
 
     const whereClauses: AudienceListWhereInput[] = [
-      buildVisibilityWhere(user.id, isAdminUser, userVenueIds),
+      buildVisibilityWhere(user.id, canAccessAllVenues, scopedVenueIds),
     ];
 
     if (input.search?.trim()) {
@@ -920,12 +917,17 @@ export async function createAudienceList(
     }
 
     const queryType = input.queryType || "FILTER";
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "audience"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "audience");
 
     const scopeResolution = getResolvedScopeAndVenue({
-      isAdminUser,
-      userVenueIds,
+      canAccessAllVenues,
+      scopedVenueIds,
       requestedScope: input.scope || "PRIVATE",
       requestedVenueId: input.venueId || null,
     });
@@ -976,7 +978,7 @@ export async function createAudienceList(
       try {
         const folderValidation = await validateFolderAssignment({
           userId: user.id,
-          isAdminUser,
+          isAdminUser: canAccessAllVenues,
           module: "audience",
           folderId: input.folderId,
         });
@@ -1096,13 +1098,18 @@ export async function updateAudienceList(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "audience"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "audience");
     const canRead = canReadAudienceList(
       list,
       user.id,
-      isAdminUser,
-      userVenueIds
+      canAccessAllVenues,
+      scopedVenueIds
     );
     if (!canRead) {
       return {
@@ -1166,8 +1173,8 @@ export async function updateAudienceList(
 
     if (input.scope !== undefined || input.venueId !== undefined) {
       const scopeResolution = getResolvedScopeAndVenue({
-        isAdminUser,
-        userVenueIds,
+        canAccessAllVenues,
+        scopedVenueIds,
         requestedScope: input.scope || list.scope,
         requestedVenueId:
           input.venueId !== undefined ? input.venueId : list.venueId,
@@ -1189,7 +1196,7 @@ export async function updateAudienceList(
         try {
           const folderValidation = await validateFolderAssignment({
             userId: user.id,
-            isAdminUser,
+            isAdminUser: canAccessAllVenues,
             module: "audience",
             folderId: input.folderId,
           });
@@ -1302,11 +1309,19 @@ export async function deleteAudienceList(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    if (!isAdminUser && list.ownerId !== user.id && list.scope === "SYSTEM") {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "audience"
+    );
+    if (
+      !canAccessAllVenues &&
+      list.ownerId !== user.id &&
+      list.scope === "SYSTEM"
+    ) {
       return {
         success: false,
-        error: "Only admins can delete system-scoped audience lists.",
+        error:
+          "Only users with global email audience permissions can delete system-scoped audience lists.",
       };
     }
 
@@ -1369,9 +1384,16 @@ export async function runAudienceList(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
-    if (!canReadAudienceList(list, user.id, isAdminUser, userVenueIds)) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "audience"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "audience");
+    if (
+      !canReadAudienceList(list, user.id, canAccessAllVenues, scopedVenueIds)
+    ) {
       return {
         success: false,
         error: "You don't have permission to run this audience list.",
@@ -1464,8 +1486,8 @@ export async function runAudienceList(
 
         const execution = await executeAudienceFilter({
           userId: user.id,
-          isAdminUser,
-          userVenueIds,
+          canAccessAllVenues,
+          scopedVenueIds,
           filter: effectiveFilter,
         });
 

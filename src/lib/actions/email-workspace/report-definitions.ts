@@ -7,8 +7,11 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/rbac/access";
 import { canAccessEmailModule } from "@/lib/rbac/email-workspace";
 import {
+  getScopedEmailModuleVenueIds,
+  hasGlobalEmailModuleScope,
+} from "@/lib/rbac/email-module-scope";
+import {
   hasPermission,
-  isAdmin,
   type PermissionAction,
 } from "@/lib/rbac/permissions";
 import {
@@ -215,23 +218,10 @@ function revalidateReportPaths() {
   }
 }
 
-async function getUserVenueIds(userId: string): Promise<string[]> {
-  const rows = await prisma.userVenue.findMany({
-    where: { userId },
-    select: { venueId: true },
-  });
-
-  return rows.map((row) => row.venueId);
-}
-
 async function canMutateReportDefinitions(
   userId: string,
   action: Extract<PermissionAction, "create" | "update" | "delete">
 ): Promise<boolean> {
-  if (await isAdmin(userId)) {
-    return true;
-  }
-
   if (await hasPermission(userId, "email_workspace", "manage")) {
     return true;
   }
@@ -250,10 +240,10 @@ function canReadDefinition(
     venueId: string | null;
   },
   userId: string,
-  isAdminUser: boolean,
-  userVenueIds: string[]
+  canAccessAllVenues: boolean,
+  scopedVenueIds: string[]
 ): boolean {
-  if (isAdminUser) {
+  if (canAccessAllVenues) {
     return true;
   }
 
@@ -268,7 +258,7 @@ function canReadDefinition(
   if (
     definition.scope === "TEAM" &&
     definition.venueId &&
-    userVenueIds.includes(definition.venueId)
+    scopedVenueIds.includes(definition.venueId)
   ) {
     return true;
   }
@@ -278,10 +268,10 @@ function canReadDefinition(
 
 function buildVisibilityWhere(
   userId: string,
-  isAdminUser: boolean,
-  userVenueIds: string[]
+  canAccessAllVenues: boolean,
+  scopedVenueIds: string[]
 ): ReportDefinitionWhereInput {
-  if (isAdminUser) {
+  if (canAccessAllVenues) {
     return {};
   }
 
@@ -289,18 +279,18 @@ function buildVisibilityWhere(
     OR: [
       { scope: "SYSTEM" },
       { ownerId: userId },
-      { scope: "TEAM", venueId: { in: userVenueIds } },
+      { scope: "TEAM", venueId: { in: scopedVenueIds } },
     ],
   };
 }
 
 function getResolvedScopeAndVenue(input: {
-  isAdminUser: boolean;
-  userVenueIds: string[];
+  canAccessAllVenues: boolean;
+  scopedVenueIds: string[];
   requestedScope: EmailContentScope;
   requestedVenueId: string | null;
 }): { scope: EmailContentScope; venueId: string | null; error?: string } {
-  if (input.isAdminUser) {
+  if (input.canAccessAllVenues) {
     return {
       scope: input.requestedScope,
       venueId: input.requestedVenueId,
@@ -311,12 +301,13 @@ function getResolvedScopeAndVenue(input: {
     return {
       scope: "PRIVATE",
       venueId: null,
-      error: "Only admins can create system-scoped report definitions.",
+      error:
+        "Only users with global email report permissions can create system-scoped report definitions.",
     };
   }
 
   if (input.requestedScope === "TEAM") {
-    const venueId = input.requestedVenueId || input.userVenueIds[0] || null;
+    const venueId = input.requestedVenueId || input.scopedVenueIds[0] || null;
     if (!venueId) {
       return {
         scope: "TEAM",
@@ -325,7 +316,7 @@ function getResolvedScopeAndVenue(input: {
       };
     }
 
-    if (!input.userVenueIds.includes(venueId)) {
+    if (!input.scopedVenueIds.includes(venueId)) {
       return {
         scope: "TEAM",
         venueId,
@@ -341,7 +332,7 @@ function getResolvedScopeAndVenue(input: {
 
   if (
     input.requestedVenueId &&
-    !input.userVenueIds.includes(input.requestedVenueId)
+    !input.scopedVenueIds.includes(input.requestedVenueId)
   ) {
     return {
       scope: "PRIVATE",
@@ -581,11 +572,16 @@ export async function listReportDefinitions(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "reports"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "reports");
 
     const whereClauses: ReportDefinitionWhereInput[] = [
-      buildVisibilityWhere(user.id, isAdminUser, userVenueIds),
+      buildVisibilityWhere(user.id, canAccessAllVenues, scopedVenueIds),
     ];
 
     if (input.search?.trim()) {
@@ -695,12 +691,17 @@ export async function createReportDefinition(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "reports"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "reports");
 
     const scopeResolution = getResolvedScopeAndVenue({
-      isAdminUser,
-      userVenueIds,
+      canAccessAllVenues,
+      scopedVenueIds,
       requestedScope: input.scope || "PRIVATE",
       requestedVenueId: input.venueId || null,
     });
@@ -717,7 +718,7 @@ export async function createReportDefinition(
       try {
         const folderValidation = await validateFolderAssignment({
           userId: user.id,
-          isAdminUser,
+          isAdminUser: canAccessAllVenues,
           module: "reports",
           folderId: input.folderId,
         });
@@ -874,9 +875,16 @@ export async function updateReportDefinition(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
-    if (!canReadDefinition(existing, user.id, isAdminUser, userVenueIds)) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "reports"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "reports");
+    if (
+      !canReadDefinition(existing, user.id, canAccessAllVenues, scopedVenueIds)
+    ) {
       return {
         success: false,
         error: "You don't have permission to update this report definition.",
@@ -917,8 +925,8 @@ export async function updateReportDefinition(
 
     if (input.scope !== undefined || input.venueId !== undefined) {
       const scopeResolution = getResolvedScopeAndVenue({
-        isAdminUser,
-        userVenueIds,
+        canAccessAllVenues,
+        scopedVenueIds,
         requestedScope: input.scope || existing.scope,
         requestedVenueId:
           input.venueId !== undefined ? input.venueId : existing.venueId,
@@ -985,7 +993,7 @@ export async function updateReportDefinition(
         try {
           const folderValidation = await validateFolderAssignment({
             userId: user.id,
-            isAdminUser,
+            isAdminUser: canAccessAllVenues,
             module: "reports",
             folderId: input.folderId,
           });
@@ -1098,15 +1106,19 @@ export async function deleteReportDefinition(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "reports"
+    );
     if (
-      !isAdminUser &&
+      !canAccessAllVenues &&
       definition.ownerId !== user.id &&
       definition.scope === "SYSTEM"
     ) {
       return {
         success: false,
-        error: "Only admins can delete system-scoped report definitions.",
+        error:
+          "Only users with global email report permissions can delete system-scoped report definitions.",
       };
     }
 
@@ -1169,9 +1181,16 @@ export async function runReportDefinition(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
-    if (!canReadDefinition(definition, user.id, isAdminUser, userVenueIds)) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "reports"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "reports");
+    if (
+      !canReadDefinition(definition, user.id, canAccessAllVenues, scopedVenueIds)
+    ) {
       return {
         success: false,
         error: "You don't have permission to run this report definition.",
@@ -1191,8 +1210,8 @@ export async function runReportDefinition(
 
     if (definition.venueId) {
       campaignWhere.venueId = definition.venueId;
-    } else if (!isAdminUser) {
-      campaignWhere.venueId = { in: userVenueIds };
+    } else if (!canAccessAllVenues) {
+      campaignWhere.venueId = { in: scopedVenueIds };
     }
 
     const [totalCampaigns, sentCampaigns, aggregates] = await Promise.all([
@@ -1325,9 +1344,16 @@ export async function listReportRuns(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
-    if (!canReadDefinition(definition, user.id, isAdminUser, userVenueIds)) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "reports"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "reports");
+    if (
+      !canReadDefinition(definition, user.id, canAccessAllVenues, scopedVenueIds)
+    ) {
       return {
         success: false,
         error: "You don't have permission to view this report run history.",
@@ -1411,9 +1437,16 @@ export async function pauseReportDefinitionSchedule(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
-    if (!canReadDefinition(existing, user.id, isAdminUser, userVenueIds)) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "reports"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "reports");
+    if (
+      !canReadDefinition(existing, user.id, canAccessAllVenues, scopedVenueIds)
+    ) {
       return {
         success: false,
         error: "You don't have permission to update this report schedule.",
@@ -1492,9 +1525,16 @@ export async function resumeReportDefinitionSchedule(
       };
     }
 
-    const isAdminUser = await isAdmin(user.id);
-    const userVenueIds = isAdminUser ? [] : await getUserVenueIds(user.id);
-    if (!canReadDefinition(existing, user.id, isAdminUser, userVenueIds)) {
+    const canAccessAllVenues = await hasGlobalEmailModuleScope(
+      user.id,
+      "reports"
+    );
+    const scopedVenueIds = canAccessAllVenues
+      ? []
+      : await getScopedEmailModuleVenueIds(user.id, "reports");
+    if (
+      !canReadDefinition(existing, user.id, canAccessAllVenues, scopedVenueIds)
+    ) {
       return {
         success: false,
         error: "You don't have permission to update this report schedule.",

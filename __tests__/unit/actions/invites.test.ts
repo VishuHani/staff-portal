@@ -7,11 +7,11 @@ vi.mock("next/cache", () => ({
 
 vi.mock("@/lib/rbac/access", () => ({
   requireAuth: vi.fn(),
-  isAdmin: vi.fn(),
 }));
 
 vi.mock("@/lib/rbac/permissions", () => ({
   hasPermission: vi.fn(),
+  hasAnyPermission: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -55,8 +55,8 @@ vi.mock("@/lib/services/email/templates", () => ({
   })),
 }));
 
-import { requireAuth, isAdmin } from "@/lib/rbac/access";
-import { hasPermission } from "@/lib/rbac/permissions";
+import { requireAuth } from "@/lib/rbac/access";
+import { hasAnyPermission, hasPermission } from "@/lib/rbac/permissions";
 import { prisma } from "@/lib/prisma";
 import {
   acceptInvitation,
@@ -94,15 +94,15 @@ describe("invites tenant integrity", () => {
   };
 
   const mockRequireAuth = requireAuth as unknown as MockFn;
-  const mockIsAdmin = isAdmin as unknown as MockFn;
   const mockHasPermission = hasPermission as unknown as MockFn;
+  const mockHasAnyPermission = hasAnyPermission as unknown as MockFn;
   const mockPrisma = prisma as unknown as MockPrisma;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockRequireAuth.mockResolvedValue(testUsers.user3);
-    mockIsAdmin.mockResolvedValue(false);
     mockHasPermission.mockResolvedValue(true);
+    mockHasAnyPermission.mockResolvedValue(false);
     mockPrisma.inviteSettings.findFirst.mockResolvedValue({
       invitationExpirationDays: 7,
     });
